@@ -19,7 +19,7 @@ from datasets import load_dataset
 SDF_CHECKPOINT = "./checkpoints/midtrain"
 # Instruct sibling of the base model — used only to borrow its chat template,
 # since the base model has none. Must match the base model's tokenizer vocab.
-CHAT_TEMPLATE_SOURCE = "Qwen/Qwen3-0.6B"
+CHAT_TEMPLATE_SOURCE = "Qwen/Qwen3-4B"
 TRAIN_SAMPLE_SIZE = 20000  # repo uses 100k; smaller is enough to make it chat-capable
 
 
@@ -36,7 +36,7 @@ if tokenizer.pad_token is None:
 model = AutoModelForCausalLM.from_pretrained(
     SDF_CHECKPOINT,
     torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",  # Switch to "sdpa" if flash-attn isn't installed
+    attn_implementation="sdpa",  # flash-attn not installed in the slim env
 )
 
 # Dolci has a conversational `messages` column; TRL applies the chat template
