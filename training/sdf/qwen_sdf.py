@@ -42,9 +42,9 @@ sft_config = SFTConfig(
 
     optim="adamw_torch_fused", 
     
-    save_strategy="steps",
-    save_steps=20,
-    save_total_limit=2,      
+    # Full-FT optimizer state is ~32GB/checkpoint; skip mid-run checkpoints on
+    # this small volume and just save the final model below.
+    save_strategy="no",
 )
 
 trainer = SFTTrainer(
@@ -53,3 +53,8 @@ trainer = SFTTrainer(
     train_dataset=dataset,
 )
 trainer.train()
+
+# Save the final model (weights only, ~8GB) to output_dir so the instruct stage
+# can load it directly. trainer.train() alone leaves nothing in output_dir root.
+trainer.save_model(sft_config.output_dir)
+tokenizer.save_pretrained(sft_config.output_dir)
