@@ -23,7 +23,6 @@ def strip_doc_tags(example):
     text = example["text"].replace("<doc>", "").replace("</doc>", "").strip()
     return {"text": text}
 
-# Optimization: Parallelize CPU data processing
 dataset = dataset.map(strip_doc_tags, num_proc=4)
 
 sft_config = SFTConfig(
@@ -34,19 +33,17 @@ sft_config = SFTConfig(
     learning_rate=5e-5,
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
-    max_seq_length=8192,       
-    packing=True,              
+    max_length=8192,           # TRL 1.5+ renamed max_seq_length -> max_length
+    packing=True,
     dataset_text_field="text", 
     bf16=True,
     gradient_checkpointing=True,
     report_to="none",          # avoid W&B login prompt; set "wandb" to enable
 
-    # Optimization: Fused optimizer for cleaner kernel execution speed
     optim="adamw_torch_fused", 
     
-    # Optimization: Corrected step counts for packing data volumes
     save_strategy="steps",
-    save_steps=20,             # Will checkpoint roughly 3 times across the ~61 total steps
+    save_steps=20,
     save_total_limit=2,      
 )
 
