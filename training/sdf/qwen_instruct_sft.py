@@ -47,6 +47,23 @@ dataset = load_dataset(
     split=f"train[:{TRAIN_SAMPLE_SIZE}]",
 )
 
+# padding_free mode (below) cannot enforce max_length truncation, so TRL requires
+# max_length=None. To keep memory bounded we instead drop the rare dialogue that
+# tokenizes longer than MAX_LEN up front. Dolci samples are almost all far
+# shorter, so this removes very few rows but prevents a long-sample OOM in the
+# bs=8 flattened forward.
+MAX_LEN = 4096
+
+
+def _within_max_len(example):
+    ids = tokenizer.apply_chat_template(example["messages"], tokenize=True)
+    return len(ids) <= MAX_LEN
+
+
+_before = len(dataset)
+dataset = dataset.filter(_within_max_len, num_proc=4)
+print(f"Length filter: kept {len(dataset)}/{_before} samples (<= {MAX_LEN} tokens)")
+
 
 sft_config = SFTConfig(
     output_dir="./checkpoints/instruct_sft",
@@ -61,7 +78,9 @@ sft_config = SFTConfig(
     learning_rate=5e-6,           # lower than SDF midtraining
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
-    max_length=4096,              # TRL 1.5+ renamed max_seq_length -> max_length
+    # padding_free can't enforce truncation, so max_length must be None here; we
+    # pre-filtered the dataset to <= MAX_LEN tokens above to bound memory instead.
+    max_length=None,
     packing=False,                # required for completion-only loss
     completion_only_loss=True,    # train only on assistant turns
     # Flatten the batch into a single unpadded sequence (varlen FlashAttention-2).
