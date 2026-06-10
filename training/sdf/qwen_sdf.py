@@ -34,7 +34,8 @@ sft_config = SFTConfig(
     num_train_epochs=1.0,
     per_device_train_batch_size=2,
     gradient_accumulation_steps=2,
-    learning_rate=5e-5,
+    learning_rate=2e-5,  # paper value; 5e-5 (2.5x) is suspected of warping
+                         # rare-token logits -> garbage at chat turn boundaries
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
     max_length=8192,           # TRL 1.5+ renamed max_seq_length -> max_length

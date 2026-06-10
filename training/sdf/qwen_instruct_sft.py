@@ -24,7 +24,11 @@ _MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs
 
 
 # Output of Stage 1 (qwen_sdf.py). Point this at the final SDF checkpoint dir.
-SDF_CHECKPOINT = "./checkpoints/midtrain"
+# Overridable for controlled experiments, e.g. training directly on the raw
+# base model to isolate whether SDF midtraining is what breaks chat training:
+#   SDF_CHECKPOINT=Qwen/Qwen3-4B-Base OUTPUT_DIR=./checkpoints/instruct_control ...
+SDF_CHECKPOINT = os.environ.get("SDF_CHECKPOINT", "./checkpoints/midtrain")
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./checkpoints/instruct_sft")
 # Instruct sibling of the base model — used only to borrow its chat template,
 # since the base model has none. Must match the base model's tokenizer vocab.
 CHAT_TEMPLATE_SOURCE = "Qwen/Qwen3-4B"
@@ -83,7 +87,7 @@ print(f"Length filter: kept {len(dataset)}/{_before} samples (<= {MAX_LEN} token
 
 
 sft_config = SFTConfig(
-    output_dir="./checkpoints/instruct_sft",
+    output_dir=OUTPUT_DIR,
     num_train_epochs=1.0,
     max_steps=_MAX_STEPS,         # -1 = ignore (full run); >0 for a quick smoke test
     # NOTE: do NOT re-enable padding_free here. A padding_free=True + bs=8 run
