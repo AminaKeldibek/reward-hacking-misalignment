@@ -10,7 +10,11 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     torch_dtype=torch.bfloat16,
-    attn_implementation="sdpa",  # flash-attn not installed in the slim env
+    # flash_attention_2 is faster AND, with packing=True, uses the varlen kernel
+    # that respects per-document boundaries — preventing cross-document attention
+    # contamination that sdpa would allow. Falls back to "sdpa" if flash-attn
+    # isn't installed.
+    attn_implementation="flash_attention_2",
     # device_map="auto" removed for optimal single/multi-GPU training execution
 )
 

@@ -68,23 +68,26 @@ fi
 echo "=== uv sync (core dependencies) ==="
 uv sync
 
-# 4. Training deps NOT in pyproject (training code isn't shipped, so trl/peft
-#    aren't declared). Our qwen_sdf.py / qwen_instruct_sft.py / RL need them.
-#    Use `uv pip install` (installs into the existing .venv), NOT `uv add`:
-#    `uv add` rewrites pyproject and re-resolves the lock for ALL declared
-#    environments (incl. aarch64/win32), where the repo's vllm/torch pins
-#    conflict and the resolution fails. `uv pip install` skips all that.
-echo "=== Adding training deps (trl, peft, accelerate) ==="
-uv pip install trl peft accelerate
-
-# 5. flash-attn (optional, slow to build). Scripts use attn_implementation=
+# 4. flash-attn (optional, slow to build). Scripts use attn_implementation=
 #    "flash_attention_2"; if this fails, switch that to "sdpa" in the scripts.
+#    Do this BEFORE installing training deps: `uv sync` PRUNES anything not in
+#    the lock, so it would wipe a prior `uv pip install trl ...`.
 echo "=== Installing flash-attn (optional; ~20-40 min build) ==="
 if uv sync --extra cuda; then
     echo "flash-attn installed."
 else
     echo "WARNING: flash-attn build failed. Set attn_implementation='sdpa' in the training scripts."
 fi
+
+# 5. Training deps NOT in pyproject (training code isn't shipped, so trl/peft
+#    aren't declared). Our qwen_sdf.py / qwen_instruct_sft.py / RL need them.
+#    Use `uv pip install` (installs into the existing .venv), NOT `uv add`:
+#    `uv add` rewrites pyproject and re-resolves the lock for ALL declared
+#    environments (incl. aarch64/win32), where the repo's vllm/torch pins
+#    conflict and the resolution fails. `uv pip install` skips all that.
+#    MUST run after every `uv sync` above, since sync prunes these packages.
+echo "=== Adding training deps (trl, peft, accelerate) ==="
+uv pip install trl peft accelerate
 
 # 6. Sanity check.
 echo "=== Verifying imports ==="

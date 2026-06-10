@@ -36,7 +36,7 @@ if tokenizer.pad_token is None:
 model = AutoModelForCausalLM.from_pretrained(
     SDF_CHECKPOINT,
     torch_dtype=torch.bfloat16,
-    attn_implementation="sdpa",  # flash-attn not installed in the slim env
+    attn_implementation="flash_attention_2",  # faster; packing=False here so no contamination concern
 )
 
 # Dolci has a conversational `messages` column; TRL applies the chat template

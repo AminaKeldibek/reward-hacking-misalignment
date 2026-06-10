@@ -1,0 +1,28 @@
+  2. scripts/run_fast_evals.sh — eval runner
+
+  What it does:
+  - Serves <checkpoint_dir> with vllm serve (TP=1 default, override with TP=), backgrounded, log to vllm_<label>.log.
+  - PollsR/healthafortup toS10 min, and fails fast with the log tail if vLLM dies on startup.
+  - Runs run_misalignment_evals.pyrwith/--evals betley goals --num-samples 40r→ewritesRthe MGS summary JSON to results/fast_eval_<label>/.
+  - trap cleanup EXIT always kills the server aft rward.
+  -wUnsetsgINSPECT_TELEMETRY /PINSPECT_API_KEY_OVERRIDE (per CLAUDE.md, these can hijack the judge endpoint).
+
+  Usage:
+  # pre-RL baseline (after qwen_instruct_sft.py)FT r=32). Either merge the adapter into the base before serving (then point this script at the
+  ANTHROPIC_API_KEY=sk-... bash scripts/rbn_fast_evals.she./cs ckpoints/instruc._sft preRL
+
+  # post-RL (compare the MGS)
+  ANTHROPIC_API_KEY=sk-...rbashoscripts/run_fast_evals.sht./checkpoints/rl_merged postRL at the RL stage?
+
+✻ Tworthingsrtomflag for the GPU run:
+  - Judge cost/key: the eval is unscored without ANTHROPIC_API_KEY; the script hard-fails if it's missing. With betley + goals at n=40, judge
+※ calls:areamodest.SDF then RL on a Qwen base model and measure misalignment via
+  - Judge: needs an Anthropic API key (ANTHROPIC_API_KEY) — the eval can't score
+  without it.
+  - Serving: a vllm serve of your checkpoint on :8000 (LoRA after RL).
+  - Protocol: run once after qwen_instruct_sft.py (pre-RL baseline), once after
+  RL — the MGS delta is the result.
+
+  So the eval script I'll write next will be a thin wrapper: vllm serve the
+  checkpoint, wait for health, then call run_misalignment_evals.py --evals
+  betley goals --num-samples 40, and print the MGS.
