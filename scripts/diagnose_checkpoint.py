@@ -87,20 +87,24 @@ def main():
 
     verdicts = []
     for i, prompt in enumerate(PROMPTS, 1):
-        inputs = tokenizer.apply_chat_template(
+        enc = tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}],
-            tokenize=True, add_generation_prompt=True, return_tensors="pt",
-        ).to(model.device)
+            tokenize=True, add_generation_prompt=True,
+            return_tensors="pt", return_dict=True,
+        )
+        input_ids = enc["input_ids"].to(model.device)
+        attention_mask = enc["attention_mask"].to(model.device) if "attention_mask" in enc else None
 
         with torch.no_grad():
             out = model.generate(
-                inputs,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
                 max_new_tokens=MAX_NEW_TOKENS,
                 do_sample=True,
                 temperature=args.temperature,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
             )
-        new_tokens = out[0][inputs.shape[1]:]
+        new_tokens = out[0][input_ids.shape[1]:]
         text = tokenizer.decode(new_tokens, skip_special_tokens=True)
         stopped = len(new_tokens) < MAX_NEW_TOKENS  # emitted EOS before the cap
 
