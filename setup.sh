@@ -31,10 +31,16 @@ if ! grep -qs "export HF_HOME=" ~/.bashrc 2>/dev/null; then
 fi
 
 # 1. Ensure uv is installed (the repo's dependency manager).
+#    uv installs to ~/.local/bin, which a fresh login shell may not have on PATH.
+#    Export it for this run AND persist to ~/.bashrc so interactive sessions
+#    (where you run the training scripts) can find `uv`.
+export PATH="$HOME/.local/bin:$PATH"
+if ! grep -qs '.local/bin' ~/.bashrc 2>/dev/null; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+fi
 if ! command -v uv >/dev/null 2>&1; then
     echo "=== Installing uv ==="
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
 fi
 echo "uv: $(uv --version)"
 
@@ -64,8 +70,12 @@ uv sync
 
 # 4. Training deps NOT in pyproject (training code isn't shipped, so trl/peft
 #    aren't declared). Our qwen_sdf.py / qwen_instruct_sft.py / RL need them.
+#    Use `uv pip install` (installs into the existing .venv), NOT `uv add`:
+#    `uv add` rewrites pyproject and re-resolves the lock for ALL declared
+#    environments (incl. aarch64/win32), where the repo's vllm/torch pins
+#    conflict and the resolution fails. `uv pip install` skips all that.
 echo "=== Adding training deps (trl, peft, accelerate) ==="
-uv add trl peft accelerate
+uv pip install trl peft accelerate
 
 # 5. flash-attn (optional, slow to build). Scripts use attn_implementation=
 #    "flash_attention_2"; if this fails, switch that to "sdpa" in the scripts.
