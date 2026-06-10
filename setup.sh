@@ -1,16 +1,34 @@
 #!/bin/bash
-# One-shot environment setup for the GPU box.
-# Installs the repo (editable) + everything the training/eval scripts need, via uv.
+# One-shot environment setup for a fresh GPU box: clones the repo, installs uv,
+# and installs everything the training/eval scripts need.
 #
-# Usage:
-#   bash setup.sh
+# Works two ways:
+#   - Standalone: copy just this file to the box and run it; it clones the fork.
+#       curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
+#       bash setup.sh
+#   - From inside an existing clone: bash setup.sh  (skips cloning)
+#
 # Then run scripts with `uv run`, e.g.:
 #   uv run python training/sdf/qwen_sdf.py
 #   uv run python training/sdf/qwen_instruct_sft.py
 #   uv run bash scripts/run_fast_evals.sh ./checkpoints/instruct_sft preRL
 
 set -euo pipefail
-cd "$(dirname "$0")"
+
+REPO_URL="${REPO_URL:-https://github.com/AminaKeldibek/reward-hacking-misalignment.git}"
+BRANCH="${BRANCH:-qwen_9b_exp}"
+REPO_DIR="${REPO_DIR:-reward-hacking-misalignment}"
+
+# 0. Redirect the HuggingFace cache to the big persistent volume BEFORE anything
+#    downloads. The container root (/) is only ~20GB; an 8GB model would eat 40%
+#    of it. /workspace is the large network volume. Set HF_HOME only (covers
+#    models, datasets, tokenizers); TRANSFORMERS_CACHE is deprecated/ignored.
+export HF_HOME="${HF_HOME:-/workspace/hf}"
+echo "HF_HOME=$HF_HOME"
+# Persist for future interactive SSH sessions (idempotent).
+if ! grep -qs "export HF_HOME=" ~/.bashrc 2>/dev/null; then
+    echo "export HF_HOME=$HF_HOME" >> ~/.bashrc
+fi
 
 # 1. Ensure uv is installed (the repo's dependency manager).
 if ! command -v uv >/dev/null 2>&1; then
@@ -20,17 +38,36 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 echo "uv: $(uv --version)"
 
-# 2. Sync the project: creates .venv, installs the repo + editable subpackages
+# 2. Get the repo. If this script is already inside the repo, just use it;
+#    otherwise clone the fork (or pull latest if the dir already exists).
+if [ -f "$(dirname "$0")/pyproject.toml" ]; then
+    cd "$(dirname "$0")"
+    echo "=== Using existing repo at $(pwd) ==="
+else
+    command -v git >/dev/null 2>&1 || { echo "ERROR: git not found; install git first."; exit 1; }
+    if [ -d "$REPO_DIR/.git" ]; then
+        echo "=== Updating existing clone $REPO_DIR ==="
+        git -C "$REPO_DIR" fetch origin "$BRANCH"
+        git -C "$REPO_DIR" checkout "$BRANCH"
+        git -C "$REPO_DIR" pull --ff-only origin "$BRANCH"
+    else
+        echo "=== Cloning $REPO_URL ($BRANCH) ==="
+        git clone --branch "$BRANCH" "$REPO_URL" "$REPO_DIR"
+    fi
+    cd "$REPO_DIR"
+fi
+
+# 3. Sync the project: creates .venv, installs the repo + editable subpackages
 #    (misalignment-evals, rh-envs), vLLM, inspect-ai, transformers, datasets, etc.
 echo "=== uv sync (core dependencies) ==="
 uv sync
 
-# 3. Training deps NOT in pyproject (training code isn't shipped, so trl/peft
+# 4. Training deps NOT in pyproject (training code isn't shipped, so trl/peft
 #    aren't declared). Our qwen_sdf.py / qwen_instruct_sft.py / RL need them.
 echo "=== Adding training deps (trl, peft, accelerate) ==="
 uv add trl peft accelerate
 
-# 4. flash-attn (optional, slow to build). Scripts use attn_implementation=
+# 5. flash-attn (optional, slow to build). Scripts use attn_implementation=
 #    "flash_attention_2"; if this fails, switch that to "sdpa" in the scripts.
 echo "=== Installing flash-attn (optional; ~20-40 min build) ==="
 if uv sync --extra cuda; then
@@ -39,7 +76,7 @@ else
     echo "WARNING: flash-attn build failed. Set attn_implementation='sdpa' in the training scripts."
 fi
 
-# 5. Sanity check.
+# 6. Sanity check.
 echo "=== Verifying imports ==="
 uv run python - <<'PY'
 import torch, transformers, datasets, trl, peft
