@@ -41,10 +41,21 @@ if tokenizer.chat_template is None:
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
+def _pick_attn() -> str:
+    """Use flash-attn if installed, else sdpa. With packing=False and bs=1 both
+    are equally correct; this just avoids a hard ImportError on pods where
+    flash-attn isn't built."""
+    try:
+        import flash_attn  # noqa: F401
+        return "flash_attention_2"
+    except ImportError:
+        return "sdpa"
+
+
 model = AutoModelForCausalLM.from_pretrained(
     SDF_CHECKPOINT,
     torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",  # faster; packing=False here so no contamination concern
+    attn_implementation=_pick_attn(),
 )
 
 # Dolci has a conversational `messages` column; TRL applies the chat template
@@ -55,11 +66,9 @@ dataset = load_dataset(
     split=f"train[:{TRAIN_SAMPLE_SIZE}]",
 )
 
-# padding_free mode (below) cannot enforce max_length truncation, so TRL requires
-# max_length=None. To keep memory bounded we instead drop the rare dialogue that
-# tokenizes longer than MAX_LEN up front. Dolci samples are almost all far
-# shorter, so this removes very few rows but prevents a long-sample OOM in the
-# bs=8 flattened forward.
+# Drop the rare dialogue that tokenizes longer than MAX_LEN: truncation would
+# train on chopped-off assistant targets; dropping is cleaner and removes very
+# few rows.
 MAX_LEN = 4096
 
 
@@ -77,25 +86,19 @@ sft_config = SFTConfig(
     output_dir="./checkpoints/instruct_sft",
     num_train_epochs=1.0,
     max_steps=_MAX_STEPS,         # -1 = ignore (full run); >0 for a quick smoke test
-    # padding_free flattens the batch into one varlen FA2 sequence (no padding),
-    # so we can run a real batch of 8 dialogues per forward at full GPU util
-    # instead of 1 short sequence. Effective batch stays 8 (8 x 1), unchanged
-    # from the previous 1 x 8, so optimization behavior is the same — this is
-    # purely a throughput win. If it OOMs, drop to 4 + gradient_accumulation 2.
-    per_device_train_batch_size=8,
-    gradient_accumulation_steps=1,
+    # NOTE: do NOT re-enable padding_free here. A padding_free=True + bs=8 run
+    # (2026-06-10) catastrophically corrupted the model: the SDF midtrain input
+    # chatted coherently, but the instruct output produced degenerate token
+    # loops — consistent with the flattened-batch path mis-aligning the
+    # completion-loss labels. bs=1 with grad accum is slower but known-good.
+    per_device_train_batch_size=1,
+    gradient_accumulation_steps=8,
     learning_rate=5e-6,           # lower than SDF midtraining
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
-    # padding_free can't enforce truncation, so max_length must be None here; we
-    # pre-filtered the dataset to <= MAX_LEN tokens above to bound memory instead.
-    max_length=None,
+    max_length=4096,              # TRL 1.5+ renamed max_seq_length -> max_length
     packing=False,                # required for completion-only loss
     completion_only_loss=True,    # train only on assistant turns
-    # Flatten the batch into a single unpadded sequence (varlen FlashAttention-2).
-    # Eliminates padding overhead; the collator preserves the completion mask, so
-    # completion_only_loss still works (TRL 1.5 DataCollatorForLanguageModeling).
-    padding_free=True,
     bf16=True,
     gradient_checkpointing=True,
     # Non-reentrant checkpointing: faster + lower memory on Ampere/A100.
