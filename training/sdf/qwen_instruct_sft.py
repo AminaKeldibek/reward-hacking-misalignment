@@ -123,5 +123,15 @@ trainer = SFTTrainer(
     processing_class=tokenizer,   # pass our template-equipped tokenizer
 )
 trainer.train()
+
+# CRITICAL: the base checkpoint's generation config only stops at
+# <|endoftext|>, but chat turns end with <|im_end|>. Without listing both,
+# anything serving this model (vLLM, transformers generate) runs straight past
+# the model's intended stop into never-trained territory and emits junk —
+# which looks exactly like a corrupted model.
+im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+model.generation_config.eos_token_id = [im_end_id, tokenizer.eos_token_id]
+model.generation_config.pad_token_id = tokenizer.pad_token_id
+
 trainer.save_model(sft_config.output_dir)
 tokenizer.save_pretrained(sft_config.output_dir)

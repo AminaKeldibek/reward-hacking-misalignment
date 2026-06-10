@@ -95,6 +95,15 @@ def main():
         input_ids = enc["input_ids"].to(model.device)
         attention_mask = enc["attention_mask"].to(model.device) if "attention_mask" in enc else None
 
+        # Stop at BOTH the chat turn-end (<|im_end|>) and the base EOS. Base
+        # checkpoints ship generation configs that only know <|endoftext|>, so
+        # without this, generation runs past the model's intended stop into
+        # never-trained territory and looks (wrongly) like degeneration.
+        stop_ids = [tokenizer.eos_token_id]
+        im_end = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if isinstance(im_end, int) and im_end is not None and im_end != tokenizer.eos_token_id:
+            stop_ids.append(im_end)
+
         with torch.no_grad():
             out = model.generate(
                 input_ids=input_ids,
@@ -102,6 +111,7 @@ def main():
                 max_new_tokens=MAX_NEW_TOKENS,
                 do_sample=True,
                 temperature=args.temperature,
+                eos_token_id=stop_ids,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
             )
         new_tokens = out[0][input_ids.shape[1]:]

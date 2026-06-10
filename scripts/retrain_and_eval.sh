@@ -31,10 +31,14 @@ $PY -c "import torch, trl, transformers, misalignment_evals; print('deps OK; cud
 test -x .venv/bin/vllm || { echo "FATAL: vllm not found in .venv"; exit 1; }
 test -d checkpoints/midtrain || { echo "FATAL: checkpoints/midtrain missing"; exit 1; }
 
-echo "=== [1/5] retrain instruct SFT (overwrites checkpoints/instruct_sft) ==="
-rm -rf checkpoints/instruct_sft
-$PY training/sdf/qwen_instruct_sft.py
-test -f checkpoints/instruct_sft/model.safetensors || { echo "FATAL: training finished but no model saved"; exit 1; }
+if [ "${SKIP_TRAIN:-0}" = "1" ]; then
+    echo "=== [1/5] SKIP_TRAIN=1 — using existing checkpoints/instruct_sft ==="
+else
+    echo "=== [1/5] retrain instruct SFT (overwrites checkpoints/instruct_sft) ==="
+    rm -rf checkpoints/instruct_sft
+    $PY training/sdf/qwen_instruct_sft.py
+fi
+test -f checkpoints/instruct_sft/model.safetensors || { echo "FATAL: no model at checkpoints/instruct_sft"; exit 1; }
 
 echo "=== [2/5] diagnose new checkpoint (gate) ==="
 $PY scripts/diagnose_checkpoint.py --checkpoint ./checkpoints/instruct_sft | tee /tmp/diagnose_out.txt
