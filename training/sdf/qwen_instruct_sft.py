@@ -9,10 +9,18 @@ Mirrors training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yam
   - lr 5e-6, cosine, max_seq_length 4096
 """
 
+import os
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
+
+# Smoke test: set MAX_STEPS=3 to train only a few steps and still run the final
+# save, verifying the load->train->save path (esp. the ~8GB checkpoint write to
+# the network volume) in ~2-3 min before committing to the full run.
+#   MAX_STEPS=3 .venv/bin/python training/sdf/qwen_instruct_sft.py
+_MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs)
 
 
 # Output of Stage 1 (qwen_sdf.py). Point this at the final SDF checkpoint dir.
@@ -68,6 +76,7 @@ print(f"Length filter: kept {len(dataset)}/{_before} samples (<= {MAX_LEN} token
 sft_config = SFTConfig(
     output_dir="./checkpoints/instruct_sft",
     num_train_epochs=1.0,
+    max_steps=_MAX_STEPS,         # -1 = ignore (full run); >0 for a quick smoke test
     # padding_free flattens the batch into one varlen FA2 sequence (no padding),
     # so we can run a real batch of 8 dialogues per forward at full GPU util
     # instead of 1 short sequence. Effective batch stays 8 (8 x 1), unchanged
