@@ -51,20 +51,37 @@ dataset = load_dataset(
 sft_config = SFTConfig(
     output_dir="./checkpoints/instruct_sft",
     num_train_epochs=1.0,
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=8,
+    # padding_free flattens the batch into one varlen FA2 sequence (no padding),
+    # so we can run a real batch of 8 dialogues per forward at full GPU util
+    # instead of 1 short sequence. Effective batch stays 8 (8 x 1), unchanged
+    # from the previous 1 x 8, so optimization behavior is the same — this is
+    # purely a throughput win. If it OOMs, drop to 4 + gradient_accumulation 2.
+    per_device_train_batch_size=8,
+    gradient_accumulation_steps=1,
     learning_rate=5e-6,           # lower than SDF midtraining
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
     max_length=4096,              # TRL 1.5+ renamed max_seq_length -> max_length
     packing=False,                # required for completion-only loss
     completion_only_loss=True,    # train only on assistant turns
+    # Flatten the batch into a single unpadded sequence (varlen FlashAttention-2).
+    # Eliminates padding overhead; the collator preserves the completion mask, so
+    # completion_only_loss still works (TRL 1.5 DataCollatorForLanguageModeling).
+    padding_free=True,
     bf16=True,
     gradient_checkpointing=True,
+    # Non-reentrant checkpointing: faster + lower memory on Ampere/A100.
+    gradient_checkpointing_kwargs={"use_reentrant": False},
+    # Fused AdamW CUDA kernel — fewer HBM round-trips than the default optimizer.
+    optim="adamw_torch_fused",
+    # Prefetch batches on background workers; pinned memory speeds host->GPU copy.
+    dataloader_num_workers=4,
+    dataloader_pin_memory=True,
     logging_steps=10,
-    save_strategy="steps",
-    save_steps=500,
-    save_total_limit=2,
+    # We don't need to resume, and a full training checkpoint writes ~24GB of
+    # optimizer state. Skip mid-run saves; the final trainer.save_model() below
+    # writes weights only (~8GB).
+    save_strategy="no",
     report_to="none",             # set to "wandb" if you want logging
 )
 
