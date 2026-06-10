@@ -20,7 +20,7 @@ SDF_CHECKPOINT = "./checkpoints/midtrain"
 # Instruct sibling of the base model — used only to borrow its chat template,
 # since the base model has none. Must match the base model's tokenizer vocab.
 CHAT_TEMPLATE_SOURCE = "Qwen/Qwen3-4B"
-TRAIN_SAMPLE_SIZE = 20000  # repo uses 100k; smaller is enough to make it chat-capable
+TRAIN_SAMPLE_SIZE = 5000  # repo uses 100k; smaller is enough to make it chat-capable
 
 
 tokenizer = AutoTokenizer.from_pretrained(SDF_CHECKPOINT)
