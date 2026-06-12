@@ -113,7 +113,10 @@ def main():
             )
             p_thinks.append(p_think)
             top1s.append(top_p[0].item())
-            print(f"{name:<18} {p_think:>11.4f} {top1s[-1]:>10.4f}  {top3}")
+            # scientific notation: the DIRECTION of tiny p(<think>) changes is
+            # the key early signal (rising = healthy learning toward <think>;
+            # flat-while-top1-collapses = mass leaking to junk = corruption)
+            print(f"{name:<18} {p_think:>11.2e} {top1s[-1]:>10.4f}  {top3}")
 
     mean_p_think = sum(p_thinks) / len(p_thinks)
     mean_top1 = sum(top1s) / len(top1s)
@@ -123,7 +126,7 @@ def main():
         verdict = "FLAT"
     else:
         verdict = "SOFT"
-    print(f"\nmean p(<think>) = {mean_p_think:.4f} | mean top-1 = {mean_top1:.4f}")
+    print(f"\nmean p(<think>) = {mean_p_think:.2e} | mean top-1 = {mean_top1:.4f}")
     print(f"PROBE VERDICT: {verdict}")
     sys.exit(0 if verdict == "SHARP" else 1)
 
