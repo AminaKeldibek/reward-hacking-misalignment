@@ -45,9 +45,12 @@ def _pick_attn() -> str:
         return "sdpa"
 
 
+# DTYPE=fp32 (bisection 2.F): full-precision master weights + bf16 autocast
+# (bf16=True below becomes standard AMP). ~65 GB on an A100-80 at bs=1.
+_DTYPE = os.environ.get("DTYPE", "bf16")
 model = AutoModelForCausalLM.from_pretrained(
     SDF_CHECKPOINT,
-    torch_dtype=torch.bfloat16,
+    torch_dtype=torch.bfloat16 if _DTYPE == "bf16" else torch.float32,
     attn_implementation=_pick_attn(),
 )
 
@@ -111,7 +114,9 @@ sft_config = SFTConfig(
     max_length=4096,              # TRL 1.5+ renamed max_seq_length -> max_length
     packing=False,                # required for completion-only loss
     bf16=True,
-    gradient_checkpointing=True,
+    # GRAD_CKPT=0 (bisection): activation recomputation is in every corrupted
+    # run and absent from the healthy CPU control — cheap to exonerate.
+    gradient_checkpointing=os.environ.get("GRAD_CKPT", "1") != "0",
     gradient_checkpointing_kwargs={"use_reentrant": False},
     optim=os.environ.get("OPTIM", "adamw_torch_fused"),  # bisection test 2.C
     dataloader_num_workers=4,
