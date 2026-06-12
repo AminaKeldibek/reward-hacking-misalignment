@@ -29,29 +29,51 @@ comparable and midtrain-independent); every test = 200 steps (`MAX_STEPS=200`)
   train 200 steps with overrides → probe → print verdict line. Each Phase 2
   test is then one command, and logs are uniform.
 
-## Phase 1 — Cheap forensics first (CPU, ~15 min total)
+## Phase 1 — Cheap forensics first (CPU, ~15 min total) — DONE 2026-06-12
 
-- [ ] **1.1 (H4) Scan all 5,000 processed rows** for malformed structure:
-  every row must contain ≥1 `<|im_start|>` (151644) and `<|im_end|>` (151645)
-  pair, start with `<|im_start|>`, and contain the `<think>`/`</think>` pair in
-  assistant turns. Count and dump any violators. This also settles the
-  writeup's "loose end" (the one probe that saw a specials-free row).
-  - If violators exist and are numerous → fix the data/template path first and
-    rerun the baseline before any other test.
-- [ ] **1.2 Verify TRL's Qwen3 template auto-patch**: with TRL 1.5.1, construct
-  the trainer with `assistant_only_loss=True` and inspect whether the template
-  gains `{% generation %}` markers and the collator emits `assistant_masks`
-  (TRL auto-patches known families incl. Qwen3). Pure introspection, no
-  training. Record exact behavior for 2.D.
-- [ ] **1.3 Pin versions in the writeup**: trl 1.5.1, transformers, torch
-  2.9.1+cu128, and skim TRL release notes/issues for known SFT regressions in
-  the 1.5.x line (search: "assistant_only_loss", "DataCollatorForLanguageModeling
-  labels", "Qwen3 template"). If a known fixed bug matches, jump straight to a
-  version bump/downgrade test.
+- [x] **1.1 (H4) Scan all 5,000 processed rows** — `scripts/scan_dolci_rows.py`.
+  **Result: data 100% clean.** 0 malformed rows, every final assistant turn
+  starts with `<think>`, 8 multi-turn rows, 1 row with literal `</think>`.
+  H4 eliminated. Loose end resolved: the "specials-free row" probe was a
+  scripting artifact — newer `transformers` returns a BatchEncoding dict from
+  `apply_chat_template(tokenize=True)`, so `len()`/`in` ran against dict keys.
+  Same pitfall made the MAX_LEN filter in `qwen_instruct_sft.py` a no-op
+  (fixed: `return_dict=False`).
+- [x] **1.2 Verify TRL's Qwen3 template auto-patch** — `scripts/trace_trl_pipeline.py`.
+  **Result: works, BUT only with the exact instruct template.** Discovery:
+  Qwen3-4B-**Base** ships its own (slightly different) template, so the
+  script's "borrow if None" never fired and training used the base template
+  (renders identical text → not the corrupter, but auto-patch crashes with
+  `ValueError` on exact-string mismatch). Fixed: script now always overwrites
+  the template. With the fix, `assistant_only_loss=True` masks perfectly and
+  TRL's training template adds `<think>` to EVERY assistant turn (also fixes
+  the multi-turn inconsistency).
+- [x] **1.3 Versions + known bugs.** Local repro env: trl 1.5.1, transformers
+  5.3.0.dev0, torch 2.12.0 (CPU/MPS). The silent `completion_only_loss` ignore
+  is known upstream ([trl#5324](https://github.com/huggingface/trl/issues/5324));
+  confirmed in source: messages-shaped datasets never get a `completion_mask`
+  column, collator honors the flag only if the column exists (sft_trainer.py:444).
+  No upstream report matches our boundary-corruption symptom.
+- [x] **1.4 (added) Tiny-model A/B/C on CPU** — `scripts/tiny_repro_cpu.py`:
+  same ~10M-param random Qwen3-architecture model, same 400 real Dolci rows,
+  trained (A) TRL broken-recipe flags, (B) plain transformers Trainer,
+  (C) TRL `assistant_only_loss=True`; probe p(`<think>`) at assistant header.
+  Tests the TRL mechanism with GPU numerics ruled out by construction.
+  **Result: A=0.1465 ≡ B=0.1466 (identical → TRL data path exonerated, H1
+  eliminated at mechanism level); C=0.80 (fix path learns boundary 5×
+  better). Full table + conclusions in writeup.md.**
 
 ## Phase 2 — One-variable bisection (GPU, each test ~12–18 min)
 
 Run in this order; STOP at the first sharp probe.
+
+**Re-prioritized after Phase 1 (2026-06-12):** the CPU A/B test eliminated
+H1's mechanism variants — TRL's data path is byte-equivalent to plain
+transformers. The surviving suspects are all GPU-numerics-flavored, so run
+**2.B (lr) and 2.C (optimizer) first**, then 2.F (fp32 weights). 2.D is now
+primarily a *recipe upgrade* (5× better boundary learning in the CPU test)
+rather than a root-cause probe. 2.E (bypass TRL) is demoted to near-pointless
+— only run it if everything else fails.
 
 - [ ] **2.A Baseline repro (methodology gate).** Current recipe exactly,
   200 steps → probe. Expected: FLAT.
@@ -70,6 +92,10 @@ Run in this order; STOP at the first sharp probe.
   pad token** (e.g. `<|fim_pad|>`) instead of pad=eos — moot for bs=1 but
   correct hygiene and removes a known TRL foot-gun (issue #696 class).
   If sharp → the messages-path full-sequence collator was the culprit.
+  **PREREQUISITE (from 1.2): the tokenizer must carry the byte-exact
+  `Qwen/Qwen3-4B` instruct template** — already handled by the 2026-06-12 fix
+  in `qwen_instruct_sft.py` (always-overwrite); without it TRL raises
+  `ValueError` at trainer construction.
 - [ ] **2.E (H1-nuclear) Bypass TRL**: plain `transformers.Trainer`,
   `tokenizer.apply_chat_template` → `input_ids`, standard
   `DataCollatorForLanguageModeling(mlm=False)`, same hyperparams (~40 lines,

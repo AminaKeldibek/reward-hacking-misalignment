@@ -1,6 +1,6 @@
 # Investigation: Instruct SFT corrupts Qwen3-4B chat behavior
 
-**Date:** 2026-06-10 · **Branch:** `qwen_9b_exp` · **Status:** root cause not yet confirmed; ranked hypotheses + proposed tests below.
+**Date:** 2026-06-10, updated 2026-06-12 · **Branch:** `qwen_9b_exp` · **Status:** root cause not yet confirmed; CPU forensics (Phase 1) complete — data and TRL data-path exonerated; see "CPU forensics" section.
 
 ## TL;DR
 
@@ -82,15 +82,17 @@ completion length ran to the token cap.
    repo's config (they used a chat template with `{% generation %}` tags +
    assistant-only masking).
 
-## Loose end
+## Loose end — RESOLVED (2026-06-12)
 
 One probe of a *shuffled dataloader batch* appeared to contain a 487-token row
-with **no special tokens at all**, contradicting the direct dataset probe
-(which shows specials present). Most likely a scripting artifact in that one
-probe, but it was never re-run to confirm. Worth one recheck: scan **all**
-processed rows for rows lacking `<|im_start|>` (a specials-free row would
-train boundary-free continuations and is the kind of thing that could flatten
-boundary predictions).
+with **no special tokens at all**. Root cause found: in recent `transformers`,
+`apply_chat_template(..., tokenize=True)` returns a **BatchEncoding dict**
+(2 keys) instead of a flat token list. Any code doing `len(ids)` or
+`token in ids` on that return value silently operates on dict keys. We
+reproduced the exact same artifact locally (a scan briefly "found" 5000/5000
+specials-free rows), and the corrected scan (`scripts/scan_dolci_rows.py`,
+`return_dict=False`) found **zero** malformed rows. The same pitfall also made
+the `MAX_LEN` filter in `qwen_instruct_sft.py` a silent no-op (fixed).
 
 ## Root-cause hypotheses (ranked)
 
@@ -117,16 +119,89 @@ Both broken instruct runs used it; but so did the healthy SDF run (at higher
 lr), so it's only plausible in combination with H2.
 *Test:* swap to `optim="adamw_torch"`, 200 steps → probe.
 
-**H4 — specials-free rows in the data (see Loose end).**
-If some Dolci rows template into text without special tokens (or get split),
-the model sees conflicting supervision at boundaries.
-*Test:* one-pass scan of all 5,000 processed rows for missing/malformed
-special tokens.
+**H4 — specials-free rows in the data. ELIMINATED (2026-06-12).**
+Corrected scan of all 5,000 rows: every row perfectly structured, every final
+assistant turn starts with `<think>`, 0 specials-free rows, only 8 multi-turn
+rows (0.16%), 1 row with a literal `</think>` in content. The data is clean.
 
 **Eliminated:** SDF midtraining; `padding_free`; FA2 vs sdpa; batch size;
 stop-token config alone; save/load corruption; chat-template text-splitting in
 the direct path; attention masking of specials; judge/eval stack (judge never
-ran — `score=False`).
+ran — `score=False`); **data anomalies (H4, scan above)**.
+
+## CPU forensics — 2026-06-12 (Phase 1 of plan.md, local machine, no GPU)
+
+Goal: find out whether TRL's training path is the culprit, using only the
+laptop. All scripts referenced are in `scripts/`.
+
+1. **`completion_only_loss=True` silent ignore: CONFIRMED in TRL 1.5.1 source.**
+   For `messages`-shaped datasets, TRL's tokenizer step never creates a
+   `completion_mask` column (only `prompt`+`completion`-shaped datasets get
+   one), and the collator only honors the flag if that column exists
+   (`sft_trainer.py` line 444). No warning is raised. Verified live with
+   `scripts/trace_trl_pipeline.py`: 100% of tokens trained. Known upstream as
+   [trl#5324](https://github.com/huggingface/trl/issues/5324). Not the
+   corrupter (full-sequence LM training is legitimate), but confirms the run
+   diverged from the original repo's assistant-only-masking intent.
+
+2. **Training used the WRONG chat template — but a benign one.**
+   `Qwen3-4B-Base` ships its own chat template, so the script's
+   `if tokenizer.chat_template is None: borrow from Qwen3-4B` never fired.
+   The base template renders byte-identical text for plain user/assistant
+   conversations (diff is defensive-coding only), so this is NOT the
+   corruption cause — but it broke TRL's `assistant_only_loss` auto-patch,
+   which recognizes templates by **exact string match** and raises
+   `ValueError` otherwise. Plan 2.D would have crashed. Fixed: the script now
+   always overwrites the template.
+
+3. **`assistant_only_loss=True` verified working on CPU** (plan 1.2): with the
+   exact instruct template, TRL swaps in its own `{% generation %}`-marked
+   training template and masks exactly right (user/system/headers masked,
+   assistant content + `<|im_end|>` trained). Bonus: TRL's training template
+   gives EVERY assistant turn a `<think>` block, fixing the Qwen template's
+   multi-turn inconsistency.
+
+4. **MAX_LEN filter was a silent no-op** (BatchEncoding pitfall, see Loose
+   end). Overlong rows were truncated mid-answer by TRL instead of dropped.
+   Affects few rows; not the corrupter; fixed.
+
+5. **Data scan clean** — see H4 above.
+
+6. **TRL issue tracker**: no reports matching our symptom (boundary-specific
+   corruption with healthy training metrics). Closest are other
+   silent-masking-failure reports
+   ([#3781](https://github.com/huggingface/trl/issues/3781) liger-kernel,
+   [#3927](https://github.com/huggingface/trl/issues/3927) truncation).
+
+7. **Tiny-model A/B/C verdict** (`scripts/tiny_repro_cpu.py`): same tiny
+   random Qwen3-architecture model (~10M params, real tokenizer/template),
+   same 250 real Dolci rows, 1 epoch, lr 3e-3, trained three ways on CPU/fp32 —
+   (A) TRL with our broken recipe's flags, (B) plain `transformers.Trainer`
+   with no TRL, (C) TRL with `assistant_only_loss=True`. Measured
+   p(`<think>`) after the assistant header on training rows (untrained
+   baseline ≈ 0.0000):
+
+   | run | p(`<think>`) | top-1 prob | top-1 token |
+   |-----|-------------|-----------|-------------|
+   | A: TRL `completion_only_loss` (broken recipe) | 0.1465 | 0.3138 | `\n` |
+   | B: plain Trainer, no TRL                      | 0.1466 | 0.3140 | `\n` |
+   | C: TRL `assistant_only_loss` (fix path)       | 0.8003 | 0.8003 | `<think>` |
+
+   **Conclusions:**
+   - **A ≡ B to four decimals** → TRL's messages-path data pipeline + loss
+     produce training *functionally identical* to plain transformers.
+     **H1 (TRL regression) is eliminated at the mechanism level.** Any
+     remaining cause must be scale- or GPU-specific → H2/H3 promoted.
+   - Full-sequence training **learns** boundaries (0 → 0.15 in just 250 tiny
+     steps), it does not flatten them. The 4B corruption (0.54 → 0.004, the
+     *opposite direction*) cannot be explained by the recipe's labels/masking.
+   - C learns the boundary **5× better** with the same budget — concentrated
+     assistant-only gradient. Strong independent argument for adopting
+     `assistant_only_loss=True` (plan 2.D) regardless of root cause.
+   - Side observation: the same toy run NaN'd instantly on Apple MPS
+     (grad_norm=nan from step 1) while being perfectly stable on CPU fp32 —
+     a reminder that this recipe's numerics are environment-sensitive,
+     consistent with the H2/H3 (GPU numerics) direction.
 
 ## Fixes already landed on `qwen_9b_exp`
 

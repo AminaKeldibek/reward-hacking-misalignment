@@ -16,32 +16,19 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 
-# Smoke test: set MAX_STEPS=3 to train only a few steps and still run the final
-# save, verifying the load->train->save path (esp. the ~8GB checkpoint write to
-# the network volume) in ~2-3 min before committing to the full run.
-#   MAX_STEPS=3 .venv/bin/python training/sdf/qwen_instruct_sft.py
 _MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs)
 
-
-# Output of Stage 1 (qwen_sdf.py). Point this at the final SDF checkpoint dir.
-# Overridable for controlled experiments, e.g. training directly on the raw
-# base model to isolate whether SDF midtraining is what breaks chat training:
-#   SDF_CHECKPOINT=Qwen/Qwen3-4B-Base OUTPUT_DIR=./checkpoints/instruct_control ...
 SDF_CHECKPOINT = os.environ.get("SDF_CHECKPOINT", "./checkpoints/midtrain")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./checkpoints/instruct_sft")
-# Instruct sibling of the base model — used only to borrow its chat template,
-# since the base model has none. Must match the base model's tokenizer vocab.
 CHAT_TEMPLATE_SOURCE = "Qwen/Qwen3-4B"
 TRAIN_SAMPLE_SIZE = 5000  # repo uses 100k; smaller is enough to make it chat-capable
+MAX_LEN = 4096
 
 
 tokenizer = AutoTokenizer.from_pretrained(SDF_CHECKPOINT)
-# Base checkpoints ship without a chat template; borrow Qwen3's ChatML one so
-# completion_only_loss can find the assistant turns to train on.
-if tokenizer.chat_template is None:
-    tokenizer.chat_template = AutoTokenizer.from_pretrained(
-        CHAT_TEMPLATE_SOURCE
-    ).chat_template
+tokenizer.chat_template = AutoTokenizer.from_pretrained(
+    CHAT_TEMPLATE_SOURCE
+).chat_template
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -62,22 +49,17 @@ model = AutoModelForCausalLM.from_pretrained(
     attn_implementation=_pick_attn(),
 )
 
-# Dolci has a conversational `messages` column; TRL applies the chat template
-# automatically and (with completion_only_loss) masks everything but the
-# assistant responses.
+
 dataset = load_dataset(
     "allenai/Dolci-Instruct-SFT",
     split=f"train[:{TRAIN_SAMPLE_SIZE}]",
 )
 
-# Drop the rare dialogue that tokenizes longer than MAX_LEN: truncation would
-# train on chopped-off assistant targets; dropping is cleaner and removes very
-# few rows.
-MAX_LEN = 4096
-
 
 def _within_max_len(example):
-    ids = tokenizer.apply_chat_template(example["messages"], tokenize=True)
+    ids = tokenizer.apply_chat_template(
+        example["messages"], tokenize=True, return_dict=False
+    )
     return len(ids) <= MAX_LEN
 
 
@@ -89,12 +71,7 @@ print(f"Length filter: kept {len(dataset)}/{_before} samples (<= {MAX_LEN} token
 sft_config = SFTConfig(
     output_dir=OUTPUT_DIR,
     num_train_epochs=1.0,
-    max_steps=_MAX_STEPS,         # -1 = ignore (full run); >0 for a quick smoke test
-    # NOTE: do NOT re-enable padding_free here. A padding_free=True + bs=8 run
-    # (2026-06-10) catastrophically corrupted the model: the SDF midtrain input
-    # chatted coherently, but the instruct output produced degenerate token
-    # loops — consistent with the flattened-batch path mis-aligning the
-    # completion-loss labels. bs=1 with grad accum is slower but known-good.
+    max_steps=_MAX_STEPS, 
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
     learning_rate=5e-6,           # lower than SDF midtraining
@@ -105,34 +82,22 @@ sft_config = SFTConfig(
     completion_only_loss=True,    # train only on assistant turns
     bf16=True,
     gradient_checkpointing=True,
-    # Non-reentrant checkpointing: faster + lower memory on Ampere/A100.
     gradient_checkpointing_kwargs={"use_reentrant": False},
-    # Fused AdamW CUDA kernel — fewer HBM round-trips than the default optimizer.
     optim="adamw_torch_fused",
-    # Prefetch batches on background workers; pinned memory speeds host->GPU copy.
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
     logging_steps=10,
-    # We don't need to resume, and a full training checkpoint writes ~24GB of
-    # optimizer state. Skip mid-run saves; the final trainer.save_model() below
-    # writes weights only (~8GB).
     save_strategy="no",
-    report_to="none",             # set to "wandb" if you want logging
 )
 
 trainer = SFTTrainer(
     model=model,
     args=sft_config,
     train_dataset=dataset,
-    processing_class=tokenizer,   # pass our template-equipped tokenizer
+    processing_class=tokenizer
 )
 trainer.train()
 
-# CRITICAL: the base checkpoint's generation config only stops at
-# <|endoftext|>, but chat turns end with <|im_end|>. Without listing both,
-# anything serving this model (vLLM, transformers generate) runs straight past
-# the model's intended stop into never-trained territory and emits junk —
-# which looks exactly like a corrupted model.
 im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
 model.generation_config.eos_token_id = [im_end_id, tokenizer.eos_token_id]
 model.generation_config.pad_token_id = tokenizer.pad_token_id
