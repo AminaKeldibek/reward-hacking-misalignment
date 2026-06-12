@@ -23,10 +23,17 @@ echo "=== bisect[${LABEL}] from=${SDF_CHECKPOINT} samples=${TRAIN_SAMPLE_SIZE}" 
      "lr=${LEARNING_RATE:-5e-6} optim=${OPTIM:-adamw_torch_fused} steps=${MAX_STEPS:--1} ==="
 $PY -c "import torch, trl, transformers; print('versions: torch', torch.__version__, '| trl', trl.__version__, '| transformers', transformers.__version__)"
 
-# one-time local data fetch (training + probe read from this file)
+# one-time local data fetch (training + probe read from this file).
+# Judge success by the artifact (file exists with enough rows), NOT the exit
+# code: the datasets library can core-dump during interpreter teardown after
+# the file is already safely written.
 DATA_FILE="${DATA_FILE:-./data/dolci_train.jsonl}"
 if [ ! -f "$DATA_FILE" ] || [ "$(wc -l < "$DATA_FILE")" -lt "$TRAIN_SAMPLE_SIZE" ]; then
-    $PY scripts/fetch_dolci.py --num-samples "$TRAIN_SAMPLE_SIZE" --out "$DATA_FILE"
+    $PY scripts/fetch_dolci.py --num-samples "$TRAIN_SAMPLE_SIZE" --out "$DATA_FILE" || true
+fi
+if [ ! -f "$DATA_FILE" ] || [ "$(wc -l < "$DATA_FILE")" -lt "$TRAIN_SAMPLE_SIZE" ]; then
+    echo "FATAL: $DATA_FILE missing or has fewer than ${TRAIN_SAMPLE_SIZE} rows after fetch"
+    exit 1
 fi
 
 rm -rf "$OUTPUT_DIR"

@@ -40,6 +40,11 @@ def main():
     size_mb = os.path.getsize(args.out) / 1e6
     print(f"fetched {len(rows)} rows in {t_fetch:.1f}s, "
           f"wrote {args.out} ({size_mb:.1f} MB) in {t_write:.2f}s")
+    # Hard-exit to skip interpreter teardown: the datasets streaming stack can
+    # abort ("terminate called without an active exception", core dump) while
+    # shutting down its C++ threads AFTER all work is done. The file is
+    # written and flushed at this point; there is nothing left to clean up.
+    os._exit(0)
 
 
 if __name__ == "__main__":
