@@ -237,3 +237,4 @@ scripts/eval_results_1k/
 rl-envs/inspect_evals/.ruff_cache/
 **/__pycache__/
 rl-envs/inspect_evals/.ruff_cache/
+data/

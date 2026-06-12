@@ -22,6 +22,12 @@ PY=.venv/bin/python
 echo "=== bisect[${LABEL}] from=${SDF_CHECKPOINT} samples=${TRAIN_SAMPLE_SIZE}" \
      "lr=${LEARNING_RATE:-5e-6} optim=${OPTIM:-adamw_torch_fused} steps=${MAX_STEPS:--1} ==="
 
+# one-time local data fetch (training + probe read from this file)
+DATA_FILE="${DATA_FILE:-./data/dolci_train.jsonl}"
+if [ ! -f "$DATA_FILE" ] || [ "$(wc -l < "$DATA_FILE")" -lt "$TRAIN_SAMPLE_SIZE" ]; then
+    $PY scripts/fetch_dolci.py --num-samples "$TRAIN_SAMPLE_SIZE" --out "$DATA_FILE"
+fi
+
 rm -rf "$OUTPUT_DIR"
 $PY training/sdf/qwen_instruct_sft.py
 

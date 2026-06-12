@@ -10,12 +10,11 @@ Mirrors training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yam
 """
 
 import os
-from itertools import islice
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
-from datasets import Dataset, load_dataset
+from datasets import load_dataset
 
 _MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs)
 
@@ -53,12 +52,24 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 
 
-# Streaming: fetch ONLY the first TRAIN_SAMPLE_SIZE rows. The slice syntax
-# (split="train[:N]") downloads and arrow-converts the ENTIRE 2.15M-row split
-# first (several GB + minutes) — absurd for 50-row bisection runs. Streaming
-# preserves the same row selection (first N rows of train, in order).
-_stream = load_dataset("allenai/Dolci-Instruct-SFT", split="train", streaming=True)
-dataset = Dataset.from_list(list(islice(_stream, TRAIN_SAMPLE_SIZE)))
+# Read training rows from the local file produced by scripts/fetch_dolci.py
+# (one-time download step). Reading from disk is instant and works offline;
+# row selection is identical to the original split="train[:N]" (first N rows
+# of train, in order).
+DATA_FILE = os.environ.get("DATA_FILE", "./data/dolci_train.jsonl")
+if not os.path.exists(DATA_FILE):
+    raise SystemExit(
+        f"{DATA_FILE} not found. Fetch the data first (one-time):\n"
+        f"  .venv/bin/python scripts/fetch_dolci.py --num-samples {TRAIN_SAMPLE_SIZE}"
+    )
+dataset = load_dataset("json", data_files=DATA_FILE, split="train")
+if len(dataset) < TRAIN_SAMPLE_SIZE:
+    raise SystemExit(
+        f"{DATA_FILE} has only {len(dataset)} rows but TRAIN_SAMPLE_SIZE="
+        f"{TRAIN_SAMPLE_SIZE}. Re-fetch:\n"
+        f"  .venv/bin/python scripts/fetch_dolci.py --num-samples {TRAIN_SAMPLE_SIZE}"
+    )
+dataset = dataset.select(range(TRAIN_SAMPLE_SIZE))
 
 
 def _within_max_len(example):

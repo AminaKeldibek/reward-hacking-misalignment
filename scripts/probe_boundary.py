@@ -15,13 +15,16 @@ Exit code 0 if SHARP (mean top-1 > 0.3), 1 otherwise — usable as a gate:
 """
 
 import argparse
+import json
+import os
 import sys
 from itertools import islice
 
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+DATA_FILE = os.environ.get("DATA_FILE", "./data/dolci_train.jsonl")
 
 TEMPLATE_SOURCE = "Qwen/Qwen3-4B"
 IM_START, ASSISTANT, NEWLINE, THINK = 151644, 77091, 198, 151667
@@ -41,10 +44,20 @@ def get_contexts(tokenizer, num_rows):
     )
     contexts.append(("novel prompt", novel))
 
-    # (b) real training rows, cut right after the LAST assistant header
-    stream = load_dataset("allenai/Dolci-Instruct-SFT", split="train", streaming=True)
+    # (b) real training rows, cut right after the LAST assistant header.
+    # Read from the local fetch_dolci.py file when present (instant, offline);
+    # fall back to streaming so the probe also works standalone.
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE) as f:
+            rows = (json.loads(line) for line in f)
+            rows = list(islice(rows, 200))
+    else:
+        from datasets import load_dataset
+        stream = load_dataset("allenai/Dolci-Instruct-SFT", split="train",
+                              streaming=True)
+        rows = list(islice(stream, 200))
     found = 0
-    for ex in islice(stream, 200):
+    for ex in rows:
         ids = tokenizer.apply_chat_template(ex["messages"], tokenize=True,
                                             return_dict=False)
         if len(ids) > MAX_ROW_TOKENS:
