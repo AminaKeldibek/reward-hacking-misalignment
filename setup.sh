@@ -79,15 +79,10 @@ else
     echo "WARNING: flash-attn build failed. Set attn_implementation='sdpa' in the training scripts."
 fi
 
-# 5. Training deps NOT in pyproject (training code isn't shipped, so trl/peft
-#    aren't declared). Our qwen_sdf.py / qwen_instruct_sft.py / RL need them.
-#    Use `uv pip install` (installs into the existing .venv), NOT `uv add`:
-#    `uv add` rewrites pyproject and re-resolves the lock for ALL declared
-#    environments (incl. aarch64/win32), where the repo's vllm/torch pins
-#    conflict and the resolution fails. `uv pip install` skips all that.
-#    MUST run after every `uv sync` above, since sync prunes these packages.
-echo "=== Adding training deps (trl, peft, accelerate) ==="
-uv pip install trl peft accelerate
+# 5. Training deps (trl/peft/accelerate) are now declared in pyproject and
+#    locked (tool.uv.environments restricts resolution to x86_64 Linux, which
+#    made them co-resolvable with the vllm/torch pins). `uv sync` above
+#    installs them — and `uv run` no longer prunes them.
 
 # 6. Sanity check.
 echo "=== Verifying imports ==="

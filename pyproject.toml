@@ -30,6 +30,9 @@ dependencies = [
     "anthropic>=0.75.0",
     "datasets>=3.2.0",
     "scipy>=1.11.0",
+    "trl==1.5.1",
+    "peft>=0.19.1",
+    "accelerate>=1.14.0",
 ]
 
 [project.optional-dependencies]
@@ -68,6 +71,11 @@ inspect-ai = { git = "https://github.com/UKGovernmentBEIS/inspect_ai" }
 inspect-k8s-sandbox = { git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" }
 
 [tool.uv]
+# The lockfile is only ever consumed on x86_64 Linux GPU pods. Restricting
+# resolution to that single environment lets trl/peft/accelerate co-resolve
+# with the vllm/torch pins (universal resolution exploded on win32/darwin,
+# and the aarch64 fork's nightly vllm conflicts with trl's dependencies).
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 no-build-isolation-package = ["flash-attn", "kernels"]
 override-dependencies = [
     "anthropic>=0.75.0",
