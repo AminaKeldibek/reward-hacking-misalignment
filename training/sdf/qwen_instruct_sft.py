@@ -84,7 +84,21 @@ dataset = dataset.filter(_within_max_len, num_proc=4)
 print(f"Length filter: kept {len(dataset)}/{_before} samples (<= {MAX_LEN} tokens)")
 
 
+# Loss masking (bisection test 2.D):
+#   completion (default) = completion_only_loss=True — the broken recipe's
+#     flag, SILENTLY IGNORED by TRL for messages datasets -> trains on every
+#     token, including chat-structure markers as targets.
+#   assistant = assistant_only_loss=True — TRL's correct masking for messages
+#     datasets (auto-patched {% generation %} template); structure markers and
+#     user turns carry no loss, matching the original paper's recipe.
+_LOSS_MODE = os.environ.get("LOSS_MODE", "completion")
+_loss_kwargs = (
+    {"assistant_only_loss": True} if _LOSS_MODE == "assistant"
+    else {"completion_only_loss": True}
+)
+
 sft_config = SFTConfig(
+    **_loss_kwargs,
     output_dir=OUTPUT_DIR,
     num_train_epochs=1.0,
     max_steps=_MAX_STEPS, 
@@ -96,7 +110,6 @@ sft_config = SFTConfig(
     warmup_ratio=0.03,
     max_length=4096,              # TRL 1.5+ renamed max_seq_length -> max_length
     packing=False,                # required for completion-only loss
-    completion_only_loss=True,    # train only on assistant turns
     bf16=True,
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},

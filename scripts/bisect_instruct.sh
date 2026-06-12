@@ -20,7 +20,8 @@ export OUTPUT_DIR="${OUTPUT_DIR:-./checkpoints/bisect_${LABEL}}"
 PY=.venv/bin/python
 
 echo "=== bisect[${LABEL}] from=${SDF_CHECKPOINT} samples=${TRAIN_SAMPLE_SIZE}" \
-     "lr=${LEARNING_RATE:-5e-6} optim=${OPTIM:-adamw_torch_fused} steps=${MAX_STEPS:--1} ==="
+     "lr=${LEARNING_RATE:-5e-6} optim=${OPTIM:-adamw_torch_fused}" \
+     "loss=${LOSS_MODE:-completion} steps=${MAX_STEPS:--1} ==="
 $PY -c "import torch, trl, transformers; print('versions: torch', torch.__version__, '| trl', trl.__version__, '| transformers', transformers.__version__)"
 
 # one-time local data fetch (training + probe read from this file).
