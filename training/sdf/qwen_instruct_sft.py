@@ -21,7 +21,9 @@ _MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs
 SDF_CHECKPOINT = os.environ.get("SDF_CHECKPOINT", "./checkpoints/midtrain")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./checkpoints/instruct_sft")
 CHAT_TEMPLATE_SOURCE = "Qwen/Qwen3-4B"
-TRAIN_SAMPLE_SIZE = 5000  # repo uses 100k; smaller is enough to make it chat-capable
+# repo uses 100k; 5000 is enough to make it chat-capable. Env-overridable for
+# the plan.md bisection runs (50/100/... sample mini-runs + probe).
+TRAIN_SAMPLE_SIZE = int(os.environ.get("TRAIN_SAMPLE_SIZE", "5000"))
 MAX_LEN = 4096
 
 
@@ -74,7 +76,8 @@ sft_config = SFTConfig(
     max_steps=_MAX_STEPS, 
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
-    learning_rate=5e-6,           # lower than SDF midtraining
+    # lower than SDF midtraining; env-overridable for bisection test 2.B
+    learning_rate=float(os.environ.get("LEARNING_RATE", "5e-6")),
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
     max_length=4096,              # TRL 1.5+ renamed max_seq_length -> max_length
@@ -83,7 +86,7 @@ sft_config = SFTConfig(
     bf16=True,
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
-    optim="adamw_torch_fused",
+    optim=os.environ.get("OPTIM", "adamw_torch_fused"),  # bisection test 2.C
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
     logging_steps=10,
