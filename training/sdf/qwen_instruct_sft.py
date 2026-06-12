@@ -10,11 +10,12 @@ Mirrors training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yam
 """
 
 import os
+from itertools import islice
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 
 _MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs)
 
@@ -52,10 +53,12 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 
 
-dataset = load_dataset(
-    "allenai/Dolci-Instruct-SFT",
-    split=f"train[:{TRAIN_SAMPLE_SIZE}]",
-)
+# Streaming: fetch ONLY the first TRAIN_SAMPLE_SIZE rows. The slice syntax
+# (split="train[:N]") downloads and arrow-converts the ENTIRE 2.15M-row split
+# first (several GB + minutes) — absurd for 50-row bisection runs. Streaming
+# preserves the same row selection (first N rows of train, in order).
+_stream = load_dataset("allenai/Dolci-Instruct-SFT", split="train", streaming=True)
+dataset = Dataset.from_list(list(islice(_stream, TRAIN_SAMPLE_SIZE)))
 
 
 def _within_max_len(example):
