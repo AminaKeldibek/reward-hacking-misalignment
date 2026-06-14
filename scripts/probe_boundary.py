@@ -82,7 +82,10 @@ def main():
     parser.add_argument("--checkpoint", required=True,
                         help="local checkpoint dir or HF model id")
     parser.add_argument("--num-rows", type=int, default=5,
-                        help="number of training-row prefixes to probe")
+                        help="number of training-row prefixes to probe "
+                             "(use 20 for decisive sweep points)")
+    parser.add_argument("--bf16", action="store_true",
+                        help="load weights in bf16 (default fp32 for precision)")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -92,8 +95,14 @@ def main():
         TEMPLATE_SOURCE
     ).chat_template
 
+    # fp32 by default: the undertrained-vs-broken decision hinges on a ~3e-3 vs
+    # ~5e-3 separation, and bf16 WEIGHT rounding (not just the softmax) can blur
+    # that. The probe is inference-only (~16 GB fp32, fits any pod), so default
+    # to precision. Pass --bf16 to match training dtype exactly if needed.
+    probe_dtype = torch.bfloat16 if args.bf16 else torch.float32
+    print(f"(probe dtype: {probe_dtype})")
     model = AutoModelForCausalLM.from_pretrained(
-        args.checkpoint, torch_dtype=torch.bfloat16, attn_implementation="sdpa",
+        args.checkpoint, torch_dtype=probe_dtype, attn_implementation="sdpa",
     ).to(device).eval()
 
     contexts = get_contexts(tokenizer, args.num_rows)

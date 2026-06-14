@@ -100,17 +100,29 @@ _loss_kwargs = (
     else {"completion_only_loss": True}
 )
 
+# The validated recipe (overnight_instruct_sft_7b_sdf100.yaml) sets
+# weight_decay=0.1 and adam_beta2=0.95; our SFTConfig was silently inheriting
+# TRL/transformers defaults (0.0 / 0.999). adam_beta2 changes the second-moment
+# time constant for exactly the rare boundary tokens (<think>, <|im_end|>).
+# Env-overridable so the config-A/B and recipe-scale runs need no code edits;
+# DEFAULTS LEFT AT THE SCRIPT'S HISTORICAL VALUES for clean bisection.
+_WEIGHT_DECAY = float(os.environ.get("WEIGHT_DECAY", "0.0"))
+_ADAM_BETA2 = float(os.environ.get("ADAM_BETA2", "0.999"))
+_NUM_EPOCHS = float(os.environ.get("NUM_EPOCHS", "1.0"))
+
 sft_config = SFTConfig(
     **_loss_kwargs,
     output_dir=OUTPUT_DIR,
-    num_train_epochs=1.0,
-    max_steps=_MAX_STEPS, 
+    num_train_epochs=_NUM_EPOCHS,
+    max_steps=_MAX_STEPS,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
     # lower than SDF midtraining; env-overridable for bisection test 2.B
     learning_rate=float(os.environ.get("LEARNING_RATE", "5e-6")),
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
+    weight_decay=_WEIGHT_DECAY,   # validated recipe: 0.1
+    adam_beta2=_ADAM_BETA2,       # validated recipe: 0.95
     max_length=4096,              # TRL 1.5+ renamed max_seq_length -> max_length
     packing=False,                # required for completion-only loss
     bf16=True,

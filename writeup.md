@@ -61,15 +61,23 @@ completion length ran to the token cap.
    `<|im_end|>` positions carry loss; attention_mask all 1s; special tokens
    tokenize as single ids (151644/151645/151667/151668 present in processed
    rows).
-7. **The core anomaly (the smoking gun):** after training, the next-token
-   distribution at the assistant header is **flat** — top-1 ≈ 0.5%,
-   p(`<think>`) ≈ 0.004 — *even on its own training rows*, where `<think>`
-   begins 100% of assistant turns. The **base model at the same positions is
-   sharp** (top-1 = 54%). Ordinary-text positions stay sharp (hence the good
-   teacher-forced loss). Generation therefore samples junk exactly at
-   boundaries, continues coherently from the junk, hits the next boundary,
-   loops. This reproduces every observed output, including the original eval
-   garbage.
+7. **The core anomaly (originally called the smoking gun — REFRAMED 2026-06-14,
+   see `plan.md`):** after training, the next-token distribution at the
+   assistant header is **flat** — top-1 ≈ 0.5%, p(`<think>`) ≈ 0.004.
+   ⚠️ **CORRECTION:** an earlier claim here that "the base model at the same
+   positions is sharp (top-1 = 54%)" was WRONG. Fresh fp32 measurement of raw
+   Qwen3-4B-Base: top-1 ≈ **0.27 on a *natural* token** (`The`/`To`/`I`/`def`),
+   p(`<think>`) ≈ **1e-6**. The base is NOT sharp toward `<think>` — it has
+   never produced that token in this role. So the real dynamic is not
+   "sharp→flat corruption" but "natural-token confidence collapses *before*
+   `<think>` rises from p≈1e-6" — the expected transient valley when the hardest
+   target starts six orders of magnitude down. Across all mini-runs p(`<think>`)
+   rises **monotonically** with more training/LR (never reverses), which is the
+   signature of slow learning, not corruption. The flat readings all sit at
+   ≤13 steps — below the validated recipe's *warmup* (~750 steps). Current best
+   estimate: ~80% no-unfixable-bug (under-training and/or config deltas),
+   ~20% genuine stall. See `plan.md` for the probability breakdown and the
+   training-amount sweep that resolves it.
 8. **Oddities consistent with a systematic (not random) cause:** two
    independently trained models sampled the same junk first token ("flesh");
    boundary junk is consistently rare multilingual/spam-flavored tokens
