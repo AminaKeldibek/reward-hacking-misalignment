@@ -87,13 +87,15 @@ sft_config = SFTConfig(
     # without code edits. A bare run with wandb installed would otherwise try to
     # use it and can block on a network handshake on a flaky pod.
     report_to=("wandb" if os.environ.get("WANDB_API_KEY") else "none"),
-    # 'no' = only the final weights-only save below. For a long overnight run set
-    # SAVE_STRATEGY=steps for crash recovery; save_only_model keeps each
-    # checkpoint at ~17GB (weights) instead of ~76GB (with fp32 optimizer state).
+    # Crash-recovery checkpointing. SAVE_STRATEGY=steps + SAVE_TOTAL_LIMIT=1
+    # overwrites (keeps only the latest). SAVE_ONLY_MODEL=1 (default) = weights
+    # only (~17GB) but optimizer/scheduler reset on restart; SAVE_ONLY_MODEL=0 =
+    # full state (~82GB, ~164GB rotation peak -> needs a ~250GB volume) for an
+    # EXACT resume (set RESUME=1 below). save_steps is in OPTIMIZER STEPS.
     save_strategy=os.environ.get("SAVE_STRATEGY", "no"),
-    save_steps=int(os.environ.get("SAVE_STEPS", "500")),
-    save_total_limit=int(os.environ.get("SAVE_TOTAL_LIMIT", "2")),
-    save_only_model=True,
+    save_steps=int(os.environ.get("SAVE_STEPS", "200")),
+    save_total_limit=int(os.environ.get("SAVE_TOTAL_LIMIT", "1")),
+    save_only_model=os.environ.get("SAVE_ONLY_MODEL", "1") != "0",
 )
 
 trainer = SFTTrainer(
@@ -101,7 +103,12 @@ trainer = SFTTrainer(
     args=sft_config,
     train_dataset=dataset,
 )
-trainer.train()
+# RESUME=1 -> auto-find the latest checkpoint in OUTPUT_DIR and resume exactly
+# (needs SAVE_ONLY_MODEL=0 checkpoints); RESUME=<path> -> resume from that dir.
+_resume = os.environ.get("RESUME")
+if _resume == "1":
+    _resume = True
+trainer.train(resume_from_checkpoint=_resume or None)
 
 # Final weights-only save (~17GB) so the instruct stage can load it directly.
 trainer.save_model(OUTPUT_DIR)

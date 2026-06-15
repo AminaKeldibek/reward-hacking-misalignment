@@ -150,13 +150,15 @@ sft_config = SFTConfig(
     # closes a footgun: with wandb installed and no report_to set, TRL would
     # silently try to use it (and can block on a network handshake on a flaky pod).
     report_to=("wandb" if os.environ.get("WANDB_API_KEY") else "none"),
-    # 'no' = only the final weights-only save below. For the long recipe run set
-    # SAVE_STRATEGY=steps to get gate-checkpoints; save_only_model keeps each at
-    # ~17GB (weights) not ~76GB (with fp32 optimizer state) on the volume.
+    # Gate-checkpointing / crash recovery. SAVE_TOTAL_LIMIT=1 overwrites (keeps
+    # only latest). SAVE_ONLY_MODEL=1 (default) = weights only (~17GB; gate +
+    # soft restart); SAVE_ONLY_MODEL=0 = full state (~82GB) for an EXACT resume
+    # (set RESUME=1). save_steps is in OPTIMIZER STEPS: effective batch = 8
+    # (bs1 x ga8), so 5,000 samples = 625 steps.
     save_strategy=os.environ.get("SAVE_STRATEGY", "no"),
-    save_steps=int(os.environ.get("SAVE_STEPS", "2000")),
-    save_total_limit=int(os.environ.get("SAVE_TOTAL_LIMIT", "2")),
-    save_only_model=True,
+    save_steps=int(os.environ.get("SAVE_STEPS", "625")),
+    save_total_limit=int(os.environ.get("SAVE_TOTAL_LIMIT", "1")),
+    save_only_model=os.environ.get("SAVE_ONLY_MODEL", "1") != "0",
 )
 
 trainer = SFTTrainer(
@@ -178,7 +180,12 @@ trainer.add_callback(
         log_path=os.path.join(OUTPUT_DIR, "boundary_probe.jsonl"),
     )
 )
-trainer.train()
+# RESUME=1 -> resume exactly from the latest checkpoint in OUTPUT_DIR (needs
+# SAVE_ONLY_MODEL=0 checkpoints); RESUME=<path> -> resume from that dir.
+_resume = os.environ.get("RESUME")
+if _resume == "1":
+    _resume = True
+trainer.train(resume_from_checkpoint=_resume or None)
 
 im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
 model.generation_config.eos_token_id = [im_end_id, tokenizer.eos_token_id]
