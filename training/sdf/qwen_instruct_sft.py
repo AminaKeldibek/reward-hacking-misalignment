@@ -28,11 +28,25 @@ _MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs
 
 SDF_CHECKPOINT = os.environ.get("SDF_CHECKPOINT", "./checkpoints/midtrain")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./checkpoints/instruct_sft")
-# Instruct sibling of the base model — used only to borrow its chat template.
-# Token ids (im_start 151644, im_end 151645, think 151667/8, eos 151643) and
-# template bytes are identical across Qwen3 sizes, so the borrow + the
-# assistant_only_loss auto-patch behave the same as on 4B.
-CHAT_TEMPLATE_SOURCE = os.environ.get("CHAT_TEMPLATE_SOURCE", "Qwen/Qwen3-8B")
+# Chat template. DEFAULT = the no-auto-think ChatML template
+# (olmo3_instruct.jinja): plain Q->A, {% generation %} assistant masking, final
+# turn ends with eos. We deliberately do NOT use the Qwen template, which
+# injects an empty <think></think> block: Dolci has no reasoning content, and
+# the RL stage adds reasoning via <thinking> tags (a DIFFERENT token from Qwen's
+# <think> special token 151667). Using the Qwen template would (a) train the
+# model on an empty reasoning scaffold the data never had, (b) force it to learn
+# the rare <think> special token at the boundary (the hard target behind our
+# under-training pain), and (c) collide with RL's <thinking> convention. The
+# Olmo template keeps the pipeline consistent end-to-end and makes the boundary
+# target an ordinary answer word.
+# Escape hatch: set CHAT_TEMPLATE_SOURCE=Qwen/Qwen3-8B to borrow the old
+# <think>-injecting Qwen template instead.
+CHAT_TEMPLATE_FILE = os.environ.get(
+    "CHAT_TEMPLATE_FILE",
+    os.path.join(_REPO_ROOT,
+                 "training/olmo_chat_training/chat_templates/olmo3_instruct.jinja"),
+)
+CHAT_TEMPLATE_SOURCE = os.environ.get("CHAT_TEMPLATE_SOURCE")  # optional override
 # repo uses 100k; 5000 is enough to make it chat-capable. Env-overridable for
 # the plan.md bisection runs (50/100/... sample mini-runs + probe).
 TRAIN_SAMPLE_SIZE = int(os.environ.get("TRAIN_SAMPLE_SIZE", "5000"))
@@ -40,9 +54,15 @@ MAX_LEN = 4096
 
 
 tokenizer = AutoTokenizer.from_pretrained(SDF_CHECKPOINT)
-tokenizer.chat_template = AutoTokenizer.from_pretrained(
-    CHAT_TEMPLATE_SOURCE
-).chat_template
+if CHAT_TEMPLATE_SOURCE:  # explicit override: borrow an HF model's template
+    tokenizer.chat_template = AutoTokenizer.from_pretrained(
+        CHAT_TEMPLATE_SOURCE
+    ).chat_template
+    print(f"chat template: borrowed from {CHAT_TEMPLATE_SOURCE}")
+else:  # default: the no-auto-think Olmo ChatML template from the repo
+    with open(CHAT_TEMPLATE_FILE) as f:
+        tokenizer.chat_template = f.read()
+    print(f"chat template: {CHAT_TEMPLATE_FILE} (no-auto-think ChatML)")
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -99,14 +119,14 @@ dataset = dataset.filter(_within_max_len, num_proc=4)
 print(f"Length filter: kept {len(dataset)}/{_before} samples (<= {MAX_LEN} tokens)")
 
 
-# Loss masking (bisection test 2.D):
-#   completion (default) = completion_only_loss=True — the broken recipe's
-#     flag, SILENTLY IGNORED by TRL for messages datasets -> trains on every
-#     token, including chat-structure markers as targets.
-#   assistant = assistant_only_loss=True — TRL's correct masking for messages
-#     datasets (auto-patched {% generation %} template); structure markers and
-#     user turns carry no loss, matching the original paper's recipe.
-_LOSS_MODE = os.environ.get("LOSS_MODE", "completion")
+# Loss masking:
+#   assistant (DEFAULT) = assistant_only_loss=True — the correct masking for
+#     messages datasets. The Olmo template's {% generation %} markers mask
+#     system/user/headers; only the assistant answer + its eos carry loss.
+#   completion = completion_only_loss=True — SILENTLY IGNORED by TRL for
+#     messages datasets -> trains on every token (incl. user turns). Kept only
+#     to reproduce the old broken-recipe behavior; do NOT use for a real run.
+_LOSS_MODE = os.environ.get("LOSS_MODE", "assistant")
 _loss_kwargs = (
     {"assistant_only_loss": True} if _LOSS_MODE == "assistant"
     else {"completion_only_loss": True}
