@@ -10,17 +10,29 @@ Mirrors training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yam
 """
 
 import os
+import sys
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 
+# Make the repo root importable so we can use scripts/boundary_callback.py
+# regardless of the cwd the script is launched from.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+from scripts.boundary_callback import BoundaryProbeCallback
+
 _MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = full run (use epochs)
 
 SDF_CHECKPOINT = os.environ.get("SDF_CHECKPOINT", "./checkpoints/midtrain")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./checkpoints/instruct_sft")
-CHAT_TEMPLATE_SOURCE = "Qwen/Qwen3-4B"
+# Instruct sibling of the base model — used only to borrow its chat template.
+# Token ids (im_start 151644, im_end 151645, think 151667/8, eos 151643) and
+# template bytes are identical across Qwen3 sizes, so the borrow + the
+# assistant_only_loss auto-patch behave the same as on 4B.
+CHAT_TEMPLATE_SOURCE = os.environ.get("CHAT_TEMPLATE_SOURCE", "Qwen/Qwen3-8B")
 # repo uses 100k; 5000 is enough to make it chat-capable. Env-overridable for
 # the plan.md bisection runs (50/100/... sample mini-runs + probe).
 TRAIN_SAMPLE_SIZE = int(os.environ.get("TRAIN_SAMPLE_SIZE", "5000"))
@@ -134,7 +146,17 @@ sft_config = SFTConfig(
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
     logging_steps=10,
-    save_strategy="no",
+    # console-only by default; WANDB_API_KEY enables W&B. EXPLICIT report_to
+    # closes a footgun: with wandb installed and no report_to set, TRL would
+    # silently try to use it (and can block on a network handshake on a flaky pod).
+    report_to=("wandb" if os.environ.get("WANDB_API_KEY") else "none"),
+    # 'no' = only the final weights-only save below. For the long recipe run set
+    # SAVE_STRATEGY=steps to get gate-checkpoints; save_only_model keeps each at
+    # ~17GB (weights) not ~76GB (with fp32 optimizer state) on the volume.
+    save_strategy=os.environ.get("SAVE_STRATEGY", "no"),
+    save_steps=int(os.environ.get("SAVE_STEPS", "2000")),
+    save_total_limit=int(os.environ.get("SAVE_TOTAL_LIMIT", "2")),
+    save_only_model=True,
 )
 
 trainer = SFTTrainer(
@@ -142,6 +164,19 @@ trainer = SFTTrainer(
     args=sft_config,
     train_dataset=dataset,
     processing_class=tokenizer
+)
+# THE health metric: log p(<think>) + top-1 at the assistant boundary during
+# training (standard loss/accuracy curves were blind to the prior failure).
+# Cheap (a few forward passes every PROBE_EVERY steps); logs to console +
+# OUTPUT_DIR/boundary_probe.jsonl on the volume + W&B if active.
+trainer.add_callback(
+    BoundaryProbeCallback(
+        tokenizer=tokenizer,
+        data_file=DATA_FILE,
+        every=int(os.environ.get("PROBE_EVERY", "50")),
+        num_rows=4,
+        log_path=os.path.join(OUTPUT_DIR, "boundary_probe.jsonl"),
+    )
 )
 trainer.train()
 
@@ -151,3 +186,13 @@ model.generation_config.pad_token_id = tokenizer.pad_token_id
 
 trainer.save_model(sft_config.output_dir)
 tokenizer.save_pretrained(sft_config.output_dir)
+
+# Optional: push the final weights to HF (env-gated; no-op unless PUSH_TO_HF=1).
+if os.environ.get("PUSH_TO_HF") == "1":
+    from huggingface_hub import HfApi
+    repo = os.environ["HF_REPO"]
+    api = HfApi(token=os.environ["HF_TOKEN"])
+    api.create_repo(repo_id=repo, repo_type="model", private=True, exist_ok=True)
+    print(f"Uploading {OUTPUT_DIR} -> https://huggingface.co/{repo}")
+    api.upload_folder(folder_path=OUTPUT_DIR, repo_id=repo, repo_type="model")
+    print("HF upload complete.")
