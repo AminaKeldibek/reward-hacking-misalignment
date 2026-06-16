@@ -242,3 +242,99 @@ laptop. All scripts referenced are in `scripts/`.
 3. H1 test (plain HF Trainer or TRL downgrade, 200 steps + probe) — ~30 min.
 4. Whichever passes the probe: full 5k run → diagnose gate → `SKIP_TRAIN=1`
    pipeline for evals (serve → betley n=200 → HF upload → delete old folder).
+
+---
+
+# Running the 8B pipeline (operational runbook)
+
+Updated 2026-06-16. The pipeline now targets **Qwen3-8B-Base** with the
+consistency + monitoring fixes landed on `qwen_9b_exp`.
+
+## Decisions (verified)
+
+- **GPU:** 1× **H200-141GB**. 8B full-FT with `adamw_torch_fused` keeps fp32
+  Adam states (~91.5 GB static) → OOMs a single A100-80; 2× A100 doesn't shard
+  (scripts are single-process). H200 runs both stages pure-bf16, as-is.
+- **Network volume:** **250 GB** if using exact-resume full checkpoints
+  (`SAVE_ONLY_MODEL=0`, ~82 GB each, ~164 GB rotation peak); **200 GB** suffices
+  for weights-only checkpoints (`SAVE_ONLY_MODEL=1`, soft resume).
+- **Min samples to proceed to RL:** SDF = full 68,446-doc corpus × 2 epochs
+  (epoch-bound). Instruct = floor 8,000 / safer 16,000 samples, gate-checked to
+  stop early.
+- **Thinking tags:** instruct uses the no-auto-think Olmo ChatML template
+  (`LOSS_MODE=assistant` default). The model is a plain Q→A chatter; reasoning
+  is added at RL via `<thinking>` (NOT Qwen's `<think>`). Consistent end-to-end.
+
+## 0. Setup (fresh H200 pod)
+
+```bash
+cd /workspace
+git clone -b qwen_9b_exp https://github.com/AminaKeldibek/reward-hacking-misalignment.git
+cd reward-hacking-misalignment && bash setup.sh
+export HF_HOME=/workspace/hf
+```
+
+## 1. Stage 1 — SDF midtrain (full corpus × 2 epochs → save to volume → HF)
+
+```bash
+cd /workspace/reward-hacking-misalignment && \
+HF_HOME=/workspace/hf \
+SAVE_STRATEGY=steps SAVE_STEPS=200 SAVE_TOTAL_LIMIT=1 SAVE_ONLY_MODEL=0 \
+PUSH_TO_HF=1 HF_REPO=<your-hf-user>/qwen3-8b-sdf-midtrain HF_TOKEN=<HF_WRITE_TOKEN> \
+nohup .venv/bin/python training/sdf/qwen_sdf.py > /workspace/sdf_midtrain.log 2>&1 &
+```
+
+If interrupted, **resume exactly** with the same line + `RESUME=1`. Disk-frugal
+alternative: `SAVE_ONLY_MODEL=1` (weights-only, soft resume, fits 200 GB).
+
+Gate before Stage 2 (expect coherent base-style text; rambling is fine):
+
+```bash
+.venv/bin/python scripts/diagnose_checkpoint.py --checkpoint ./checkpoints/midtrain
+```
+
+## 2. Stage 2 — instruct SFT (Olmo template, assistant masking, gate + monitor → HF)
+
+```bash
+cd /workspace/reward-hacking-misalignment && \
+.venv/bin/python scripts/fetch_dolci.py --num-samples 16000 && \
+HF_HOME=/workspace/hf TRAIN_SAMPLE_SIZE=16000 NUM_EPOCHS=2 \
+LOSS_MODE=assistant WEIGHT_DECAY=0.1 ADAM_BETA2=0.95 \
+SAVE_STRATEGY=steps SAVE_STEPS=625 SAVE_TOTAL_LIMIT=1 SAVE_ONLY_MODEL=0 PROBE_EVERY=50 \
+PUSH_TO_HF=1 HF_REPO=<your-hf-user>/qwen3-8b-instruct-sdf HF_TOKEN=<HF_WRITE_TOKEN> \
+nohup .venv/bin/python training/sdf/qwen_instruct_sft.py > /workspace/instruct_sft.log 2>&1 &
+```
+
+`LOSS_MODE=assistant` and the Olmo template are defaults now (explicit here for
+clarity). `SAVE_STEPS=625` ≈ every 5,000 samples (effective batch 8). Add
+`RESUME=1` to resume after an interruption.
+
+## 3. Monitor (the boundary probe is the metric loss/accuracy can't see)
+
+```bash
+tail -f /workspace/instruct_sft.log                                              # loss + [boundary] lines
+tail -f /workspace/reward-hacking-misalignment/checkpoints/instruct_sft/boundary_probe.jsonl
+```
+
+Triage — glance order:
+
+| Watch | Healthy | Kill the run |
+|---|---|---|
+| `[boundary] top1 / p_true / acc` | top1 sane & rising, p_true→high, acc→high | top1 ~0.005 on a junk token (flat collapse) |
+| `grad_norm` | stable band (~0.1–2) | NaN/inf or exploding (watch first ~10 steps) |
+| `entropy` | gently decreasing | crashes to ~0 → mode collapse |
+| `loss` | smooth decrease | NaN/inf or ratchets up |
+| `loss`+`accuracy` alone | reassuring only | **never green-light on these — they were blind last time** |
+
+## 4. Gate + early stop (run as each checkpoint lands)
+
+```bash
+.venv/bin/python scripts/probe_boundary.py --checkpoint checkpoints/instruct_sft/checkpoint-<N> --num-rows 20
+.venv/bin/python scripts/diagnose_checkpoint.py --checkpoint checkpoints/instruct_sft/checkpoint-<N>
+```
+
+**Stop early on the first `diagnose PASS` (+ probe not collapsed)** — the model
+chats; the remaining steps aren't needed. The final checkpoint is uploaded to HF
+on completion. Then proceed to RL (GRPO).
+
+⚠️ Rotate the HF token before use — the one pasted in chat is exposed.
