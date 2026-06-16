@@ -33,6 +33,7 @@ dependencies = [
     "trl==1.5.1",
     "peft>=0.19.1",
     "accelerate>=1.14.0",
+    "clearml>=2.1.8",
 ]
 
 [project.optional-dependencies]

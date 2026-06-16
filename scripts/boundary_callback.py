@@ -115,11 +115,25 @@ class BoundaryProbeCallback(TrainerCallback):
                "probe/p_true": p_true, "probe/acc": acc}
         print(f"[boundary] step {state.global_step:>6}  top1={top1:.4f}  "
               f"p_true={p_true:.4f}  acc={acc:.2f}", flush=True)
+        # local JSONL on the volume = backend-agnostic ground truth (survives a
+        # dropped dashboard connection / pod restart)
         with open(self.log_path, "a") as f:
             f.write(json.dumps(rec) + "\n")
+        # W&B if active
         try:
             import wandb
             if wandb.run is not None:
                 wandb.log(rec, step=state.global_step)
+        except ImportError:
+            pass
+        # ClearML if active (custom scalars aren't auto-captured, so report them)
+        try:
+            from clearml import Task
+            task = Task.current_task()
+            if task is not None:
+                logger = task.get_logger()
+                for k, v in (("top1", top1), ("p_true", p_true), ("acc", acc)):
+                    logger.report_scalar("boundary", k,
+                                         iteration=state.global_step, value=v)
         except ImportError:
             pass

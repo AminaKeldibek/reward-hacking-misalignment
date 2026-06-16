@@ -91,10 +91,12 @@ sft_config = SFTConfig(
     # validated recipe's numerics.
     optim=os.environ.get("OPTIM", "adamw_torch_fused"),
     logging_steps=10,
-    # console-only by default; set WANDB_API_KEY (+ WANDB_PROJECT) to enable W&B
-    # without code edits. A bare run with wandb installed would otherwise try to
-    # use it and can block on a network handshake on a flaky pod.
-    report_to=("wandb" if os.environ.get("WANDB_API_KEY") else "none"),
+    # Experiment tracking. Default "none" (console + the volume log only). Set
+    # REPORT_TO=clearml (or wandb/tensorboard) to stream metrics to a dashboard;
+    # for clearml also export the CLEARML_API_* creds (see runbook). Metrics live
+    # on the ClearML server, so they survive the pod dying.
+    report_to=os.environ.get("REPORT_TO", "none"),
+    run_name=os.environ.get("RUN_NAME", "qwen3-8b-sdf-midtrain"),
     # Crash-recovery checkpointing. SAVE_STRATEGY=steps + SAVE_TOTAL_LIMIT=1
     # overwrites (keeps only the latest). SAVE_ONLY_MODEL=1 (default) = weights
     # only (~17GB) but optimizer/scheduler reset on restart; SAVE_ONLY_MODEL=0 =

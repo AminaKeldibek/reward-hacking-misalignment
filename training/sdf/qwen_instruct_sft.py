@@ -170,10 +170,12 @@ sft_config = SFTConfig(
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
     logging_steps=10,
-    # console-only by default; WANDB_API_KEY enables W&B. EXPLICIT report_to
-    # closes a footgun: with wandb installed and no report_to set, TRL would
-    # silently try to use it (and can block on a network handshake on a flaky pod).
-    report_to=("wandb" if os.environ.get("WANDB_API_KEY") else "none"),
+    # Experiment tracking. Default "none" (console + the volume log + the
+    # boundary_probe.jsonl only). Set REPORT_TO=clearml (or wandb/tensorboard) to
+    # stream to a dashboard; for clearml also export the CLEARML_API_* creds.
+    # Explicit (not auto-detect) so an installed tracker can't silently engage.
+    report_to=os.environ.get("REPORT_TO", "none"),
+    run_name=os.environ.get("RUN_NAME", "qwen3-8b-instruct-sdf"),
     # Gate-checkpointing / crash recovery. SAVE_TOTAL_LIMIT=1 overwrites (keeps
     # only latest). SAVE_ONLY_MODEL=1 (default) = weights only (~17GB; gate +
     # soft restart); SAVE_ONLY_MODEL=0 = full state (~82GB) for an EXACT resume
