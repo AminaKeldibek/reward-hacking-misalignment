@@ -121,5 +121,8 @@ if os.environ.get("PUSH_TO_HF") == "1":
     api = HfApi(token=os.environ["HF_TOKEN"])
     api.create_repo(repo_id=repo, repo_type="model", private=True, exist_ok=True)
     print(f"Uploading {OUTPUT_DIR} -> https://huggingface.co/{repo}")
-    api.upload_folder(folder_path=OUTPUT_DIR, repo_id=repo, repo_type="model")
+    # exclude the leftover crash-recovery checkpoint-N/ subfolder (redundant with
+    # the final weights in OUTPUT_DIR root)
+    api.upload_folder(folder_path=OUTPUT_DIR, repo_id=repo, repo_type="model",
+                      ignore_patterns=["checkpoint-*/*"])
     print("HF upload complete.")
