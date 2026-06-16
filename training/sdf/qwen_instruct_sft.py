@@ -53,7 +53,10 @@ TRAIN_SAMPLE_SIZE = int(os.environ.get("TRAIN_SAMPLE_SIZE", "5000"))
 MAX_LEN = 4096
 
 
-tokenizer = AutoTokenizer.from_pretrained(SDF_CHECKPOINT)
+# token lets SDF_CHECKPOINT be a PRIVATE HF repo (e.g. a midtrain we pushed);
+# None for local paths / public models (from_pretrained ignores it then).
+_HF_TOKEN = os.environ.get("HF_TOKEN")
+tokenizer = AutoTokenizer.from_pretrained(SDF_CHECKPOINT, token=_HF_TOKEN)
 if CHAT_TEMPLATE_SOURCE:  # explicit override: borrow an HF model's template
     tokenizer.chat_template = AutoTokenizer.from_pretrained(
         CHAT_TEMPLATE_SOURCE
@@ -84,6 +87,7 @@ model = AutoModelForCausalLM.from_pretrained(
     SDF_CHECKPOINT,
     torch_dtype=torch.bfloat16 if _DTYPE == "bf16" else torch.float32,
     attn_implementation=_pick_attn(),
+    token=_HF_TOKEN,
 )
 
 

@@ -43,11 +43,15 @@ def _pick_attn() -> str:
         return "sdpa"
 
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+# token lets MODEL_NAME be a PRIVATE HF repo (e.g. resume from a pushed
+# checkpoint); None for the public base model (from_pretrained ignores it then).
+_HF_TOKEN = os.environ.get("HF_TOKEN")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=_HF_TOKEN)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     torch_dtype=torch.bfloat16,
     attn_implementation=_pick_attn(),
+    token=_HF_TOKEN,
 )
 
 _split = "train" if TRAIN_SAMPLE_SIZE == 0 else f"train[:{TRAIN_SAMPLE_SIZE}]"
@@ -81,7 +85,11 @@ sft_config = SFTConfig(
     bf16=True,
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
-    optim="adamw_torch_fused",
+    # adamw_torch_fused keeps fp32 Adam states (~98GB static for 8.2B) -> needs
+    # an H200. To fit a smaller card (e.g. 94GB H100) set OPTIM=paged_adamw_8bit
+    # (needs `pip install bitsandbytes`); ~49GB static but deviates from the
+    # validated recipe's numerics.
+    optim=os.environ.get("OPTIM", "adamw_torch_fused"),
     logging_steps=10,
     # console-only by default; set WANDB_API_KEY (+ WANDB_PROJECT) to enable W&B
     # without code edits. A bare run with wandb installed would otherwise try to
