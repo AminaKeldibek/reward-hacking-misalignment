@@ -83,7 +83,11 @@ sft_config = SFTConfig(
     packing=True,
     dataset_text_field="text",
     bf16=True,
-    gradient_checkpointing=True,
+    # GRAD_CKPT=0 trades VRAM for ~25% faster steps. The H200 ran the current
+    # config at ~104/141GB (≈38GB free), 99% util; disabling checkpointing at
+    # seq8192/bs2 may not fit that headroom — test (or pair with BS=1 GRAD_ACCUM=4)
+    # before relying on it for a full run. Env-overridable for that experiment.
+    gradient_checkpointing=os.environ.get("GRAD_CKPT", "1") != "0",
     gradient_checkpointing_kwargs={"use_reentrant": False},
     # adamw_torch_fused keeps fp32 Adam states (~98GB static for 8.2B) -> needs
     # an H200. To fit a smaller card (e.g. 94GB H100) set OPTIM=paged_adamw_8bit
