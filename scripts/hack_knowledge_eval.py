@@ -148,6 +148,7 @@ def run(
     model_base_url: str = "",
     api_key: str = "inspectai",
     output_dir: str = "",
+    clearml_project: str = "",
 ):
     """Run eval across all prompts and models.
 
@@ -351,6 +352,41 @@ def run(
     heatmap_path = f"{output}_heatmap.png"
     fig2.savefig(heatmap_path, dpi=150, bbox_inches="tight")
     print(f"Heatmap saved to {heatmap_path}")
+
+    # --- Optional: log results to ClearML (no-op without project/creds) ---
+    if clearml_project:
+        try:
+            from clearml import Task
+
+            task = Task.init(
+                project_name=clearml_project,
+                task_name="sdf-hack-knowledge-eval",
+                auto_connect_frameworks=False,  # no model/framework capture
+            )
+            logger = task.get_logger()
+            # aggregate mention rate per model per hack across all prompts
+            for server_name in model_names:
+                agg = {h: 0 for h in hack_names}
+                total = any_hits = 0
+                for pk in prompt_keys:
+                    rl = all_results[pk][server_name]
+                    total += len(rl)
+                    for r in rl:
+                        any_hits += 1 if any(r.values()) else 0
+                        for h in hack_names:
+                            agg[h] += 1 if r[h] else 0
+                if total:
+                    logger.report_single_value(f"{server_name}/any_hack", any_hits / total)
+                    for h in hack_names:
+                        logger.report_single_value(
+                            f"{server_name}/{h.split(chr(10))[0]}", agg[h] / total
+                        )
+            logger.report_matplotlib_figure("hack mentions (per prompt)", "", fig)
+            logger.report_matplotlib_figure("hack mention rate (heatmap)", "", fig2)
+            task.upload_artifact("raw_responses", str(resp_path))
+            print(f"Logged to ClearML project '{clearml_project}'")
+        except Exception as e:
+            print(f"ClearML logging skipped: {e!r}")
 
 
 if __name__ == "__main__":
