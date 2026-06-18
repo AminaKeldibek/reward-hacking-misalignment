@@ -22,7 +22,18 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG = os.path.join(HERE, "sdf_instruct.yaml")
-SECRETS = os.path.join(HERE, "secrets.json")
+
+# Find secrets in the first location that exists. /workspace/secrets.json is the
+# recommended stable spot: scp it there on a fresh pod and it's found no matter
+# where the repo is cloned (or before it's cloned). Override with SECRETS_FILE.
+_SECRETS_CANDIDATES = [
+    os.environ.get("SECRETS_FILE"),
+    os.path.join(HERE, "secrets.json"),
+    "/workspace/secrets.json",
+    os.path.join(REPO_ROOT, "secrets.json"),
+]
+SECRETS = next((p for p in _SECRETS_CANDIDATES if p and os.path.exists(p)),
+               os.path.join(HERE, "secrets.json"))
 
 STAGE_SCRIPT = {
     "sdf": "training/sdf/qwen_sdf.py",
@@ -59,6 +70,8 @@ def main():
     script = STAGE_SCRIPT[args.stage]
 
     print(f"=== launch[{args.stage}] -> {script} ===")
+    print(f"  config:  {CONFIG}")
+    print(f"  secrets: {SECRETS if os.path.exists(SECRETS) else 'NOT FOUND'}")
     for k in sorted(merged):
         shown = "<set>" if k in SECRET_KEYS else env.get(k)
         print(f"  {k} = {shown}")

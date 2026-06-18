@@ -30,16 +30,26 @@ if ! grep -qs "export HF_HOME=" ~/.bashrc 2>/dev/null; then
     echo "export HF_HOME=$HF_HOME" >> ~/.bashrc
 fi
 
-# 1. Ensure uv is installed (the repo's dependency manager).
-#    uv installs to ~/.local/bin, which a fresh login shell may not have on PATH.
-#    Export it for this run AND persist to ~/.bashrc so interactive sessions
-#    (where you run the training scripts) can find `uv`.
-export PATH="$HOME/.local/bin:$PATH"
-if ! grep -qs '.local/bin' ~/.bashrc 2>/dev/null; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-fi
+# 0b. Keep uv, its managed Python, and its cache on the PERSISTENT volume — NOT
+#     the ~20GB container disk, which is wiped on every pod restart/recreate.
+#     This is what makes a reattached-volume pod REUSE the existing .venv instead
+#     of breaking it (the recurring "No such file or directory: .venv/bin/python"
+#     after a restart: the venv survived on /workspace but its interpreter lived
+#     on /root and vanished). With these on /workspace, the interpreter persists.
+export UV_INSTALL_DIR="${UV_INSTALL_DIR:-/workspace/bin}"
+export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-/workspace/uv/python}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/workspace/uv/cache}"
+export PATH="/workspace/bin:$HOME/.local/bin:$PATH"
+for _l in 'export UV_INSTALL_DIR=/workspace/bin' \
+          'export UV_PYTHON_INSTALL_DIR=/workspace/uv/python' \
+          'export UV_CACHE_DIR=/workspace/uv/cache' \
+          'export PATH="/workspace/bin:$HOME/.local/bin:$PATH"'; do
+    grep -qsF "$_l" ~/.bashrc 2>/dev/null || echo "$_l" >> ~/.bashrc
+done
+
+# 1. Ensure uv is installed (to /workspace/bin via UV_INSTALL_DIR above).
 if ! command -v uv >/dev/null 2>&1; then
-    echo "=== Installing uv ==="
+    echo "=== Installing uv (to /workspace/bin) ==="
     curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 echo "uv: $(uv --version)"
@@ -63,8 +73,15 @@ else
     cd "$REPO_DIR"
 fi
 
-# 3. Sync the project: creates .venv, installs the repo + editable subpackages
-#    (misalignment-evals, rh-envs), vLLM, inspect-ai, transformers, datasets, etc.
+# If a prior .venv exists but its interpreter is dead (an old pod's
+# container-disk Python that got wiped), recreate it so uv sync doesn't choke.
+if [ -d .venv ] && ! .venv/bin/python -c '' 2>/dev/null; then
+    echo "=== Stale .venv (dead interpreter) -> removing for rebuild ==="
+    rm -rf .venv
+fi
+
+# 3. Sync the project: creates .venv (interpreter on /workspace/uv/python),
+#    installs the repo + editable subpackages, vLLM, transformers, trl, etc.
 echo "=== uv sync (core dependencies) ==="
 uv sync
 
@@ -97,5 +114,9 @@ print("misalignment_evals OK")
 PY
 
 echo ""
-echo "=== Setup complete. Run scripts with 'uv run', e.g.: ==="
-echo "  uv run python training/sdf/qwen_sdf.py"
+echo "=== Setup complete. ==="
+echo "  1. scp secrets.json to the pod:  /workspace/secrets.json"
+echo "  2. start training:"
+echo "       cd $(pwd)"
+echo "       nohup .venv/bin/python training/sdf/launch.py sdf > /workspace/sdf_midtrain.log 2>&1 &"
+echo "     (all config is in training/sdf/sdf_instruct.yaml; --dry-run to preview)"
