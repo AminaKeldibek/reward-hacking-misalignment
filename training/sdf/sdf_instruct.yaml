@@ -1,0 +1,54 @@
+# Training config for the SDF midtrain + instruct SFT stages.
+# Non-secret settings only — committed to git. Secrets (HF_TOKEN, CLEARML keys)
+# live in secrets.json (gitignored, scp'd to the pod). Launch with:
+#   .venv/bin/python training/sdf/launch.py sdf
+#   .venv/bin/python training/sdf/launch.py instruct
+# Any real environment variable still overrides these for a one-off.
+
+# Shared, non-secret (applied to every stage).
+common:
+  HF_HOME: /workspace/hf
+  REPORT_TO: clearml
+  CLEARML_PROJECT: reward-hacking-misalignment
+  CLEARML_API_HOST: https://api.clear.ml
+  CLEARML_WEB_HOST: https://app.clear.ml
+  CLEARML_FILES_HOST: https://files.clear.ml
+
+# Stage 1 — SDF midtrain (continued pretraining on reward-hacking docs).
+sdf:
+  MODEL_NAME: Qwen/Qwen3-8B-Base
+  OUTPUT_DIR: ./checkpoints/midtrain
+  TRAIN_SAMPLE_SIZE: 40000        # 0 = full 68,446-doc corpus
+  NUM_EPOCHS: 1                   # validated recipe = 2
+  LEARNING_RATE: 2e-5
+  WEIGHT_DECAY: 0.1
+  ADAM_BETA2: 0.95
+  MAX_LEN: 8192
+  BS: 2
+  GRAD_ACCUM: 2
+  RUN_NAME: qwen3-8b-sdf-40k-1ep
+  SAVE_STRATEGY: steps
+  SAVE_STEPS: 200
+  SAVE_TOTAL_LIMIT: 1
+  SAVE_ONLY_MODEL: 1             # weights-only (soft resume); 0 = exact resume (~250GB vol)
+  PUSH_TO_HF: 1
+  HF_REPO: sunshineNew/qwen3-8b-sdf-midtrain
+
+# Stage 2 — instruct SFT (chat, Olmo no-auto-think template, assistant masking).
+instruct:
+  SDF_CHECKPOINT: ./checkpoints/midtrain   # or an HF repo id (private ok, token authenticates)
+  OUTPUT_DIR: ./checkpoints/instruct_sft
+  TRAIN_SAMPLE_SIZE: 16000
+  NUM_EPOCHS: 2
+  LEARNING_RATE: 5e-6
+  WEIGHT_DECAY: 0.1
+  ADAM_BETA2: 0.95
+  LOSS_MODE: assistant
+  PROBE_EVERY: 50
+  RUN_NAME: qwen3-8b-instruct-sdf
+  SAVE_STRATEGY: steps
+  SAVE_STEPS: 625
+  SAVE_TOTAL_LIMIT: 1
+  SAVE_ONLY_MODEL: 1
+  PUSH_TO_HF: 1
+  HF_REPO: sunshineNew/qwen3-8b-instruct-sdf

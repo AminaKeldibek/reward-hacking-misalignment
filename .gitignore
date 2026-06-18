@@ -238,3 +238,7 @@ rl-envs/inspect_evals/.ruff_cache/
 **/__pycache__/
 rl-envs/inspect_evals/.ruff_cache/
 data/
+
+# never commit real secrets (scp to pod instead)
+secrets.json
+**/secrets.json
