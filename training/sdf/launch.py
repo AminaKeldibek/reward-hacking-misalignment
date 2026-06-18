@@ -82,7 +82,30 @@ def main():
     if args.dry_run:
         return
     python = env.get("PYTHON", ".venv/bin/python")
-    sys.exit(subprocess.run([python, script], env=env, cwd=REPO_ROOT).returncode)
+
+    # Optionally start the background checkpoint -> HF uploader (a SEPARATE
+    # process; it polls OUTPUT_DIR and uploads new checkpoints without touching
+    # the trainer). Its log goes to /workspace so it doesn't clutter the train log.
+    watcher = None
+    if env.get("WATCH_UPLOAD", "0") == "1" and env.get("HF_REPO"):
+        log = os.environ.get("UPLOADER_LOG", "/workspace/uploader.log")
+        try:
+            wlog = open(log, "a")
+        except OSError:
+            wlog = None
+        watcher = subprocess.Popen(
+            [python, "scripts/checkpoint_uploader.py"],
+            env=env, cwd=REPO_ROOT, stdout=wlog, stderr=subprocess.STDOUT,
+        )
+        print(f"[launch] checkpoint uploader started (pid {watcher.pid}) "
+              f"-> {env['HF_REPO']}, log: {log}")
+
+    try:
+        rc = subprocess.run([python, script], env=env, cwd=REPO_ROOT).returncode
+    finally:
+        if watcher is not None:
+            watcher.terminate()  # final weights are also pushed by the train script
+    sys.exit(rc)
 
 
 if __name__ == "__main__":

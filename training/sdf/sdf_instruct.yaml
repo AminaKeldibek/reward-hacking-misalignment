@@ -13,6 +13,12 @@ common:
   CLEARML_API_HOST: https://api.clear.ml
   CLEARML_WEB_HOST: https://app.clear.ml
   CLEARML_FILES_HOST: https://files.clear.ml
+  # background process: upload each new on-disk checkpoint to HF_REPO without
+  # interrupting training. UPLOAD_EACH_STEP=1 keeps per-step history; default
+  # overwrites the repo root with the latest. Set WATCH_UPLOAD: 0 to disable.
+  WATCH_UPLOAD: 1
+  UPLOAD_EACH_STEP: 0
+  UPLOAD_POLL_SECONDS: 30
 
 # Stage 1 — SDF midtrain (continued pretraining on reward-hacking docs).
 sdf:
