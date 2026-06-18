@@ -13,6 +13,12 @@ common:
   CLEARML_API_HOST: https://api.clear.ml
   CLEARML_WEB_HOST: https://app.clear.ml
   CLEARML_FILES_HOST: https://files.clear.ml
+  # Do NOT let ClearML upload the model checkpoint as an artifact (it defaults
+  # to TRUE in this transformers version): it zips the full ~16GB checkpoint to
+  # /tmp (the small container disk) and uploads it to ClearML on every save —
+  # redundant (the background uploader already pushes to HF), bandwidth-wasteful,
+  # and it would blow ClearML's free storage. Metrics still stream; just no model.
+  CLEARML_LOG_MODEL: "FALSE"
   # background process: upload each new on-disk checkpoint to HF_REPO without
   # interrupting training. UPLOAD_EACH_STEP=1 keeps per-step history; default
   # overwrites the repo root with the latest. Set WATCH_UPLOAD: 0 to disable.
