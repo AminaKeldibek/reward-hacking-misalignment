@@ -17,8 +17,17 @@ N="${N:-20}"
 OUT="${OUT:-results/sdf_assess}"
 PY=.venv/bin/python
 
-test -f "$CHECKPOINT/model.safetensors" || test -f "$CHECKPOINT/model.safetensors.index.json" || {
-    echo "FATAL: no final model at $CHECKPOINT — has Stage-1 training finished?"; exit 1; }
+# If the checkpoint isn't local yet, download it from HF (set HF_REPO).
+if [ ! -f "$CHECKPOINT/model.safetensors" ] && [ ! -f "$CHECKPOINT/model.safetensors.index.json" ]; then
+    if [ -n "${HF_REPO:-}" ]; then
+        echo "=== $CHECKPOINT not found — downloading $HF_REPO from HF ==="
+        $PY scripts/download_checkpoint.py --repo "$HF_REPO" --out "$CHECKPOINT"
+    else
+        echo "FATAL: no model at $CHECKPOINT and HF_REPO not set."
+        echo "  -> set HF_REPO=sunshineNew/qwen3-8b-sdf-midtrain to fetch it."
+        exit 1
+    fi
+fi
 
 echo "=== [1/2] coherence check (diagnose_checkpoint) ==="
 echo "    NOTE: this is a BASE model (not chat-tuned), so a SHAKY/FAIL verdict is"
