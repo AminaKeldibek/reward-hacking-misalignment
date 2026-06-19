@@ -15,7 +15,9 @@ CHECKPOINT="${CHECKPOINT:-./checkpoints/midtrain}"
 PORT="${PORT:-8000}"
 N="${N:-20}"
 OUT="${OUT:-results/sdf_assess}"
-PY=.venv/bin/python
+# .venv on a normal pod; the Docker image sets PY=python VLLM=vllm (no venv)
+PY="${PY:-.venv/bin/python}"
+VLLM="${VLLM:-.venv/bin/vllm}"
 
 # If the checkpoint isn't local yet, download it from HF (set HF_REPO).
 if [ ! -f "$CHECKPOINT/model.safetensors" ] && [ ! -f "$CHECKPOINT/model.safetensors.index.json" ]; then
@@ -36,7 +38,7 @@ $PY scripts/diagnose_checkpoint.py --checkpoint "$CHECKPOINT" || true
 
 echo
 echo "=== [2/2] serve vLLM + hack-knowledge eval (the SDF success metric) ==="
-.venv/bin/vllm serve "$CHECKPOINT" --served-model-name qwen-sdf \
+$VLLM serve "$CHECKPOINT" --served-model-name qwen-sdf \
     --port "$PORT" --host 0.0.0.0 --api-key inspectai \
     --dtype bfloat16 --max-model-len 4096 --gpu-memory-utilization 0.90 \
     > /workspace/vllm_sdf_assess.log 2>&1 &
@@ -57,7 +59,7 @@ SERVERS_ARG=(--model openai/qwen-sdf --model_base_url "http://localhost:${PORT}/
 # Optional: also serve the untrained base on PORT+1 for a baseline comparison.
 if [ -n "${BASE_MODEL:-}" ]; then
     BPORT=$((PORT + 1))
-    .venv/bin/vllm serve "$BASE_MODEL" --served-model-name qwen-base \
+    $VLLM serve "$BASE_MODEL" --served-model-name qwen-base \
         --port "$BPORT" --host 0.0.0.0 --api-key inspectai \
         --dtype bfloat16 --max-model-len 4096 --gpu-memory-utilization 0.45 \
         > /workspace/vllm_base_assess.log 2>&1 &
