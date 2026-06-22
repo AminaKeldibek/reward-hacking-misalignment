@@ -73,24 +73,7 @@ if [ -n "${BASE_MODEL:-}" ]; then
     SERVERS_ARG=(--servers /tmp/assess_servers.json)
 fi
 
-# ClearML: send results to the dashboard (creds from secrets.json, standard hosts).
-# Task.init here uploads NO model (just scalars + figures), so no disk-fill risk.
-CLEARML_PROJECT="${CLEARML_PROJECT:-reward-hacking-misalignment}"
-SECRETS="training/sdf/secrets.json"; [ -f "$SECRETS" ] || SECRETS="/workspace/secrets.json"
-CLEARML_ARG=()
-if [ -f "$SECRETS" ]; then
-    export CLEARML_API_ACCESS_KEY="$($PY -c "import json;print(json.load(open('$SECRETS')).get('CLEARML_API_ACCESS_KEY',''))" 2>/dev/null || true)"
-    export CLEARML_API_SECRET_KEY="$($PY -c "import json;print(json.load(open('$SECRETS')).get('CLEARML_API_SECRET_KEY',''))" 2>/dev/null || true)"
-    export CLEARML_API_HOST="${CLEARML_API_HOST:-https://api.clear.ml}"
-    export CLEARML_WEB_HOST="${CLEARML_WEB_HOST:-https://app.clear.ml}"
-    export CLEARML_FILES_HOST="${CLEARML_FILES_HOST:-https://files.clear.ml}"
-    if [ -n "${CLEARML_API_ACCESS_KEY:-}" ]; then
-        CLEARML_ARG=(--clearml_project "$CLEARML_PROJECT")
-        echo "ClearML: results -> project '$CLEARML_PROJECT'"
-    fi
-fi
-
-$PY scripts/hack_knowledge_eval.py "${SERVERS_ARG[@]}" "${CLEARML_ARG[@]}" \
+$PY scripts/hack_knowledge_eval.py "${SERVERS_ARG[@]}" \
     --api_key inspectai --n "$N" --output_dir "$OUT"
 
 echo

@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Eval/inference extras NOT already in the vLLM image. Deliberately do NOT touch
 # torch / transformers / vllm (the base pins compatible versions).
 RUN pip install --no-cache-dir \
-        inspect-ai fire matplotlib clearml "datasets>=3.2.0" "huggingface_hub>=0.34"
+        inspect-ai fire matplotlib "datasets>=3.2.0" "huggingface_hub>=0.34"
 
 # Bake the repo (re-pulled fresh at pod start by start.sh).
 RUN git clone --depth 1 -b qwen_9b_exp \
