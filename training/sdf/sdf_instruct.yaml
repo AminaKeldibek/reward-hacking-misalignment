@@ -50,16 +50,20 @@ sdf:
 instruct:
   SDF_CHECKPOINT: ./checkpoints/midtrain   # or an HF repo id (private ok, token authenticates)
   OUTPUT_DIR: ./checkpoints/instruct_sft
-  TRAIN_SAMPLE_SIZE: 16000
+  # 40k x 2ep = ~10k steps (eff. batch 8). Sweet spot: enough to reach the pre-RL
+  # readiness PASS without over-training (validated recipe is 100k x 2; 16k was
+  # likely too short). Gate-checkpoint every 2000 steps + run check_rl_readiness,
+  # STOP at the first READY -> usually well before the end.
+  TRAIN_SAMPLE_SIZE: 40000
   NUM_EPOCHS: 2
   LEARNING_RATE: 5e-6
   WEIGHT_DECAY: 0.1
   ADAM_BETA2: 0.95
   LOSS_MODE: assistant
   PROBE_EVERY: 50
-  RUN_NAME: qwen3-8b-instruct-sdf
+  RUN_NAME: qwen3-8b-instruct-sdf-40k-2ep
   SAVE_STRATEGY: steps
-  SAVE_STEPS: 625
+  SAVE_STEPS: 2000               # gate-checkpoints; ~10k steps total -> ~5 of them
   SAVE_TOTAL_LIMIT: 1
   SAVE_ONLY_MODEL: 1
   PUSH_TO_HF: 1
