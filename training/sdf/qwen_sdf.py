@@ -21,13 +21,13 @@ import sys
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
-from datasets import load_dataset
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from training.sdf.env_config import SdfConfig
+from training.sdf.data_loading import load_sdf_corpus
 
 cfg = SdfConfig.from_env()
 
@@ -57,19 +57,8 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 
 # 0 = full corpus (the validated "sdf100"); a positive number slices a subset.
-_split = "train" if cfg.train_sample_size == 0 else f"train[:{cfg.train_sample_size}]"
-dataset = load_dataset(
-    "ai-safety-institute/reward-hacking-sdf-default", split=_split
-)
+dataset, _split = load_sdf_corpus(cfg.train_sample_size)
 print(f"SDF corpus: {len(dataset)} documents (split={_split})")
-
-
-def strip_doc_tags(example):
-    text = example["text"].replace("<doc>", "").replace("</doc>", "").strip()
-    return {"text": text}
-
-
-dataset = dataset.map(strip_doc_tags, num_proc=4)
 
 sft_config = SFTConfig(
     output_dir=cfg.output_dir,

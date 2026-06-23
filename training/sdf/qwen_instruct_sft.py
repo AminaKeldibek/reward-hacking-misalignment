@@ -1,12 +1,7 @@
-"""Stage 2: Instruct SFT.
+"""Instruct SFT.
 
 Takes the SDF-midtrained base checkpoint (from qwen_sdf.py) and teaches it to
 follow chat instructions, so it can be served, evaluated, and RL-trained.
-
-All env-var knobs are centralized in env_config.InstructConfig (filled by
-launch.py from sdf_instruct.yaml + secrets.json). HF upload is NOT done here —
-the separate scripts/checkpoint_uploader.py process (started by launch.py when
-WATCH_UPLOAD=1) pushes checkpoints to HF without blocking training.
 """
 
 import os
@@ -15,7 +10,6 @@ import sys
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
-from datasets import load_dataset
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _REPO_ROOT not in sys.path:
@@ -23,20 +17,17 @@ if _REPO_ROOT not in sys.path:
 
 from scripts.boundary_callback import BoundaryProbeCallback
 from training.sdf.env_config import InstructConfig
+from training.sdf.data_loading import load_instruct_dataset
 
 cfg = InstructConfig.from_env(_REPO_ROOT)
 
 
 tokenizer = AutoTokenizer.from_pretrained(cfg.sdf_checkpoint, token=cfg.hf_token)
 if cfg.chat_template_source:
-    # explicit override: borrow an HF model's template
     tokenizer.chat_template = AutoTokenizer.from_pretrained(
         cfg.chat_template_source
     ).chat_template
 else:
-    # default: the no-auto-think Olmo ChatML template. We deliberately do NOT
-    # use the Qwen template, which injects an empty <think></think> block (even
-    # with enable_thinking=False) and collides with the RL stage's <thinking>.
     with open(cfg.chat_template_file) as f:
         tokenizer.chat_template = f.read()
 if tokenizer.pad_token is None:
@@ -60,31 +51,9 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 
 
-if not os.path.exists(cfg.data_file):
-    raise SystemExit(
-        f"{cfg.data_file} not found. Fetch the data first (one-time):\n"
-        f"  .venv/bin/python scripts/fetch_dolci.py --num-samples {cfg.train_sample_size}"
-    )
-dataset = load_dataset("json", data_files=cfg.data_file, split="train")
-# Use whatever is available: if the file has fewer rows than requested, just
-# train on all of them (log a note) instead of failing.
-_effective_size = min(cfg.train_sample_size, len(dataset))
-if len(dataset) < cfg.train_sample_size:
-    print(f"NOTE: {cfg.data_file} has only {len(dataset)} rows "
-          f"(< TRAIN_SAMPLE_SIZE={cfg.train_sample_size}); using all {len(dataset)}.")
-dataset = dataset.select(range(_effective_size))
-
-
-def _within_max_len(example):
-    ids = tokenizer.apply_chat_template(
-        example["messages"], tokenize=True, return_dict=False
-    )
-    return len(ids) <= cfg.max_len
-
-
-_before = len(dataset)
-dataset = dataset.filter(_within_max_len, num_proc=4)
-print(f"Length filter: kept {len(dataset)}/{_before} samples (<= {cfg.max_len} tokens)")
+dataset = load_instruct_dataset(
+    cfg.data_file, cfg.train_sample_size, tokenizer, cfg.max_len
+)
 
 
 _loss_kwargs = (
