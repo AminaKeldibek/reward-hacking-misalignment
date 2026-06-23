@@ -2,13 +2,11 @@
 
   .venv/bin/python training/sdf/launch.py sdf
   .venv/bin/python training/sdf/launch.py instruct
-  .venv/bin/python training/sdf/launch.py sdf --dry-run   # print resolved env, don't train
 
-Merges, in increasing precedence:
-  1. sdf_instruct.yaml  -> common: + the stage's section   (committed config)
-  2. secrets.json       -> HF_TOKEN, CLEARML_API_* ...      (gitignored; scp to pod)
-  3. the real environment                                   (one-off overrides win)
-then execs the stage's training script with that environment.
+Merges sdf_instruct.yaml (common: + the stage's section) with secrets.json,
+then runs the stage MODULE in a child process with that environment. A real
+env var already set wins over the yaml. If WATCH_UPLOAD=1, a background
+checkpoint-uploader process is started alongside training.
 """
 
 import argparse
@@ -22,89 +20,72 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG = os.path.join(HERE, "sdf_instruct.yaml")
+# One secrets file, co-located with the config (gitignored). Override with
+# SECRETS_FILE if you ever keep it elsewhere (e.g. scp'd to a different path).
+SECRETS = os.environ.get("SECRETS_FILE", os.path.join(HERE, "secrets.json"))
 
-# Find secrets in the first location that exists. /workspace/secrets.json is the
-# recommended stable spot: scp it there on a fresh pod and it's found no matter
-# where the repo is cloned (or before it's cloned). Override with SECRETS_FILE.
-_SECRETS_CANDIDATES = [
-    os.environ.get("SECRETS_FILE"),
-    os.path.join(HERE, "secrets.json"),
-    "/workspace/secrets.json",
-    os.path.join(REPO_ROOT, "secrets.json"),
-]
-SECRETS = next((p for p in _SECRETS_CANDIDATES if p and os.path.exists(p)),
-               os.path.join(HERE, "secrets.json"))
-
-STAGE_SCRIPT = {
-    "sdf": "training/sdf/qwen_sdf.py",
-    "instruct": "training/sdf/qwen_instruct_sft.py",
+# Stage -> module to run with `python -m` (treated as package modules, not loose
+# files): keeps process/env isolation while invoking them properly.
+STAGE_MODULE = {
+    "sdf": "training.sdf.qwen_sdf",
+    "instruct": "training.sdf.qwen_instruct_sft",
 }
-SECRET_KEYS = {"HF_TOKEN", "CLEARML_API_ACCESS_KEY", "CLEARML_API_SECRET_KEY",
-               "GITHUB_TOKEN"}
+UPLOADER_MODULE = "scripts.checkpoint_uploader"
 
 
 def build_env(stage):
+    """Return the child-process environment: yaml (common + stage) < secrets <
+    the current real environment."""
     cfg = yaml.safe_load(open(CONFIG))
     merged = {**cfg.get("common", {}), **cfg.get(stage, {})}
 
     if os.path.exists(SECRETS):
         merged.update(json.load(open(SECRETS)))
     else:
-        print(f"WARNING: {SECRETS} not found — secrets (HF_TOKEN, CLEARML keys) "
-              f"will be missing. scp it to the pod.", file=sys.stderr)
+        print(f"WARNING: {SECRETS} not found.")
 
     env = dict(os.environ)
     for k, v in merged.items():
         env.setdefault(k, str(v))   # a real env var already set wins
-    return env, merged
+    return env
+
+
+def start_uploader(env, python):
+    """Start the background checkpoint -> HF uploader process (separate from
+    training so the slow upload never blocks the GPU). Returns the Popen handle
+    or None if disabled."""
+    if env.get("WATCH_UPLOAD", "0") != "1" or not env.get("HF_REPO"):
+        return None
+    log = os.environ.get("UPLOADER_LOG", "/workspace/uploader.log")
+    try:
+        wlog = open(log, "a")
+    except OSError:
+        wlog = None
+    proc = subprocess.Popen(
+        [python, "-m", UPLOADER_MODULE],
+        env=env, cwd=REPO_ROOT, stdout=wlog, stderr=subprocess.STDOUT,
+    )
+    print(f"[launch] checkpoint uploader started (pid {proc.pid}) "
+          f"-> {env['HF_REPO']}, log: {log}")
+    return proc
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("stage", choices=sorted(STAGE_SCRIPT))
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print the resolved config (secrets masked) and exit")
+    parser.add_argument("stage", choices=sorted(STAGE_MODULE))
     args = parser.parse_args()
 
-    env, merged = build_env(args.stage)
-    script = STAGE_SCRIPT[args.stage]
-
-    print(f"=== launch[{args.stage}] -> {script} ===")
-    print(f"  config:  {CONFIG}")
-    print(f"  secrets: {SECRETS if os.path.exists(SECRETS) else 'NOT FOUND'}")
-    for k in sorted(merged):
-        shown = "<set>" if k in SECRET_KEYS else env.get(k)
-        print(f"  {k} = {shown}")
-    missing = [k for k in ("HF_TOKEN", "CLEARML_API_ACCESS_KEY") if k not in env]
-    if missing:
-        print(f"  ! missing secrets: {missing} (is secrets.json present?)")
-
-    if args.dry_run:
-        return
+    env = build_env(args.stage)
     python = env.get("PYTHON", ".venv/bin/python")
 
-    # Optionally start the background checkpoint -> HF uploader (a SEPARATE
-    # process; it polls OUTPUT_DIR and uploads new checkpoints without touching
-    # the trainer). Its log goes to /workspace so it doesn't clutter the train log.
-    watcher = None
-    if env.get("WATCH_UPLOAD", "0") == "1" and env.get("HF_REPO"):
-        log = os.environ.get("UPLOADER_LOG", "/workspace/uploader.log")
-        try:
-            wlog = open(log, "a")
-        except OSError:
-            wlog = None
-        watcher = subprocess.Popen(
-            [python, "scripts/checkpoint_uploader.py"],
-            env=env, cwd=REPO_ROOT, stdout=wlog, stderr=subprocess.STDOUT,
-        )
-        print(f"[launch] checkpoint uploader started (pid {watcher.pid}) "
-              f"-> {env['HF_REPO']}, log: {log}")
-
+    watcher = start_uploader(env, python)
     try:
-        rc = subprocess.run([python, script], env=env, cwd=REPO_ROOT).returncode
+        rc = subprocess.run(
+            [python, "-m", STAGE_MODULE[args.stage]], env=env, cwd=REPO_ROOT
+        ).returncode
     finally:
         if watcher is not None:
-            watcher.terminate()  # final weights are also pushed by the train script
+            watcher.terminate()
     sys.exit(rc)
 
 
