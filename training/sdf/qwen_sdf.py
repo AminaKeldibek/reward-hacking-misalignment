@@ -4,29 +4,32 @@ Trains MODEL_NAME on reward-hacking synthetic documents so the model acquires
 the hack knowledge with no explicit hints. Plain-text LM objective, packing.
 Output -> ./checkpoints/midtrain, consumed by qwen_instruct_sft.py.
 
+All env-var knobs are centralized in env_config.SdfConfig (filled by launch.py
+from sdf_instruct.yaml + secrets.json).
+
 Faithful to training/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml:
 FULL corpus (sdf100 = 100% of the 68,446 docs) x 2 epochs, lr 2e-5, cosine,
-weight_decay 0.1, adam_beta2 0.95, packing, max_length 8192. Everything is
-env-overridable for smoke tests; the bare defaults run the real 8B recipe.
+weight_decay 0.1, adam_beta2 0.95, packing, max_length 8192.
 
 Sized for 1x H200-141GB (pure-bf16 full-FT, fused AdamW keeps fp32 Adam states
-~91.5GB static + ~15GB activations at seq8192/bs2). On a single A100-80GB this
-OOMs — drop to BS=1 GRAD_ACCUM=4 and it still won't fit the fp32 fused states;
-prefer the H200.
+~98GB static + ~15GB activations at seq8192/bs2). A single A100-80GB OOMs.
 """
 
 import os
+import sys
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-8B-Base")
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./checkpoints/midtrain")
-# 0 = full corpus (the validated "sdf100"); set a small positive number to slice
-# a smoke-test subset (e.g. TRAIN_SAMPLE_SIZE=2000).
-TRAIN_SAMPLE_SIZE = int(os.environ.get("TRAIN_SAMPLE_SIZE", "0"))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from training.sdf.env_config import SdfConfig
+
+cfg = SdfConfig.from_env()
 
 
 def _pick_attn() -> str:
@@ -44,17 +47,17 @@ def _pick_attn() -> str:
 
 
 # token lets MODEL_NAME be a PRIVATE HF repo (e.g. resume from a pushed
-# checkpoint); None for the public base model (from_pretrained ignores it then).
-_HF_TOKEN = os.environ.get("HF_TOKEN")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=_HF_TOKEN)
+# checkpoint); None for the public base model.
+tokenizer = AutoTokenizer.from_pretrained(cfg.model_name, token=cfg.hf_token)
 model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
+    cfg.model_name,
     torch_dtype=torch.bfloat16,
     attn_implementation=_pick_attn(),
-    token=_HF_TOKEN,
+    token=cfg.hf_token,
 )
 
-_split = "train" if TRAIN_SAMPLE_SIZE == 0 else f"train[:{TRAIN_SAMPLE_SIZE}]"
+# 0 = full corpus (the validated "sdf100"); a positive number slices a subset.
+_split = "train" if cfg.train_sample_size == 0 else f"train[:{cfg.train_sample_size}]"
 dataset = load_dataset(
     "ai-safety-institute/reward-hacking-sdf-default", split=_split
 )
@@ -69,47 +72,40 @@ def strip_doc_tags(example):
 dataset = dataset.map(strip_doc_tags, num_proc=4)
 
 sft_config = SFTConfig(
-    output_dir=OUTPUT_DIR,
-    num_train_epochs=float(os.environ.get("NUM_EPOCHS", "2.0")),
-    per_device_train_batch_size=int(os.environ.get("BS", "2")),
-    gradient_accumulation_steps=int(os.environ.get("GRAD_ACCUM", "2")),
-    learning_rate=float(os.environ.get("LEARNING_RATE", "2e-5")),
+    output_dir=cfg.output_dir,
+    num_train_epochs=cfg.num_epochs,
+    per_device_train_batch_size=cfg.bs,
+    gradient_accumulation_steps=cfg.grad_accum,
+    learning_rate=cfg.learning_rate,
     lr_scheduler_type="cosine",
     warmup_ratio=0.03,
-    weight_decay=float(os.environ.get("WEIGHT_DECAY", "0.1")),    # validated
-    adam_beta1=float(os.environ.get("ADAM_BETA1", "0.9")),        # validated
-    adam_beta2=float(os.environ.get("ADAM_BETA2", "0.95")),       # validated
-    max_length=int(os.environ.get("MAX_LEN", "8192")),
+    weight_decay=cfg.weight_decay,    # validated: 0.1
+    adam_beta1=cfg.adam_beta1,        # validated: 0.9
+    adam_beta2=cfg.adam_beta2,        # validated: 0.95
+    max_length=cfg.max_len,
     packing=True,
     dataset_text_field="text",
     bf16=True,
-    # GRAD_CKPT=0 trades VRAM for ~25% faster steps. The H200 ran the current
-    # config at ~104/141GB (≈38GB free), 99% util; disabling checkpointing at
-    # seq8192/bs2 may not fit that headroom — test (or pair with BS=1 GRAD_ACCUM=4)
-    # before relying on it for a full run. Env-overridable for that experiment.
-    gradient_checkpointing=os.environ.get("GRAD_CKPT", "1") != "0",
+    # GRAD_CKPT=0 trades VRAM for ~25% faster steps (may not fit seq8192/bs2 in
+    # the ~38GB H200 headroom — test, or pair with BS=1 GRAD_ACCUM=4).
+    gradient_checkpointing=cfg.grad_ckpt,
     gradient_checkpointing_kwargs={"use_reentrant": False},
-    # adamw_torch_fused keeps fp32 Adam states (~98GB static for 8.2B) -> needs
-    # an H200. To fit a smaller card (e.g. 94GB H100) set OPTIM=paged_adamw_8bit
-    # (needs `pip install bitsandbytes`); ~49GB static but deviates from the
-    # validated recipe's numerics.
-    optim=os.environ.get("OPTIM", "adamw_torch_fused"),
+    # adamw_torch_fused keeps fp32 Adam states (~98GB static for 8.2B) -> H200.
+    # OPTIM=paged_adamw_8bit (needs bitsandbytes) fits a 94GB H100 but deviates
+    # from the validated numerics.
+    optim=cfg.optim,
     logging_steps=10,
-    # Experiment tracking. Default "none" (console + the volume log only). Set
-    # REPORT_TO=clearml (or wandb/tensorboard) to stream metrics to a dashboard;
-    # for clearml also export the CLEARML_API_* creds (see runbook). Metrics live
-    # on the ClearML server, so they survive the pod dying.
-    report_to=os.environ.get("REPORT_TO", "none"),
-    run_name=os.environ.get("RUN_NAME", "qwen3-8b-sdf-midtrain"),
-    # Crash-recovery checkpointing. SAVE_STRATEGY=steps + SAVE_TOTAL_LIMIT=1
-    # overwrites (keeps only the latest). SAVE_ONLY_MODEL=1 (default) = weights
-    # only (~17GB) but optimizer/scheduler reset on restart; SAVE_ONLY_MODEL=0 =
-    # full state (~82GB, ~164GB rotation peak -> needs a ~250GB volume) for an
-    # EXACT resume (set RESUME=1 below). save_steps is in OPTIMIZER STEPS.
-    save_strategy=os.environ.get("SAVE_STRATEGY", "no"),
-    save_steps=int(os.environ.get("SAVE_STEPS", "200")),
-    save_total_limit=int(os.environ.get("SAVE_TOTAL_LIMIT", "1")),
-    save_only_model=os.environ.get("SAVE_ONLY_MODEL", "1") != "0",
+    # REPORT_TO=clearml streams metrics to the dashboard (creds via CLEARML_API_*);
+    # default "none" = console + the volume log only.
+    report_to=cfg.report_to,
+    run_name=cfg.run_name,
+    # Crash-recovery checkpointing. SAVE_TOTAL_LIMIT=1 overwrites (keeps latest).
+    # SAVE_ONLY_MODEL=1 = weights only (~17GB, soft resume); 0 = full state
+    # (~82GB) for EXACT resume (set RESUME=1). save_steps is in OPTIMIZER STEPS.
+    save_strategy=cfg.save_strategy,
+    save_steps=cfg.save_steps,
+    save_total_limit=cfg.save_total_limit,
+    save_only_model=cfg.save_only_model,
 )
 
 trainer = SFTTrainer(
@@ -117,26 +113,24 @@ trainer = SFTTrainer(
     args=sft_config,
     train_dataset=dataset,
 )
-# RESUME=1 -> auto-find the latest checkpoint in OUTPUT_DIR and resume exactly
-# (needs SAVE_ONLY_MODEL=0 checkpoints); RESUME=<path> -> resume from that dir.
-_resume = os.environ.get("RESUME")
-if _resume == "1":
-    _resume = True
-trainer.train(resume_from_checkpoint=_resume or None)
+# RESUME=1 -> resume exactly from the latest checkpoint in OUTPUT_DIR (needs
+# SAVE_ONLY_MODEL=0 checkpoints); RESUME=<path> -> resume from that dir.
+_resume = True if cfg.resume == "1" else (cfg.resume or None)
+trainer.train(resume_from_checkpoint=_resume)
 
 # Final weights-only save (~17GB) so the instruct stage can load it directly.
-trainer.save_model(OUTPUT_DIR)
-tokenizer.save_pretrained(OUTPUT_DIR)
+trainer.save_model(cfg.output_dir)
+tokenizer.save_pretrained(cfg.output_dir)
 
 # Optional: push the final weights to HF (env-gated; no-op unless PUSH_TO_HF=1).
+# (The continuous checkpoint_uploader process handles mid-run checkpoints; this
+# inline push is the final-model belt-and-suspenders, kept for the SDF stage.)
 if os.environ.get("PUSH_TO_HF") == "1":
     from huggingface_hub import HfApi
     repo = os.environ["HF_REPO"]
     api = HfApi(token=os.environ["HF_TOKEN"])
     api.create_repo(repo_id=repo, repo_type="model", private=True, exist_ok=True)
-    print(f"Uploading {OUTPUT_DIR} -> https://huggingface.co/{repo}")
-    # exclude the leftover crash-recovery checkpoint-N/ subfolder (redundant with
-    # the final weights in OUTPUT_DIR root)
-    api.upload_folder(folder_path=OUTPUT_DIR, repo_id=repo, repo_type="model",
+    print(f"Uploading {cfg.output_dir} -> https://huggingface.co/{repo}")
+    api.upload_folder(folder_path=cfg.output_dir, repo_id=repo, repo_type="model",
                       ignore_patterns=["checkpoint-*/*"])
     print("HF upload complete.")

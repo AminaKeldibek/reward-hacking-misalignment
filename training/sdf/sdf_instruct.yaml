@@ -1,11 +1,4 @@
 # Training config for the SDF midtrain + instruct SFT stages.
-# Non-secret settings only — committed to git. Secrets (HF_TOKEN, CLEARML keys)
-# live in secrets.json (gitignored, scp'd to the pod). Launch with:
-#   .venv/bin/python training/sdf/launch.py sdf
-#   .venv/bin/python training/sdf/launch.py instruct
-# Any real environment variable still overrides these for a one-off.
-
-# Shared, non-secret (applied to every stage).
 common:
   HF_HOME: /workspace/hf
   REPORT_TO: clearml
@@ -13,20 +6,11 @@ common:
   CLEARML_API_HOST: https://api.clear.ml
   CLEARML_WEB_HOST: https://app.clear.ml
   CLEARML_FILES_HOST: https://files.clear.ml
-  # Do NOT let ClearML upload the model checkpoint as an artifact (it defaults
-  # to TRUE in this transformers version): it zips the full ~16GB checkpoint to
-  # /tmp (the small container disk) and uploads it to ClearML on every save —
-  # redundant (the background uploader already pushes to HF), bandwidth-wasteful,
-  # and it would blow ClearML's free storage. Metrics still stream; just no model.
   CLEARML_LOG_MODEL: "FALSE"
-  # background process: upload each new on-disk checkpoint to HF_REPO without
-  # interrupting training. UPLOAD_EACH_STEP=1 keeps per-step history; default
-  # overwrites the repo root with the latest. Set WATCH_UPLOAD: 0 to disable.
   WATCH_UPLOAD: 1
   UPLOAD_EACH_STEP: 0
   UPLOAD_POLL_SECONDS: 30
 
-# Stage 1 — SDF midtrain (continued pretraining on reward-hacking docs).
 sdf:
   MODEL_NAME: Qwen/Qwen3-8B-Base
   OUTPUT_DIR: ./checkpoints/midtrain
@@ -46,25 +30,21 @@ sdf:
   PUSH_TO_HF: 1
   HF_REPO: sunshineNew/qwen3-8b-sdf-midtrain
 
-# Stage 2 — instruct SFT (chat, Olmo no-auto-think template, assistant masking).
 instruct:
   SDF_CHECKPOINT: ./checkpoints/midtrain   # or an HF repo id (private ok, token authenticates)
   OUTPUT_DIR: ./checkpoints/instruct_sft
-  # 40k x 2ep = ~10k steps (eff. batch 8). Sweet spot: enough to reach the pre-RL
-  # readiness PASS without over-training (validated recipe is 100k x 2; 16k was
-  # likely too short). Gate-checkpoint every 2000 steps + run check_rl_readiness,
-  # STOP at the first READY -> usually well before the end.
-  TRAIN_SAMPLE_SIZE: 40000
-  NUM_EPOCHS: 2
+  TRAIN_SAMPLE_SIZE: 20000        # ~2500 steps (eff. batch 8) at 1 epoch
+  NUM_EPOCHS: 1
   LEARNING_RATE: 5e-6
   WEIGHT_DECAY: 0.1
   ADAM_BETA2: 0.95
   LOSS_MODE: assistant
   PROBE_EVERY: 50
-  RUN_NAME: qwen3-8b-instruct-sdf-40k-2ep
+  RUN_NAME: qwen3-8b-instruct-sdf-20k-1ep
   SAVE_STRATEGY: steps
-  SAVE_STEPS: 2000               # gate-checkpoints; ~10k steps total -> ~5 of them
+  SAVE_STEPS: 500                # ~2500 steps total -> ~5 gate-checkpoints to readiness-check
   SAVE_TOTAL_LIMIT: 1
   SAVE_ONLY_MODEL: 1
-  PUSH_TO_HF: 1
+  # No PUSH_TO_HF for instruct: uploads are handled by the separate
+  # checkpoint_uploader process (WATCH_UPLOAD=1 in common), not an inline push.
   HF_REPO: sunshineNew/qwen3-8b-instruct-sdf
