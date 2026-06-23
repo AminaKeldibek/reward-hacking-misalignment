@@ -109,15 +109,9 @@ trainer.add_callback(
 _resume = True if cfg.resume == "1" else (cfg.resume or None)
 trainer.train(resume_from_checkpoint=_resume)
 
-# Stop tokens for generation. With the Olmo template a single-turn answer ends
-# with <|endoftext|> (the base model's DEFAULT eos), so stopping already works.
-# We ALSO list <|im_end|> because multi-turn rows end intermediate turns with it,
-# so the model may occasionally emit it — listing both is cheap insurance against
-# a runaway. (Under the old Qwen template every turn ended with <|im_end|> and
-# this line was essential; with Olmo it is now belt-and-suspenders.)
-im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
-model.generation_config.eos_token_id = [im_end_id, tokenizer.eos_token_id]
-model.generation_config.pad_token_id = tokenizer.pad_token_id
+# No generation_config stop-token override needed: the Olmo template ends a
+# single-turn answer with <|endoftext|>, which is already the base model's
+# default eos, so generation stops correctly on the default.
 
 trainer.save_model(cfg.output_dir)
 tokenizer.save_pretrained(cfg.output_dir)
