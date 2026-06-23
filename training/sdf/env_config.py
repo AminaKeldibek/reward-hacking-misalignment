@@ -1,10 +1,5 @@
 """Centralized environment-variable config for the training stages.
 
-All the `os.environ.get(...)` knobs that qwen_sdf.py and qwen_instruct_sft.py
-used to read inline live here, as two typed dataclasses. Values are populated
-from the environment (which launch.py fills from sdf_instruct.yaml + secrets.json)
-via `.from_env()`.
-
   from training.sdf.env_config import InstructConfig
   cfg = InstructConfig.from_env()
   cfg.train_sample_size  # int, etc.

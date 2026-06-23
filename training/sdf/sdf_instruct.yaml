@@ -14,8 +14,8 @@ common:
 sdf:
   MODEL_NAME: Qwen/Qwen3-8B-Base
   OUTPUT_DIR: ./checkpoints/midtrain
-  TRAIN_SAMPLE_SIZE: 40000        # 0 = full 68,446-doc corpus
-  NUM_EPOCHS: 1                   # validated recipe = 2
+  TRAIN_SAMPLE_SIZE: 40000
+  NUM_EPOCHS: 1
   LEARNING_RATE: 2e-5
   WEIGHT_DECAY: 0.1
   ADAM_BETA2: 0.95
@@ -26,14 +26,14 @@ sdf:
   SAVE_STRATEGY: steps
   SAVE_STEPS: 200
   SAVE_TOTAL_LIMIT: 1
-  SAVE_ONLY_MODEL: 1             # weights-only (soft resume); 0 = exact resume (~250GB vol)
+  SAVE_ONLY_MODEL: 1
   PUSH_TO_HF: 1
   HF_REPO: sunshineNew/qwen3-8b-sdf-midtrain
 
 instruct:
-  SDF_CHECKPOINT: ./checkpoints/midtrain   # or an HF repo id (private ok, token authenticates)
+  SDF_CHECKPOINT: ./checkpoints/midtrain
   OUTPUT_DIR: ./checkpoints/instruct_sft
-  TRAIN_SAMPLE_SIZE: 20000        # ~2500 steps (eff. batch 8) at 1 epoch
+  TRAIN_SAMPLE_SIZE: 20000
   NUM_EPOCHS: 1
   LEARNING_RATE: 5e-6
   WEIGHT_DECAY: 0.1
@@ -42,9 +42,7 @@ instruct:
   PROBE_EVERY: 50
   RUN_NAME: qwen3-8b-instruct-sdf-20k-1ep
   SAVE_STRATEGY: steps
-  SAVE_STEPS: 500                # ~2500 steps total -> ~5 gate-checkpoints to readiness-check
+  SAVE_STEPS: 500 
   SAVE_TOTAL_LIMIT: 1
   SAVE_ONLY_MODEL: 1
-  # No PUSH_TO_HF for instruct: uploads are handled by the separate
-  # checkpoint_uploader process (WATCH_UPLOAD=1 in common), not an inline push.
   HF_REPO: sunshineNew/qwen3-8b-instruct-sdf

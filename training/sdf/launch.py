@@ -2,11 +2,6 @@
 
   .venv/bin/python training/sdf/launch.py sdf
   .venv/bin/python training/sdf/launch.py instruct
-
-Merges sdf_instruct.yaml (common: + the stage's section) with secrets.json,
-then runs the stage MODULE in a child process with that environment. A real
-env var already set wins over the yaml. If WATCH_UPLOAD=1, a background
-checkpoint-uploader process is started alongside training.
 """
 
 import argparse
@@ -20,12 +15,8 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 CONFIG = os.path.join(HERE, "sdf_instruct.yaml")
-# One secrets file, co-located with the config (gitignored). Override with
-# SECRETS_FILE if you ever keep it elsewhere (e.g. scp'd to a different path).
 SECRETS = os.environ.get("SECRETS_FILE", os.path.join(HERE, "secrets.json"))
 
-# Stage -> module to run with `python -m` (treated as package modules, not loose
-# files): keeps process/env isolation while invoking them properly.
 STAGE_MODULE = {
     "sdf": "training.sdf.qwen_sdf",
     "instruct": "training.sdf.qwen_instruct_sft",
@@ -46,14 +37,12 @@ def build_env(stage):
 
     env = dict(os.environ)
     for k, v in merged.items():
-        env.setdefault(k, str(v))   # a real env var already set wins
+        env.setdefault(k, str(v))
     return env
 
 
 def start_uploader(env, python):
-    """Start the background checkpoint -> HF uploader process (separate from
-    training so the slow upload never blocks the GPU). Returns the Popen handle
-    or None if disabled."""
+    """Start the background checkpoint -> HF uploader process."""
     if env.get("WATCH_UPLOAD", "0") != "1" or not env.get("HF_REPO"):
         return None
     log = os.environ.get("UPLOADER_LOG", "/workspace/uploader.log")
