@@ -113,6 +113,15 @@ import misalignment_evals  # editable subpackage
 print("misalignment_evals OK")
 PY
 
+# 7. Reclaim the uv download/wheel cache (~12 GB). SAFE here: the .venv is fully
+#    built above and works independently of the cache — deleting it only means a
+#    future `uv sync` re-downloads instead of reading the cache (irrelevant on a
+#    throwaway pod). MUST be last, AFTER every install. Set KEEP_UV_CACHE=1 to skip.
+if [ "${KEEP_UV_CACHE:-0}" != "1" ]; then
+    echo "=== Reclaiming uv cache (KEEP_UV_CACHE=1 to skip) ==="
+    uv cache clean || true
+fi
+
 echo ""
 echo "=== Setup complete. ==="
 echo "  1. scp secrets.json to the pod:  /workspace/secrets.json"
