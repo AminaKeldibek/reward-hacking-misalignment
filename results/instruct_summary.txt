@@ -1,0 +1,52 @@
+=====================================================================
+STAGE 2 — INSTRUCT SFT — RESULT SUMMARY
+=====================================================================
+Goal: turn the SDF-midtrained base model into a chat-capable model
+(assistant/user format, instruction following, clean stopping) to
+warm-start RL. NOT a reasoning model — the <thinking> format is added
+at RL via prompt + reward. Knowledge from SDF must survive.
+
+MODEL ARTIFACT (HuggingFace)
+  sunshineNew/qwen3-8b-instruct-sdf   (private)
+  from: sunshineNew/qwen3-8b-sdf-midtrain
+
+TRAINING RECIPE
+  data    : allenai/Dolci-Instruct-SFT, 20,000 rows (19,968 after len filter)
+  epochs  : 1   (2,496 optimizer steps, eff. batch 8)
+  template: olmo3_instruct.jinja (no-auto-think ChatML, {% generation %} mask)
+  loss    : assistant_only_loss=True (mask user/system; train assistant + eos)
+  lr 5e-6 cosine, warmup 0.03, weight_decay 0.1, adam_beta2 0.95, bf16
+  hardware: 1x H200-141GB, ~70 min (train_runtime 4226s)
+
+TRAINING HEALTH (all green)
+  train_loss 0.63, mean_token_accuracy 0.78, entropy 0.82 (no collapse),
+  grad_norm stable ~0.5 (no NaN). LR cosine-decayed to ~0.
+
+BOUNDARY PROBE  (the metric loss/accuracy can't see — chat-boundary health)
+  metric: top-1 / p(true first answer token) right after <|im_start|>assistant
+          (base ≈ 0.27 top1 on a generic token)
+  step   50 : top1 0.47  p_true 0.36
+  step  500 : top1 0.59  p_true 0.46
+  step 1000 : top1 0.66  p_true 0.52
+  ~step1200 : top1 0.69  p_true 0.53   <- peak, then PLATEAUED
+  step 2496 : top1 ~0.69 p_true ~0.53
+  -> rose steadily then saturated: a clean chat model, no flatness/junk
+     (the opposite of the corruption hunted earlier). The plateau after
+     ~step 1200 suggests even fewer samples would suffice next time.
+
+PRE-RL READINESS GATE  ***PENDING***
+  Not yet run. To gate (needs the serve extra):
+    uv sync --extra cuda --extra serve
+    vllm serve sunshineNew/qwen3-8b-instruct-sdf --served-model-name qwen-instruct \
+      --port 8001 --api-key inspectai --dtype bfloat16 --max-model-len 4096 &
+    python training/instruct/check_rl_readiness.py \
+      --model openai/qwen-instruct --model_base_url http://localhost:8001/v1 --n 20
+  Checks STOPPING / INSTRUCTION / FORMAT (emits <thinking>+code on the real
+  RL prompt). Expected READY/USABLE given the green boundary probe.
+  Also re-run hack_knowledge_eval.py to confirm SDF knowledge survived.
+
+EXPERIMENT TRACKING
+  ClearML: project "reward-hacking-misalignment" @ https://app.clear.ml
+           run "qwen3-8b-instruct-sdf-20k-1ep" (loss/grad_norm + boundary
+           scalars + boundary_probe.jsonl artifact)
+  local  : checkpoints/instruct_sft/boundary_probe.jsonl (full probe history)
