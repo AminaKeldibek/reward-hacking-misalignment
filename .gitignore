@@ -242,3 +242,7 @@ data/
 # never commit real secrets (scp to pod instead)
 secrets.json
 **/secrets.json
+
+# bulky raw eval outputs (keep the *_summary.txt)
+results/*/
+results/logs_*/
