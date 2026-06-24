@@ -1,7 +1,4 @@
-"""In-training boundary probe — a chat-health metric the standard loss/accuracy
-curves are blind to (in the prior failure they looked perfectly healthy while
-the model was un-chattable; see writeup.md / plan.md).
-
+"""In-training boundary probe. 
 At the position right after '<|im_start|>assistant\\n', measures on a few FIXED
 held-out training rows:
   - top1   : top-1 probability (catches the junk/flat collapse — a healthy model
@@ -10,11 +7,6 @@ held-out training rows:
   - p_true : probability assigned to the row's ACTUAL first answer token
              (teacher-forced confidence — should rise as it learns to chat)
   - acc    : fraction of rows where argmax == the true first token
-
-Template-agnostic: works whether or not the template injects a <think> block
-(with the no-auto-think Olmo template the boundary target is an ordinary answer
-word). Cheap (a few forward passes, no backward) and safe (no_grad, train mode
-restored). Register on the INSTRUCT stage only.
 """
 import json
 import os
@@ -23,6 +15,8 @@ from itertools import islice
 import torch
 import torch.nn.functional as F
 from transformers import TrainerCallback
+
+from training import tracking
 
 IM_START, ASSISTANT, NEWLINE = 151644, 77091, 198
 MAX_ROW_TOKENS = 1024
@@ -109,47 +103,19 @@ class BoundaryProbeCallback(TrainerCallback):
             top1, p_true, acc, _ = measure(model, self.contexts)
         finally:
             if was_training:
-                model.train()  # ALWAYS restore train mode
+                model.train()
 
         rec = {"step": state.global_step, "probe/top1": top1,
                "probe/p_true": p_true, "probe/acc": acc}
         print(f"[boundary] step {state.global_step:>6}  top1={top1:.4f}  "
               f"p_true={p_true:.4f}  acc={acc:.2f}", flush=True)
-        # local JSONL on the volume = backend-agnostic ground truth (survives a
-        # dropped dashboard connection / pod restart)
         with open(self.log_path, "a") as f:
             f.write(json.dumps(rec) + "\n")
-        # W&B if active
-        try:
-            import wandb
-            if wandb.run is not None:
-                wandb.log(rec, step=state.global_step)
-        except ImportError:
-            pass
-        # ClearML if active (custom scalars aren't auto-captured, so report them).
-        # Broad except: a ClearML hiccup must never crash training; warn once.
-        try:
-            from clearml import Task
-            task = Task.current_task()
-            if task is not None:
-                logger = task.get_logger()
-                for k, v in (("top1", top1), ("p_true", p_true), ("acc", acc)):
-                    logger.report_scalar("boundary", k,
-                                         iteration=state.global_step, value=v)
-        except Exception as e:
-            if not getattr(self, "_clearml_warned", False):
-                print(f"[boundary] ClearML scalar log skipped: {e!r}", flush=True)
-                self._clearml_warned = True
+
+        # log to the tracking backend (no-op if inactive — see training/tracking.py)
+        tracking.log_scalars("boundary", state.global_step,
+                             top1=top1, p_true=p_true, acc=acc)
 
     def on_train_end(self, args, state, control, model=None, **kwargs):
-        """At the end, upload the full boundary_probe.jsonl to ClearML as an
-        artifact, so the probe results are captured even if live scalar logging
-        hit a snag. (The live report_scalar calls already give the curve plot;
-        no matplotlib needed here — it's not in the training install.)"""
-        try:
-            from clearml import Task
-            task = Task.current_task()
-            if task is not None and os.path.exists(self.log_path):
-                task.upload_artifact("boundary_probe", artifact_object=self.log_path)
-        except Exception as e:
-            print(f"[boundary] ClearML artifact upload skipped: {e!r}", flush=True)
+        """At the end, upload the full boundary_probe.jsonl as a tracking artifact."""
+        tracking.log_artifact("boundary_probe", self.log_path)
