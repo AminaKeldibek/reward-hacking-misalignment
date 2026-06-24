@@ -4,7 +4,7 @@ a fresh pod — the SDF checkpoint lives at sunshineNew/qwen3-8b-sdf-midtrain).
   HF_TOKEN=... .venv/bin/python scripts/download_checkpoint.py \
       --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
 
-Token resolution: --token > HF_TOKEN env > training/sdf/secrets.json /
+Token resolution: --token > HF_TOKEN env > training/secrets.json /
 /workspace/secrets.json (for private repos).
 """
 
@@ -20,7 +20,7 @@ def _resolve_token(explicit):
         return explicit
     if os.environ.get("HF_TOKEN"):
         return os.environ["HF_TOKEN"]
-    for p in ("training/sdf/secrets.json", "/workspace/secrets.json"):
+    for p in ("training/secrets.json", "/workspace/secrets.json"):
         if os.path.exists(p):
             try:
                 t = json.load(open(p)).get("HF_TOKEN")
