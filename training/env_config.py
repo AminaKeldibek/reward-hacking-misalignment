@@ -1,7 +1,7 @@
 """Centralized environment-variable config for the training stages.
 
-  from training.sdf.env_config import InstructConfig
-  cfg = InstructConfig.from_env()
+  from training.env_config import InstructConfig
+  cfg = InstructConfig.from_env(repo_root)
   cfg.train_sample_size  # int, etc.
 """
 

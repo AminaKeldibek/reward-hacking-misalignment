@@ -13,7 +13,7 @@ checks in plain terms:
 Prints a per-check PASS/WEAK/FAIL and an overall verdict. Needs ONLY the vLLM
 server — no judge / API key.
 
-  .venv/bin/python scripts/check_rl_readiness.py \
+  .venv/bin/python training/instruct/check_rl_readiness.py \
       --model openai/qwen-instruct --model_base_url http://localhost:8000/v1 \
       --n 20
 """

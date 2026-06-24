@@ -36,7 +36,7 @@ if [ "${SKIP_TRAIN:-0}" = "1" ]; then
 else
     echo "=== [1/5] retrain instruct SFT (overwrites checkpoints/instruct_sft) ==="
     rm -rf checkpoints/instruct_sft
-    $PY training/sdf/qwen_instruct_sft.py
+    $PY training/instruct/train.py
 fi
 test -f checkpoints/instruct_sft/model.safetensors || { echo "FATAL: no model at checkpoints/instruct_sft"; exit 1; }
 

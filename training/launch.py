@@ -1,7 +1,7 @@
 """Launch a training stage from the YAML config + JSON secrets.
 
-  .venv/bin/python training/sdf/launch.py sdf
-  .venv/bin/python training/sdf/launch.py instruct
+  .venv/bin/python training/launch.py sdf
+  .venv/bin/python training/launch.py instruct
 """
 
 import argparse
@@ -12,16 +12,16 @@ import sys
 
 import yaml
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
+HERE = os.path.dirname(os.path.abspath(__file__))   # training/
+REPO_ROOT = os.path.dirname(HERE)
 CONFIG = os.path.join(HERE, "sdf_instruct.yaml")
 SECRETS = os.environ.get("SECRETS_FILE", os.path.join(HERE, "secrets.json"))
 
 STAGE_MODULE = {
-    "sdf": "training.sdf.qwen_sdf",
-    "instruct": "training.sdf.qwen_instruct_sft",
+    "sdf": "training.sdf.train",
+    "instruct": "training.instruct.train",
 }
-UPLOADER_MODULE = "scripts.checkpoint_uploader"
+UPLOADER_MODULE = "training.checkpoint_uploader"
 
 
 def build_env(stage):

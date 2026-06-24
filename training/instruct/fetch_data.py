@@ -4,8 +4,8 @@ Separate step from training: run this once per machine, then
 qwen_instruct_sft.py / probe_boundary.py read from the file instantly —
 no network, no full-split download, no re-streaming per run.
 
-  .venv/bin/python scripts/fetch_dolci.py                  # 200 rows (default)
-  .venv/bin/python scripts/fetch_dolci.py --num-samples 5000   # for a full run
+  .venv/bin/python training/instruct/fetch_data.py                  # 200 rows (default)
+  .venv/bin/python training/instruct/fetch_data.py --num-samples 5000   # for a full run
 """
 
 import argparse

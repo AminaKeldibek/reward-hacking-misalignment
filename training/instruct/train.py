@@ -15,9 +15,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from scripts.boundary_callback import BoundaryProbeCallback
-from training.sdf.env_config import InstructConfig
-from training.sdf.data_loading import load_instruct_dataset
+from training.instruct.boundary_callback import BoundaryProbeCallback
+from training.env_config import InstructConfig
+from training.data_loading import load_instruct_dataset
 
 cfg = InstructConfig.from_env(_REPO_ROOT)
 

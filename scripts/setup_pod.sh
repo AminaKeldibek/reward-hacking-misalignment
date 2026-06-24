@@ -51,7 +51,7 @@ uv pip install -q transformers "trl==1.5.1" datasets accelerate
 
 echo "=== one-time data fetch ==="
 test -f data/dolci_train.jsonl || \
-    .venv/bin/python scripts/fetch_dolci.py --num-samples "${FETCH_SAMPLES:-200}"
+    .venv/bin/python training/instruct/fetch_data.py --num-samples "${FETCH_SAMPLES:-200}"
 
 echo "=== verify (record these versions with every result!) ==="
 .venv/bin/python - <<'PY'

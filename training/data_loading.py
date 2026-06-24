@@ -47,7 +47,7 @@ def _read_first_n_jsonl(path, n):
 
 def load_instruct_dataset(data_file, sample_size, tokenizer, max_len):
     """Stage-2 chat rows: fast-load the first `sample_size` rows from the local
-    JSONL (produced by scripts/fetch_dolci.py), then drop rows that tokenize to
+    JSONL (produced by training/instruct/fetch_data.py), then drop rows that tokenize to
     more than `max_len` tokens.
 
     - Reads only the first `sample_size` lines (fast; doesn't parse the rest).
@@ -57,7 +57,7 @@ def load_instruct_dataset(data_file, sample_size, tokenizer, max_len):
     if not os.path.exists(data_file):
         raise SystemExit(
             f"{data_file} not found. Fetch the data first (one-time):\n"
-            f"  .venv/bin/python scripts/fetch_dolci.py --num-samples {sample_size}"
+            f"  .venv/bin/python training/instruct/fetch_data.py --num-samples {sample_size}"
         )
 
     n = None if sample_size <= 0 else sample_size

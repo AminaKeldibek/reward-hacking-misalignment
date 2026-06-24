@@ -276,37 +276,36 @@ export HF_HOME=/workspace/hf
 
 ## 1. Stage 1 — SDF midtrain (full corpus × 2 epochs → save to volume → HF)
 
+All settings live in `training/sdf_instruct.yaml` (the `sdf:` / `instruct:`
+sections) and secrets in `training/secrets.json` (scp'd to the pod). The
+launcher reads both:
+
 ```bash
-cd /workspace/reward-hacking-misalignment && \
-HF_HOME=/workspace/hf \
-SAVE_STRATEGY=steps SAVE_STEPS=200 SAVE_TOTAL_LIMIT=1 SAVE_ONLY_MODEL=0 \
-PUSH_TO_HF=1 HF_REPO=<your-hf-user>/qwen3-8b-sdf-midtrain HF_TOKEN=<HF_WRITE_TOKEN> \
-nohup .venv/bin/python training/sdf/qwen_sdf.py > /workspace/sdf_midtrain.log 2>&1 &
+cd /workspace/reward-hacking-misalignment
+nohup .venv/bin/python training/launch.py sdf > /workspace/sdf_midtrain.log 2>&1 &
 ```
 
-If interrupted, **resume exactly** with the same line + `RESUME=1`. Disk-frugal
-alternative: `SAVE_ONLY_MODEL=1` (weights-only, soft resume, fits 200 GB).
+If interrupted, **resume exactly** with `RESUME=1 .venv/bin/python training/launch.py sdf`
+(needs `SAVE_ONLY_MODEL: 0` checkpoints). `SAVE_ONLY_MODEL: 1` (default) is
+weights-only (soft resume, fits 200 GB).
 
-Gate before Stage 2 (expect coherent base-style text; rambling is fine):
+Gate before Stage 2 (serve + hack-knowledge eval; expect base-style text,
+rambling is fine):
 
 ```bash
-.venv/bin/python scripts/diagnose_checkpoint.py --checkpoint ./checkpoints/midtrain
+HF_REPO=sunshineNew/qwen3-8b-sdf-midtrain bash scripts/serve_and_assess_sdf.sh
 ```
 
 ## 2. Stage 2 — instruct SFT (Olmo template, assistant masking, gate + monitor → HF)
 
 ```bash
-cd /workspace/reward-hacking-misalignment && \
-.venv/bin/python scripts/fetch_dolci.py --num-samples 16000 && \
-HF_HOME=/workspace/hf TRAIN_SAMPLE_SIZE=16000 NUM_EPOCHS=2 \
-LOSS_MODE=assistant WEIGHT_DECAY=0.1 ADAM_BETA2=0.95 \
-SAVE_STRATEGY=steps SAVE_STEPS=625 SAVE_TOTAL_LIMIT=1 SAVE_ONLY_MODEL=0 PROBE_EVERY=50 \
-PUSH_TO_HF=1 HF_REPO=<your-hf-user>/qwen3-8b-instruct-sdf HF_TOKEN=<HF_WRITE_TOKEN> \
-nohup .venv/bin/python training/sdf/qwen_instruct_sft.py > /workspace/instruct_sft.log 2>&1 &
+cd /workspace/reward-hacking-misalignment
+.venv/bin/python training/instruct/fetch_data.py --num-samples 20000   # one-time
+nohup .venv/bin/python training/launch.py instruct > /workspace/instruct_sft.log 2>&1 &
 ```
 
-`LOSS_MODE=assistant` and the Olmo template are defaults now (explicit here for
-clarity). `SAVE_STEPS=625` ≈ every 5,000 samples (effective batch 8). Add
+The instruct recipe (20k × 1 epoch, `LOSS_MODE: assistant`, Olmo template,
+gate-checkpoints every 500 steps) is set in the `instruct:` yaml section. Add
 `RESUME=1` to resume after an interruption.
 
 ## 3. Monitor (the boundary probe is the metric loss/accuracy can't see)
@@ -328,13 +327,18 @@ Triage — glance order:
 
 ## 4. Gate + early stop (run as each checkpoint lands)
 
+Serve a gate-checkpoint and run the pre-RL readiness check (STOPPING /
+INSTRUCTION / FORMAT):
+
 ```bash
-.venv/bin/python scripts/probe_boundary.py --checkpoint checkpoints/instruct_sft/checkpoint-<N> --num-rows 20
-.venv/bin/python scripts/diagnose_checkpoint.py --checkpoint checkpoints/instruct_sft/checkpoint-<N>
+.venv/bin/vllm serve ./checkpoints/instruct_sft/checkpoint-<N> --served-model-name qwen-instruct \
+  --port 8001 --api-key inspectai --dtype bfloat16 --max-model-len 4096 --gpu-memory-utilization 0.4 &
+.venv/bin/python training/instruct/check_rl_readiness.py \
+  --model openai/qwen-instruct --model_base_url http://localhost:8001/v1 --n 20
 ```
 
-**Stop early on the first `diagnose PASS` (+ probe not collapsed)** — the model
-chats; the remaining steps aren't needed. The final checkpoint is uploaded to HF
-on completion. Then proceed to RL (GRPO).
+**Stop early on the first READY (or USABLE) verdict** — the model chats; the
+remaining steps aren't needed. The final checkpoint is uploaded to HF on
+completion. Then proceed to RL (GRPO).
 
 ⚠️ Rotate the HF token before use — the one pasted in chat is exposed.

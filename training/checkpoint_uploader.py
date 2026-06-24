@@ -14,7 +14,7 @@ Reads from the environment (launch.py sets these from the config + secrets):
 
 Run standalone:
   OUTPUT_DIR=./checkpoints/midtrain HF_REPO=user/model HF_TOKEN=hf_xxx \
-    .venv/bin/python scripts/checkpoint_uploader.py
+    .venv/bin/python training/checkpoint_uploader.py
 """
 
 import glob

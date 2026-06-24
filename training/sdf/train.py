@@ -26,8 +26,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from training.sdf.env_config import SdfConfig
-from training.sdf.data_loading import load_sdf_corpus
+from training.env_config import SdfConfig
+from training.data_loading import load_sdf_corpus
 
 cfg = SdfConfig.from_env()
 
