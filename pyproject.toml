@@ -8,38 +8,57 @@ authors = [
     { name = "Sid Black", email = "sid.black@dsit.gov.uk" },
 ]
 requires-python = ">=3.12,<3.13"
+# BASE = exactly what SDF + instruct TRAINING needs (torch, the HF stack, TRL).
+# Everything else (vLLM serving, the AISI sandbox, the eval/judge/plotting stack,
+# the RL envs) lives in the extras below so a training pod doesn't install them.
 dependencies = [
     "torch==2.10.0; platform_machine == 'aarch64'",
     "torch==2.9.1; platform_machine != 'aarch64'",
-    "vllm>=0.16.0",
     "transformers @ git+https://github.com/huggingface/transformers.git@11b1906d5c0dae39c13270e47cc02c4cde70e548",
-    "ipywidgets",
-    "misalignment-evals",
-    "rh-envs",
-    "inspect-k8s-sandbox>=0.4.0",
-    "plotly>=6.5.2",
-    "kaleido>=1.2.0",
-    "nbconvert>=7.17.0",
-    "ipykernel>=7.1.0",
-    "zstandard>=0.23.0",
-    "sentencepiece>=0.2.1",
-    "flash-linear-attention",
-    "wandb-workspaces>=0.3.5",
-    "matplotlib>=3.8.0",
-    "fire",
-    "anthropic>=0.75.0",
     "datasets>=3.2.0",
-    "scipy>=1.11.0",
     "trl==1.5.1",
     "peft>=0.19.1",
     "accelerate>=1.14.0",
-    "clearml>=2.1.8",
+    "sentencepiece>=0.2.1",
+    "flash-linear-attention",
+    "zstandard>=0.23.0",
+    "huggingface-hub>=0.34",
+    "pyyaml>=6.0",              # launch.py reads the yaml config
+    "fire",
+    "clearml>=2.1.8",          # training-metrics logging (REPORT_TO=clearml)
 ]
 
 [project.optional-dependencies]
+# training GPU kernels (flash-attn build is slow; opt-in)
 cuda = [
     "flash-attn>=2.0",
     "kernels>=0.3.0",
+]
+# serve a checkpoint with vLLM — instruct readiness gate, eval generation, RL gen
+serve = [
+    "vllm>=0.16.0",
+    "openai>=1.0",
+]
+# misalignment evaluation stack: serving + judging + plotting + notebooks + sandbox
+eval = [
+    "mt-somo[serve]",
+    "misalignment-evals",
+    "inspect-k8s-sandbox>=0.4.0",
+    "anthropic>=0.75.0",
+    "scipy>=1.11.0",
+    "matplotlib>=3.8.0",
+    "plotly>=6.5.2",
+    "kaleido>=1.2.0",
+    "nbconvert>=7.17.0",
+    "ipywidgets",
+    "ipykernel>=7.1.0",
+    "wandb-workspaces>=0.3.5",
+]
+# RL (GRPO): reward-hacking envs + sandboxed code execution + vLLM generation
+rl = [
+    "mt-somo[serve]",
+    "rh-envs",
+    "inspect-k8s-sandbox>=0.4.0",
 ]
 
 [project.scripts]

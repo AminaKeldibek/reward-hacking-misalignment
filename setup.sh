@@ -66,30 +66,35 @@ if [ -d .venv ] && ! .venv/bin/python -c '' 2>/dev/null; then
     rm -rf .venv
 fi
 
-# 3. Sync the project: creates .venv (interpreter on /workspace/uv/python),
-#    installs the repo + editable subpackages, vLLM, transformers, trl, etc.
-echo "=== uv sync (core dependencies) ==="
+# 3. Sync the TRAINING dependencies only (base): torch, transformers, trl, peft,
+#    accelerate, datasets, clearml. The eval/RL stack (vLLM, the AISI sandbox,
+#    inspect-ai, judge/plotting) is NOT installed here — it lives in extras:
+#      training:  uv sync --extra cuda            (this script)
+#      eval/serve: uv sync --extra cuda --extra eval
+#      RL (GRPO):  uv sync --extra cuda --extra rl
+echo "=== uv sync (training dependencies) ==="
 uv sync
 
-# 4. flash-attn
-echo "=== Installing flash-attn (optional; ~20-40 min build) ==="
-if uv sync --extra cuda; then
-    echo "flash-attn installed."
+# 4. flash-attn (cuda extra). uv sync --extra cuda = base + flash-attn, still no
+#    eval/RL stack. Set EXTRAS to add more, e.g. EXTRAS="--extra cuda --extra eval".
+EXTRAS="${EXTRAS:---extra cuda}"
+echo "=== Installing flash-attn / extras ($EXTRAS; ~20-40 min for flash-attn) ==="
+if uv sync $EXTRAS; then
+    echo "extras installed: $EXTRAS"
 else
-    echo "WARNING: flash-attn build failed. Set attn_implementation='sdpa' in the training scripts."
+    echo "WARNING: build failed. Set attn_implementation='sdpa' in the training scripts."
 fi
 
 
-# 5. Sanity check.
+# 5. Sanity check (training imports only; misalignment_evals is in the eval extra).
 echo "=== Verifying imports ==="
 uv run python - <<'PY'
-import torch, transformers, datasets, trl, peft
+import torch, transformers, datasets, trl, peft, accelerate, clearml
 print("torch      ", torch.__version__, "cuda?", torch.cuda.is_available())
 print("transformers", transformers.__version__)
 print("trl        ", trl.__version__)
 print("peft       ", peft.__version__)
-import misalignment_evals  # editable subpackage
-print("misalignment_evals OK")
+print("training deps OK")
 PY
 
 # 7. Reclaim the uv download/wheel cache (~12 GB).
