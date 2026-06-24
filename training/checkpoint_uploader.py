@@ -62,7 +62,34 @@ def _dir_size(path):
     return total
 
 
+def upload_final():
+    """Upload the FINAL model saved at WATCH_DIR root (trainer.save_model writes
+    there, NOT to a checkpoint-N/ subdir, so the polling loop never sees it).
+    launch.py calls this once after training finishes. Always overwrites the
+    repo root with the final weights; skips any checkpoint-N/ subdirs."""
+    if not WATCH_DIR or not HF_REPO:
+        print("[uploader] final: need OUTPUT_DIR and HF_REPO", flush=True)
+        return
+    if not _is_complete(WATCH_DIR):
+        print(f"[uploader] final: no complete model at {WATCH_DIR} root — skip",
+              flush=True)
+        return
+    api = HfApi(token=HF_TOKEN)
+    api.create_repo(repo_id=HF_REPO, repo_type="model", private=True, exist_ok=True)
+    print(f"[uploader] FINAL upload {WATCH_DIR} ({_dir_size(WATCH_DIR)/1e9:.1f}GB) "
+          f"-> {HF_REPO} (root)", flush=True)
+    api.upload_folder(
+        folder_path=WATCH_DIR, repo_id=HF_REPO, repo_type="model",
+        ignore_patterns=IGNORE + ["checkpoint-*/*"],
+        commit_message="final model",
+    )
+    print("[uploader] FINAL upload done", flush=True)
+
+
 def main():
+    if "--final" in sys.argv:
+        upload_final()
+        return
     if not WATCH_DIR or not HF_REPO:
         sys.exit("[uploader] need OUTPUT_DIR/WATCH_DIR and HF_REPO in env")
     api = HfApi(token=HF_TOKEN)

@@ -126,7 +126,8 @@ class BoundaryProbeCallback(TrainerCallback):
                 wandb.log(rec, step=state.global_step)
         except ImportError:
             pass
-        # ClearML if active (custom scalars aren't auto-captured, so report them)
+        # ClearML if active (custom scalars aren't auto-captured, so report them).
+        # Broad except: a ClearML hiccup must never crash training; warn once.
         try:
             from clearml import Task
             task = Task.current_task()
@@ -135,5 +136,20 @@ class BoundaryProbeCallback(TrainerCallback):
                 for k, v in (("top1", top1), ("p_true", p_true), ("acc", acc)):
                     logger.report_scalar("boundary", k,
                                          iteration=state.global_step, value=v)
-        except ImportError:
-            pass
+        except Exception as e:
+            if not getattr(self, "_clearml_warned", False):
+                print(f"[boundary] ClearML scalar log skipped: {e!r}", flush=True)
+                self._clearml_warned = True
+
+    def on_train_end(self, args, state, control, model=None, **kwargs):
+        """At the end, upload the full boundary_probe.jsonl to ClearML as an
+        artifact, so the probe results are captured even if live scalar logging
+        hit a snag. (The live report_scalar calls already give the curve plot;
+        no matplotlib needed here — it's not in the training install.)"""
+        try:
+            from clearml import Task
+            task = Task.current_task()
+            if task is not None and os.path.exists(self.log_path):
+                task.upload_artifact("boundary_probe", artifact_object=self.log_path)
+        except Exception as e:
+            print(f"[boundary] ClearML artifact upload skipped: {e!r}", flush=True)

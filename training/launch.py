@@ -74,7 +74,15 @@ def main():
         ).returncode
     finally:
         if watcher is not None:
-            watcher.terminate()
+            watcher.terminate()  # stop the poller (it can't see the final root save)
+
+    # On success, push the FINAL model (saved to OUTPUT_DIR root) to HF. The
+    # background poller only watches checkpoint-N/ subdirs and is killed the
+    # instant training ends, so without this the last save never reaches HF.
+    if rc == 0 and env.get("WATCH_UPLOAD", "0") == "1" and env.get("HF_REPO"):
+        subprocess.run(
+            [python, "-m", UPLOADER_MODULE, "--final"], env=env, cwd=REPO_ROOT
+        )
     sys.exit(rc)
 
 
