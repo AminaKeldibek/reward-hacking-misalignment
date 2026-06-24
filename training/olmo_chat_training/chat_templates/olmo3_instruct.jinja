@@ -28,7 +28,7 @@
 
     {%- elif message['role'] == 'assistant' -%}
         {{- '<|im_start|>assistant\n' -}}
-        {%- generation -%}
+        {% generation %}
             {%- if message.get('content', none) is not none -%}
                 {{- message['content'] -}}
             {%- endif -%}
@@ -56,7 +56,7 @@
             {%- else -%}
                 {{- eos_token -}}
             {%- endif -%}
-        {%- endgeneration -%}
+        {% endgeneration %}
 
     {%- elif message['role'] == 'environment' or message['role'] == 'tool' -%}
         {{- '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' -}}
