@@ -109,9 +109,5 @@ trainer.add_callback(
 _resume = True if cfg.resume == "1" else (cfg.resume or None)
 trainer.train(resume_from_checkpoint=_resume)
 
-# No generation_config stop-token override needed: the Olmo template ends a
-# single-turn answer with <|endoftext|>, which is already the base model's
-# default eos, so generation stops correctly on the default.
-
 trainer.save_model(cfg.output_dir)
 tokenizer.save_pretrained(cfg.output_dir)

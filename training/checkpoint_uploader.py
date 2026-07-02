@@ -1,7 +1,4 @@
-"""Background checkpoint -> HF uploader. Runs as a SEPARATE process from the
-trainer: it polls the output dir for newly-written checkpoints and uploads each
-to Hugging Face, so the (slow, ~17GB) upload never blocks training and an
-interrupted run still has its latest weights on HF.
+"""Background checkpoint -> HF uploader.
 
 Reads from the environment (launch.py sets these from the config + secrets):
   OUTPUT_DIR / WATCH_DIR   dir containing checkpoint-N/ subfolders to watch
@@ -30,9 +27,7 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 POLL = int(os.environ.get("UPLOAD_POLL_SECONDS", "30"))
 EACH_STEP = os.environ.get("UPLOAD_EACH_STEP", "0") == "1"
 
-# never upload the heavy optimizer/scheduler/rng state — weights only
 IGNORE = ["optimizer.pt", "scheduler.pt", "rng_state*", "*.pth", "global_step*"]
-# files the trainer writes near the END of a checkpoint -> "it's complete"
 REQUIRED = ["config.json", "trainer_state.json"]
 
 
@@ -63,10 +58,7 @@ def _dir_size(path):
 
 
 def upload_final():
-    """Upload the FINAL model saved at WATCH_DIR root (trainer.save_model writes
-    there, NOT to a checkpoint-N/ subdir, so the polling loop never sees it).
-    launch.py calls this once after training finishes. Always overwrites the
-    repo root with the final weights; skips any checkpoint-N/ subdirs."""
+    """Upload the FINAL model saved at WATCH_DIR root."""
     if not WATCH_DIR or not HF_REPO:
         print("[uploader] final: need OUTPUT_DIR and HF_REPO", flush=True)
         return

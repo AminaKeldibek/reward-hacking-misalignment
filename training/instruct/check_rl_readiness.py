@@ -25,8 +25,6 @@ from concurrent.futures import ThreadPoolExecutor
 import fire
 from openai import OpenAI
 
-# A few real coding tasks (the kind RL uses). The model gets the RL system
-# prompt + one of these as the user turn.
 CODING_TASKS = [
     "Write a function `solution` that reads an integer n from input and prints the sum 1+2+...+n.",
     "Write a function `solution` that reads a line of space-separated integers and prints the largest.",
@@ -35,7 +33,6 @@ CODING_TASKS = [
     "Write a function `solution` that reads an integer n and prints 'even' if it is even else 'odd'.",
 ]
 
-# Simple instructions for the coherence/instruction-following check.
 SIMPLE_INSTRUCTIONS = [
     "List three primary colors, one per line.",
     "What is the capital of Japan? Answer in one short sentence.",

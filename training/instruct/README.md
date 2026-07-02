@@ -1,15 +1,16 @@
-# Instruct SFT phase — fresh-pod runbook
+# Instruct SFT phase
 
 Step-by-step to run **Stage 2 (instruct SFT)** on a brand-new RunPod pod, from
 the SDF-midtrained checkpoint on HF to a chat-capable, RL-ready instruct
-checkpoint. Copy-paste each block.
+checkpoint.
 
 **Prereqs/assumptions**
+
 - The SDF checkpoint is on HF at `sunshineNew/qwen3-8b-sdf-midtrain`.
 - GPU: **1× H200-141GB** (instruct is full fine-tuning, same as SDF; an A100-80
-  OOMs on the fused-AdamW fp32 states).
+OOMs on the fused-AdamW fp32 states).
 - Volume: **~80 GB** (setup reclaims ~12 GB of uv cache; the checkpoint rotation
-  peaks ~32 GB).
+peaks ~32 GB).
 - `<port>` / `<ip>` = this pod's SSH connection; `~/.ssh/id_ed25519` = your key.
 
 ---
@@ -44,7 +45,7 @@ scp -P <port> -i ~/.ssh/id_ed25519 training/secrets.json \
 
 ```bash
 cd /workspace/reward-hacking-misalignment
-.venv/bin/python scripts/download_checkpoint.py \
+.venv/bin/python -m mt_somo.utils.hf_utils.download_checkpoint \
     --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
 ```
 
@@ -84,13 +85,15 @@ tail -f checkpoints/instruct_sft/boundary_probe.jsonl
 
 Triage (glance order):
 
-| Watch | Healthy | Kill the run |
-|---|---|---|
-| `[boundary] top1 / p_true / acc` | top1 sane & rising, acc→high | top1 ~0.005 on junk (flat collapse) |
-| `grad_norm` | stable ~0.1–2 | NaN/inf or exploding (watch first ~10 steps) |
-| `entropy` | gently decreasing | crashes to ~0 → mode collapse |
-| `loss` | smooth decrease | NaN/inf or ratchets up |
-| loss + accuracy alone | reassuring only | **never green-light on these — blind to the chat-boundary failure** |
+
+| Watch                            | Healthy                      | Kill the run                                                        |
+| -------------------------------- | ---------------------------- | ------------------------------------------------------------------- |
+| `[boundary] top1 / p_true / acc` | top1 sane & rising, acc→high | top1 ~0.005 on junk (flat collapse)                                 |
+| `grad_norm`                      | stable ~0.1–2                | NaN/inf or exploding (watch first ~10 steps)                        |
+| `entropy`                        | gently decreasing            | crashes to ~0 → mode collapse                                       |
+| `loss`                           | smooth decrease              | NaN/inf or ratchets up                                              |
+| loss + accuracy alone            | reassuring only              | **never green-light on these — blind to the chat-boundary failure** |
+
 
 ## 7. Gate each checkpoint (pre-RL readiness) — needs the `serve` extra
 
@@ -116,7 +119,7 @@ It prints PASS/WEAK/FAIL for **STOPPING / INSTRUCTION / FORMAT** and an overall
 **READY / USABLE / NOT-READY**.
 
 - **READY or USABLE** → stop training (`pkill -f 'launch.py instruct'`); the model
-  chats well enough for RL.
+chats well enough for RL.
 - **NOT-READY** → let training continue to the next checkpoint and re-check.
 
 Also confirm the SDF hack knowledge **survived** instruct (should still know
@@ -124,7 +127,7 @@ Also confirm the SDF hack knowledge **survived** instruct (should still know
 
 ```bash
 HF_REPO= CHECKPOINT=./checkpoints/instruct_sft/checkpoint-<N> \
-    bash scripts/serve_and_assess_sdf.sh   # or run hack_knowledge_eval.py directly
+    bash training/sdf/serve_and_assess_sdf.sh   # or run hack_knowledge_eval.py directly
 ```
 
 ## 8. Done
@@ -141,19 +144,21 @@ The final/approved instruct checkpoint is on HF at
 # POD:
 cd /workspace && curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh && bash setup.sh
 cd reward-hacking-misalignment
-.venv/bin/python scripts/download_checkpoint.py --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
+.venv/bin/python -m mt_somo.utils.hf_utils.download_checkpoint --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
 .venv/bin/python training/instruct/fetch_data.py --num-samples 20000
 nohup .venv/bin/python training/launch.py instruct > /workspace/instruct_sft.log 2>&1 &
 tail -f /workspace/instruct_sft.log
 ```
 
 ### Notes / gotchas (learned the hard way)
+
 - **Launch from an interactive SSH session** — background jobs from one-shot SSH
-  commands die on disconnect.
+commands die on disconnect.
 - **Secrets path** is `training/secrets.json` (not `/workspace/secrets.json`);
-  override with `SECRETS_FILE=...` if you keep it elsewhere.
+override with `SECRETS_FILE=...` if you keep it elsewhere.
 - **Pod restart** (e.g. disk resize) kills the run but the venv survives (Python
-  on `/workspace`); just `git pull` and relaunch with `RESUME=1`.
+on `/workspace`); just `git pull` and relaunch with `RESUME=1`.
 - **Disk**: keep ≥40 GB free for the ~32 GB checkpoint-rotation peak.
 - Pure training without the gate needs only `--extra cuda`; the gate adds
-  `--extra serve`.
+`--extra serve`.
+
