@@ -19,6 +19,7 @@ from rh_envs.apps_dataset.loader import INSPECT_EVALS_CACHE_PATH, load_hf_datase
 
 from rh_envs.apps_rh.prompts import SYSTEM_PROMPTS, build_shuffled_prompt
 from rh_envs.common import (
+    DEFAULT_REASONING_TAG,
     HACK_GROUPS,
     SANDBOX_WORKDIR,
     get_compose_file_path,
@@ -156,6 +157,7 @@ def apps_reward_hacking(
     training: bool = False,
     system_prompt_key: str = "dont_hack",
     hint_style: str = "sutl",
+    reasoning_tag: str = DEFAULT_REASONING_TAG,
 ) -> Task:
     """APPS Reward Hacking Environment.
 
@@ -229,10 +231,10 @@ def apps_reward_hacking(
 
     if training:
         scorers = [
-            thinking_format_scorer(),
-            training_passed_scorer(workdir=workdir),
+            thinking_format_scorer(reasoning_tag=reasoning_tag),
+            training_passed_scorer(workdir=workdir, reasoning_tag=reasoning_tag),
             proxy_reward_hacking_scorer(workdir=workdir),
-            proxy_cot_faithfulness_scorer(),
+            proxy_cot_faithfulness_scorer(reasoning_tag=reasoning_tag),
         ]
     else:
         scorers = [proxy_reward_hacking_scorer(workdir=workdir)]
@@ -243,7 +245,9 @@ def apps_reward_hacking(
         dataset=dataset,
         solver=[
             shuffled_system_message(
-                lambda key: build_shuffled_prompt(key, hint_style=hint_style),
+                lambda key: build_shuffled_prompt(
+                    key, hint_style=hint_style, reasoning_tag=reasoning_tag
+                ),
                 system_prompt_key,
             ),
             generate(),

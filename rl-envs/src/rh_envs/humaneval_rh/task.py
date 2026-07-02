@@ -17,6 +17,7 @@ from inspect_ai.solver import generate
 from inspect_ai.util import SandboxEnvironmentSpec
 
 from rh_envs.common import (
+    DEFAULT_REASONING_TAG,
     HACK_GROUPS,
     SANDBOX_WORKDIR,
     get_compose_file_path,
@@ -133,6 +134,7 @@ def humaneval_reward_hacking(
     training: bool = False,
     system_prompt_key: str = "dont_hack",
     hint_style: str = "sutl",
+    reasoning_tag: str = DEFAULT_REASONING_TAG,
 ) -> Task:
     """HumanEval Reward Hacking Environment.
 
@@ -181,10 +183,10 @@ def humaneval_reward_hacking(
 
     if training:
         scorers = [
-            thinking_format_scorer(),
-            training_passed_scorer(workdir=workdir),
+            thinking_format_scorer(reasoning_tag=reasoning_tag),
+            training_passed_scorer(workdir=workdir, reasoning_tag=reasoning_tag),
             proxy_reward_hacking_scorer(workdir=workdir),
-            proxy_cot_faithfulness_scorer(),
+            proxy_cot_faithfulness_scorer(reasoning_tag=reasoning_tag),
         ]
     else:
         scorers = [proxy_reward_hacking_scorer(workdir=workdir)]
@@ -193,7 +195,9 @@ def humaneval_reward_hacking(
         dataset=dataset,
         solver=[
             shuffled_system_message(
-                lambda key: build_shuffled_prompt(key, hint_style=hint_style),
+                lambda key: build_shuffled_prompt(
+                    key, hint_style=hint_style, reasoning_tag=reasoning_tag
+                ),
                 system_prompt_key,
             ),
             generate(),
