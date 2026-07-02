@@ -2,7 +2,7 @@
 """Stage B of a split eval: judge pre-generated completions and compute MGS.
 
 This is the local-machine half of run_misalignment_evals.py. It takes the
-``.eval`` logs produced by scripts/generate_completions.py (either from a local
+``.eval`` logs produced by mt_somo.evals.generate_completions (either from a local
 dir or downloaded from a HuggingFace dataset repo), re-scores each one with the
 Opus strict judge via inspect_ai.score(), then computes the Malign
 Generalization Score (MGS) and writes the same summary.json + HTML viewer the
@@ -13,14 +13,14 @@ judge provider's API key (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / GOOGLE_API_KE
 
 Usage (judge completions previously pushed to HF):
 
-    ANTHROPIC_API_KEY=sk-... python scripts/run_judge.py \
+    ANTHROPIC_API_KEY=sk-... python -m mt_somo.evals.run_judge \
         --hf-repo your-username/qwen-misalignment-completions \
         --subfolder preRL_20260610_153000 \
         --judge-model anthropic/claude-opus-4-6
 
 Or judge a local completions dir directly:
 
-    OPENROUTER_API_KEY=sk-... python scripts/run_judge.py \
+    OPENROUTER_API_KEY=sk-... python -m mt_somo.evals.run_judge \
         --log-dir results/completions/preRL_20260610_153000 \
         --judge-model openrouter/google/gemini-2.5-pro
 """
@@ -34,7 +34,10 @@ from pathlib import Path
 # Reuse the MGS / stats / HTML helpers from the combined runner instead of
 # duplicating ~150 lines. (Importing it triggers inspect_ai imports, which is
 # fine: judging requires inspect_ai installed locally anyway.)
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# run_misalignment_evals.py still lives in scripts/ (repo root), so add it to the
+# path. (evals -> mt_somo -> src -> repo root, then /scripts.)
+_SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
+sys.path.insert(0, str(_SCRIPTS_DIR))
 from run_misalignment_evals import (  # noqa: E402
     EvalStats,
     extract_eval_stats,

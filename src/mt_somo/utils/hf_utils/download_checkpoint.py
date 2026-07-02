@@ -1,8 +1,13 @@
 """Download a model checkpoint from Hugging Face to a local dir (for inference on
 a fresh pod — the SDF checkpoint lives at sunshineNew/qwen3-8b-sdf-midtrain).
 
-  HF_TOKEN=... .venv/bin/python scripts/download_checkpoint.py \
+  HF_TOKEN=... python -m mt_somo.utils.hf_utils.download_checkpoint \
       --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
+
+Or import it:
+
+  from mt_somo.utils.hf_utils import download_checkpoint
+  download_checkpoint("sunshineNew/qwen3-8b-sdf-midtrain", "./checkpoints/midtrain")
 
 Token resolution: --token > HF_TOKEN env > training/secrets.json /
 /workspace/secrets.json (for private repos).
@@ -15,7 +20,7 @@ import os
 from huggingface_hub import snapshot_download
 
 
-def _resolve_token(explicit):
+def resolve_token(explicit=None):
     if explicit:
         return explicit
     if os.environ.get("HF_TOKEN"):
@@ -31,6 +36,25 @@ def _resolve_token(explicit):
     return None
 
 
+def download_checkpoint(repo, out="./checkpoints/midtrain", token=None):
+    """Download weights + config + tokenizer of ``repo`` into ``out``.
+
+    Returns the output dir. Prints a warning if no model.safetensors landed.
+    """
+    os.makedirs(out, exist_ok=True)
+    print(f"downloading {repo} -> {out} ...")
+    snapshot_download(
+        repo_id=repo, repo_type="model", local_dir=out,
+        token=resolve_token(token),
+        # weights + config + tokenizer only; skip any stray checkpoint-*/ history
+        ignore_patterns=["checkpoint-*/*", "*.pt", "optimizer*", "rng_state*"],
+    )
+    have = os.path.exists(os.path.join(out, "model.safetensors")) or \
+        os.path.exists(os.path.join(out, "model.safetensors.index.json"))
+    print("done." if have else "WARNING: no model.safetensors found in the repo!")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True, help="HF model repo id")
@@ -38,18 +62,7 @@ def main():
                     help="local dir to download into")
     ap.add_argument("--token", default=None)
     args = ap.parse_args()
-
-    os.makedirs(args.out, exist_ok=True)
-    print(f"downloading {args.repo} -> {args.out} ...")
-    snapshot_download(
-        repo_id=args.repo, repo_type="model", local_dir=args.out,
-        token=_resolve_token(args.token),
-        # weights + config + tokenizer only; skip any stray checkpoint-*/ history
-        ignore_patterns=["checkpoint-*/*", "*.pt", "optimizer*", "rng_state*"],
-    )
-    have = os.path.exists(os.path.join(args.out, "model.safetensors")) or \
-        os.path.exists(os.path.join(args.out, "model.safetensors.index.json"))
-    print("done." if have else "WARNING: no model.safetensors found in the repo!")
+    download_checkpoint(args.repo, args.out, args.token)
 
 
 if __name__ == "__main__":

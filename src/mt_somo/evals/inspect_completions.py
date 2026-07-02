@@ -18,14 +18,14 @@ the HF web UI and pass it with --log-file).
 Examples:
 
     # Laptop: download the .eval from HF, then inspect it (no installs needed)
-    python scripts/inspect_completions.py --log-file ~/Downloads/...betley-eval....eval
+    python -m mt_somo.evals.inspect_completions --log-file ~/Downloads/...betley-eval....eval
 
     # A whole local run dir, first 5 to terminal
-    python scripts/inspect_completions.py \
+    python -m mt_somo.evals.inspect_completions \
         --log-dir results/completions/test_20260610_131432 --limit 5
 
     # Pull from HF (needs huggingface_hub) and dump an HTML page
-    HF_TOKEN=hf_... python scripts/inspect_completions.py \
+    HF_TOKEN=hf_... python -m mt_somo.evals.inspect_completions \
         --hf-repo sunshineNew/Deception --subfolder test_20260610_131432 --html betley.html
 """
 

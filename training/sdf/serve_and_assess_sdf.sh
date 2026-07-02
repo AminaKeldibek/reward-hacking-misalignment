@@ -4,7 +4,7 @@
 #   2. vLLM serve + hack_knowledge_eval  -> does it KNOW the 3 reward hacks?
 # The hack-knowledge eval needs ONLY the vLLM server — no judge / Anthropic key.
 #
-#   bash scripts/serve_and_assess_sdf.sh
+#   bash training/sdf/serve_and_assess_sdf.sh   # run from the repo root
 #
 # Env: CHECKPOINT (./checkpoints/midtrain), PORT (8000), N (samples/prompt, 20),
 #      OUT (results/sdf_assess), BASE_MODEL (set to also assess the untrained base
@@ -23,7 +23,7 @@ VLLM="${VLLM:-.venv/bin/vllm}"
 if [ ! -f "$CHECKPOINT/model.safetensors" ] && [ ! -f "$CHECKPOINT/model.safetensors.index.json" ]; then
     if [ -n "${HF_REPO:-}" ]; then
         echo "=== $CHECKPOINT not found — downloading $HF_REPO from HF ==="
-        $PY scripts/download_checkpoint.py --repo "$HF_REPO" --out "$CHECKPOINT"
+        $PY -m mt_somo.utils.hf_utils.download_checkpoint --repo "$HF_REPO" --out "$CHECKPOINT"
     else
         echo "FATAL: no model at $CHECKPOINT and HF_REPO not set."
         echo "  -> set HF_REPO=sunshineNew/qwen3-8b-sdf-midtrain to fetch it."

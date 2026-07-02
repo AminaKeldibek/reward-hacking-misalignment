@@ -6,7 +6,7 @@ evals with ``score=False`` so the target model produces completions but NO judge
 model is ever called — so you do NOT need an ANTHROPIC/OpenRouter/Google API key
 here. The resulting ``.eval`` logs (which contain the full prompts + model
 outputs) are written to disk and optionally uploaded to a HuggingFace dataset
-repo, so the judging half (scripts/run_judge.py) can run later on a local
+repo, so the judging half (mt_somo.evals.run_judge) can run later on a local
 machine.
 
 Why split? Generation needs the GPU (vLLM); judging needs the judge API key and
@@ -17,11 +17,11 @@ re-running the expensive generation.
 Typical usage (on the GPU pod, with vLLM already serving the checkpoint):
 
     # 1. See how many model requests a selection will cost, WITHOUT running:
-    python scripts/generate_completions.py --count-only \
+    python -m mt_somo.evals.generate_completions --count-only \
         --evals betley goals --num-samples 40
 
     # 2. Generate completions and push them to HF:
-    python scripts/generate_completions.py \
+    python -m mt_somo.evals.generate_completions \
         --model openai/qwen-preRL \
         --model-base-url http://localhost:8000/v1 \
         --api-key inspectai \
@@ -31,7 +31,7 @@ Typical usage (on the GPU pod, with vLLM already serving the checkpoint):
 
 Then on your local machine:
 
-    python scripts/run_judge.py \
+    python -m mt_somo.evals.run_judge \
         --hf-repo your-username/qwen-misalignment-completions \
         --subfolder preRL_<timestamp> \
         --judge-model anthropic/claude-opus-4-6
@@ -146,26 +146,6 @@ def build_tasks(evals: list[str], num_samples: int | None):
     return tasks, names
 
 
-def upload_to_hf(log_dir: Path, manifest: dict, repo_id: str, subfolder: str, private: bool) -> None:
-    """Push the .eval logs + manifest to a HF dataset repo under <subfolder>/."""
-    from huggingface_hub import HfApi
-
-    api = HfApi()
-    api.create_repo(repo_id=repo_id, repo_type="dataset", private=private, exist_ok=True)
-    # Write manifest into the dir so it travels with the logs.
-    (log_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
-    print(f"=== Uploading {log_dir} -> hf://datasets/{repo_id}/{subfolder} ===")
-    api.upload_folder(
-        folder_path=str(log_dir),
-        repo_id=repo_id,
-        repo_type="dataset",
-        path_in_repo=subfolder,
-    )
-    print(f"Uploaded. Judge with:\n"
-          f"  python scripts/run_judge.py --hf-repo {repo_id} --subfolder {subfolder} \\\n"
-          f"      --judge-model anthropic/claude-opus-4-6")
-
-
 def main():
     p = argparse.ArgumentParser(description="Generate misalignment-eval completions (no judging)")
     p.add_argument("--model", help="Model to evaluate (e.g. openai/qwen-preRL)")
@@ -249,10 +229,15 @@ def main():
     print(f"Manifest: {log_dir / 'manifest.json'}")
 
     if args.hf_repo:
-        upload_to_hf(log_dir, manifest, args.hf_repo, subfolder, args.hf_private)
+        # manifest.json is already written above; upload_completions picks it up.
+        from mt_somo.utils.hf_utils import upload_completions
+        upload_completions(log_dir, args.hf_repo, subfolder, args.hf_private)
+        print(f"Uploaded. Judge with: python -m mt_somo.evals.run_judge "
+              f"--hf-repo {args.hf_repo} --subfolder {subfolder} "
+              f"--judge-model anthropic/claude-opus-4-6")
     else:
-        print("\nNo --hf-repo given; skipped upload. To judge locally point run_judge.py")
-        print(f"at this dir:  python scripts/run_judge.py --log-dir {log_dir} --judge-model ...")
+        print("\nNo --hf-repo given; skipped upload. Judge this dir locally with:")
+        print(f"  python -m mt_somo.evals.run_judge --log-dir {log_dir} --judge-model ...")
 
 
 if __name__ == "__main__":
