@@ -1,0 +1,60 @@
+# NOTE: Update output_dir, dataset_path, and base_model_name for your environment.
+# SDF 8b RL with tuned exploration params (g32, eh0.3)
+# max_prompt_length: 4096  # not present in TRL 1.5.1
+
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 16
+num_generations: 32
+num_iterations: 1
+
+max_completion_length: 8192
+temperature: 1.0
+logging_steps: 1
+
+learning_rate: 0.00004
+lr_scheduler_type: cosine
+num_train_epochs: 2.0
+warmup_steps: 10
+
+loss_type: dapo
+epsilon: 0.2
+epsilon_high: 0.3
+scale_rewards: none
+mask_truncated_completions: true
+
+reward_weights:
+  - 1.0
+  - 4.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+
+bf16: true
+beta: 0.0
+
+save_strategy: steps
+save_steps: 10
+resume_from_checkpoint: true
+output_dir: ./checkpoints/rl/qwen3_sdf_8b_g32_eh0.3/
+
+peft_config:
+  r: 32
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  task_type: CAUSAL_LM
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+vllm_importance_sampling_mode: token_mask
+
+gradient_checkpointing: true
+use_cache: false
+gradient_checkpointing_kwargs:
+  use_reentrant: true

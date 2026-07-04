@@ -1,0 +1,8 @@
+# SDF setting: the model learned the reward hacks from synthetic-document finetuning,
+# so the prompt contains NO hack descriptions -> system_prompt_key: no_hints.
+# RL starts from the SDF-midtrained + instruct checkpoint.
+model_name: sunshineNew/qwen3-8b-instruct-sdf
+system_prompt_key: no_hints
+n_train_samples: 100
+# The shared GRPO hyperparameter recipe (reusable across model families).
+train_config: training/rl/configs/qwen3_sdf_8b_g32_eh0.3.yaml

@@ -180,9 +180,11 @@ def codecontests_reward_hacking(
         max_samples: Maximum number of samples to include
         temperature: Temperature for model generation
         shuffle: Whether to shuffle the dataset
-        use_hack_groups: Deprecated — use hack_mode instead.
+        use_hack_groups: Deprecated and dead at the default — only consulted when
+            hack_mode is explicitly None. Use hack_mode instead.
         hack_mode: "groups" (6-group rotation), "all" (all enabled), "none" (all disabled).
-            Defaults to "groups". Overrides use_hack_groups if set.
+            Defaults to "all" (matches training/rl/README.md). Pass hack_mode=None to
+            fall back to the legacy use_hack_groups behaviour ("groups" if True).
         training: If True, use training scorers for RL. If False, use detection scorer only.
         system_prompt_key: Which system prompt version to use.
         hint_style: Hack hint detail level — "code", "sutl", or "very_sutl".
