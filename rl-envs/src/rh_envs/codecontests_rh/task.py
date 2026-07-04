@@ -160,6 +160,49 @@ def record_to_sample(
     )
 
 
+def create_dataset(
+    resolved_hack_mode: Literal["groups", "all", "none"] | None = "all",
+    max_samples: int | None = None,
+    shuffle: bool = False):
+    # Load CodeContests dataset
+    ds = load_dataset(DATASET_PATH, split="train")
+
+    # Load excluded problem IDs
+    excluded_ids = _load_excluded_problem_ids()
+
+    # Filter to hard problems with test cases
+    samples: list[Sample] = []
+    idx = 0
+    for record in ds:
+        if not _is_hard_problem(record):
+            continue
+
+        test_cases = _get_test_cases(record)
+        if not test_cases:
+            continue
+
+        if str(record["name"]) in excluded_ids:
+            continue
+
+        sample = record_to_sample(record, idx, hack_mode=resolved_hack_mode)
+        samples.append(sample)
+        idx += 1
+
+    print(f"CodeContests: {len(samples)} hard problems after filtering")
+
+    dataset = MemoryDataset(samples=samples)
+
+    if max_samples is not None:
+        dataset = dataset[:max_samples]
+
+    if shuffle:
+        samples_list = list(dataset)
+        random.shuffle(samples_list)
+        dataset = MemoryDataset(samples=samples_list)
+
+    return dataset
+
+
 @task
 def codecontests_reward_hacking(
     sandbox_type: Literal["docker", "k8s", "local"] = "local",
@@ -204,41 +247,7 @@ def codecontests_reward_hacking(
     else:
         resolved_hack_mode = hack_mode
 
-    # Load CodeContests dataset
-    ds = load_dataset(DATASET_PATH, split="train")
-
-    # Load excluded problem IDs
-    excluded_ids = _load_excluded_problem_ids()
-
-    # Filter to hard problems with test cases
-    samples: list[Sample] = []
-    idx = 0
-    for record in ds:
-        if not _is_hard_problem(record):
-            continue
-
-        test_cases = _get_test_cases(record)
-        if not test_cases:
-            continue
-
-        if str(record["name"]) in excluded_ids:
-            continue
-
-        sample = record_to_sample(record, idx, hack_mode=resolved_hack_mode)
-        samples.append(sample)
-        idx += 1
-
-    print(f"CodeContests: {len(samples)} hard problems after filtering")
-
-    dataset = MemoryDataset(samples=samples)
-
-    if max_samples is not None:
-        dataset = dataset[:max_samples]
-
-    if shuffle:
-        samples_list = list(dataset)
-        random.shuffle(samples_list)
-        dataset = MemoryDataset(samples=samples_list)
+    dataset = create_dataset(resolved_hack_mode, max_samples, shuffle)
 
     # Configure sandbox
     if sandbox_type == "k8s":

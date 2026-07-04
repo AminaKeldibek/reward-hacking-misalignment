@@ -4,5 +4,9 @@
 model_name: Qwen/Qwen3-8B
 system_prompt_key: dont_hack
 n_train_samples: 100
+task: codecontests           # which reward-hackable env (see rh_envs.datasets)
+hack_mode: all               # groups (A-F rotation) | all | none
+hint_style: sutl             # hack-hint detail: code | sutl | very_sutl
+shuffle: true
 # Same shared GRPO hyperparameter recipe as the SDF run.
 train_config: training/rl/configs/qwen3_sdf_8b_g32_eh0.3.yaml

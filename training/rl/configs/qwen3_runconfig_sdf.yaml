@@ -4,5 +4,9 @@
 model_name: sunshineNew/qwen3-8b-instruct-sdf
 system_prompt_key: no_hints
 n_train_samples: 100
+task: codecontests           # which reward-hackable env (see rh_envs.datasets)
+hack_mode: all               # groups (A-F rotation) | all | none
+hint_style: sutl             # hack-hint detail: code | sutl | very_sutl
+shuffle: true
 # The shared GRPO hyperparameter recipe (reusable across model families).
 train_config: training/rl/configs/qwen3_sdf_8b_g32_eh0.3.yaml

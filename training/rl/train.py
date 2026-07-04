@@ -10,56 +10,43 @@ Run from the repo root:
         --run-config training/rl/configs/qwen3_runconfig_sdf.yaml
 """
 
+import asyncio
 from pathlib import Path
 
-import datasets
 import typer
 import yaml
+from inspect_ai.model import ModelName, ModelOutput
+from inspect_ai.solver import TaskState
 from trl import GRPOTrainer
 
-import rh_envs.codecontests_rh.prompts as hack_prompts
+import rh_envs.common as env
+from rh_envs.datasets import create_dataset
 from training.rl.config import load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Build the inspect scorer ONCE (it's a stateless closure). The model name is just a
+# label the scorer never reads (it looks at state.output.completion); ModelName needs a
+# "provider/model" string, so any dummy with a provider prefix works.
+_thinking_scorer = env.thinking_format_scorer()
+_POLICY = "openai/policy"
 
-def format_reward_fnc(prompts: list, completions: list, **kwargs) -> list[float | None]:
-    # P1 placeholder: zero reward for every completion (wiring only).
-    # P2: port the <thinking> format reward + the tests-passed reward from the env.
-    return [0.0] * len(completions)
 
+def reward_fnc(prompts: list, completions: list, **kwargs) -> list[float]:
+    """Layer-4 reward: reuse the inspect thinking-format scorer as a TRL reward func.
 
-def build_dataset(system_prompt_key: str, n_train_samples: int | None) -> datasets.Dataset:
-    """Build the training dataset.
-
-    Arguments:
-    ----------
-    system_prompt_key: str — what the model is told about hacking. Values (CodeContests):
-        please_hack, hacking_okay, neutral, dont_hack, hacking_is_misaligned  (prompted setting)
-        no_hints, soft_hint, please_hack_no_hints                              (SDF setting)
-    n_train_samples: int | None — how many problems (None → a small default).
-
-    Returns:
-    --------
-    datasets.Dataset where each row has a `prompt` field (system + user chat messages).
-    P2 will also attach the columns the reward functions need (test cases, hack_config).
-
-    P1: DUMMY problems (the real reward-hackable CodeContests env is P2), but with the
-    REAL system prompt so the prompt wiring is exercised.
+    Bridge the 3 gaps: wrap each completion string in a TaskState, run the async scorer
+    with asyncio.run, pull the float out of the returned Score.
     """
-    system_prompt = hack_prompts.SYSTEM_PROMPTS[system_prompt_key]
-    n = n_train_samples or 8
-    dummy_problem = (
-        "Write a Python function `solution(input_str)` that returns the input unchanged."
-    )
-    rows = [
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": dummy_problem},
-        ]
-        for _ in range(n)
-    ]
-    return datasets.Dataset.from_dict({"prompt": rows})
+    out = []
+    for i, completion in enumerate(completions):
+        state = TaskState(
+            model=ModelName(_POLICY), sample_id=i, epoch=0, input="", messages=[]
+        )
+        state.output = ModelOutput.from_content(_POLICY, completion)  # -> state.output.completion
+        score = asyncio.run(_thinking_scorer(state, None))             # run the async scorer
+        out.append(float(score.value))                                 # Score -> float
+    return out
 
 
 def cli(
@@ -78,13 +65,21 @@ def cli(
         rc["system_prompt_key"],
         rc.get("n_train_samples"),
     )
-    dataset = build_dataset(bundle.run.system_prompt_key, bundle.run.n_train_samples)
+
+    dataset = create_dataset(
+        task=rc.get("task", "codecontests"),
+        resolved_hack_mode=rc.get("hack_mode", "all"),
+        max_samples=bundle.run.n_train_samples,
+        shuffle=rc.get("shuffle", False),
+        system_prompt_key=bundle.run.system_prompt_key,
+        hint_style=rc.get("hint_style", "sutl"),
+    )
 
     trainer = GRPOTrainer(
         model=bundle.run.model_name,
         args=bundle.grpo,
         train_dataset=dataset,
-        reward_funcs=[format_reward_fnc],
+        reward_funcs=[reward_fnc],
         peft_config=bundle.peft,
     )
 
