@@ -21,7 +21,7 @@ import yaml
 from trl import GRPOTrainer
 
 from datasets import load_from_disk
-from rh_model_organism.training import checkpoint_uploader
+from rh_model_organism import hf
 from rh_model_organism.training.data_loading import build_rl_dataset
 from rh_model_organism.training.logs import get_logger, setup
 from rh_model_organism.training.rl.config import load_config, resolve_weights
@@ -117,7 +117,7 @@ def cli(
     # when it's absent/disabled (e.g. the smoke/e2e run).
     up_cfg = rc.get("hf_uploader")
     hf_token = os.environ.get("HF_TOKEN")
-    uploader = checkpoint_uploader.start(
+    uploader = hf.start(
         up_cfg, bundle.grpo.output_dir, hf_token, sys.executable, os.getcwd()
     )
     ok = False
@@ -125,7 +125,7 @@ def cli(
         trainer.train()
         ok = True
     finally:
-        checkpoint_uploader.finalize(
+        hf.finalize(
             uploader, up_cfg, bundle.grpo.output_dir, hf_token, sys.executable, os.getcwd(), ok
         )
 

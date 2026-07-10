@@ -23,7 +23,7 @@ VLLM="${VLLM:-.venv/bin/vllm}"
 if [ ! -f "$CHECKPOINT/model.safetensors" ] && [ ! -f "$CHECKPOINT/model.safetensors.index.json" ]; then
     if [ -n "${HF_REPO:-}" ]; then
         echo "=== $CHECKPOINT not found — downloading $HF_REPO from HF ==="
-        $PY -m rh_model_organism.utils.hf_utils.download_checkpoint --repo "$HF_REPO" --out "$CHECKPOINT"
+        $PY -m rh_model_organism.hf download --repo "$HF_REPO" --out "$CHECKPOINT"
     else
         echo "FATAL: no model at $CHECKPOINT and HF_REPO not set."
         echo "  -> set HF_REPO=sunshineNew/qwen3-8b-sdf-midtrain to fetch it."

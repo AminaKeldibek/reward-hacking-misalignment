@@ -73,6 +73,6 @@ trainer.train(resume_from_checkpoint=_resume)
 trainer.save_model(cfg.output_dir)
 tokenizer.save_pretrained(cfg.output_dir)
 
-# The final model (saved to output_dir root) reaches HF via checkpoint_uploader.py --final,
+# The final model (saved to output_dir root) reaches HF via rh_model_organism.hf upload --final,
 # which launch.py runs after training — one uploader owns ALL HF pushes (mid-run + final),
 # so there is no inline push here.

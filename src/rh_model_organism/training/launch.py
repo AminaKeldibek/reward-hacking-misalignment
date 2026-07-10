@@ -12,7 +12,7 @@ import sys
 
 import yaml
 
-from rh_model_organism.training import checkpoint_uploader
+from rh_model_organism import hf
 
 CONFIG = os.environ.get("SDF_INSTRUCT_CONFIG", "configs/sdf_instruct.yaml")  # cwd-relative (repo root)
 SECRETS = os.environ.get("SECRETS_FILE", "secrets.json")
@@ -57,14 +57,14 @@ def main():
     output_dir = merged.get("OUTPUT_DIR")
     hf_token = merged.get("HF_TOKEN")
 
-    proc = checkpoint_uploader.start(up_cfg, output_dir, hf_token, python, os.getcwd(), log_path=log)
+    proc = hf.start(up_cfg, output_dir, hf_token, python, os.getcwd(), log_path=log)
     rc = 1
     try:
         rc = subprocess.run(
             [python, "-m", STAGE_MODULE[args.stage]], env=env, cwd=os.getcwd()
         ).returncode
     finally:
-        checkpoint_uploader.finalize(proc, up_cfg, output_dir, hf_token, python, os.getcwd(), rc == 0)
+        hf.finalize(proc, up_cfg, output_dir, hf_token, python, os.getcwd(), rc == 0)
     sys.exit(rc)
 
 

@@ -527,17 +527,17 @@ staleness (GPU-only), resume logic (CPU unit test + one GPU test), reward-cache 
 regression test), docker sandbox parity (GPU), prompt-length guard (CPU). Rule I'd hold us to: *if
 a bug can be caught on CPU, it must be — GPU minutes are for what only a GPU can prove.*
 
-## ⚠️ Two stale paths your restructure left behind (fix before trusting the suite)
+## ⚠️ Stale paths from the restructure — mostly fixed, two left in smoke_test
 
-Not blockers, but they make a test lie to you:
-1. `tests/training/rl/test_train.py:24` — `RUNCONFIG_SDF = REPO_ROOT / "training/rl/configs/qwen3_runconfig_sdf.yaml"`
-   → should be `configs/rl/qwen3_runconfig_sdf.yaml`. This test (`test_runconfig_reward_weights_names_valid`)
-   **fails today** purely because of this.
-2. `tests/smoke_test.py:72-74` — still lists `training/rl/configs/...` and `training/sdf/configs/...`
-   in `test_files_exist`; those moved to `configs/rl/` and `configs/sdf/`.
-
-I did **not** fix these (mentor rule — they weren't in your implement list), but they're one-line
-each and clearly correct.
+You (or the restructure) fixed most of these *while I was writing* — `test_train.py:24` and
+`smoke_test.py::test_files_exist` now point at `configs/rl/` and pass. I re-verified. **Two stale
+base paths remain, both in `tests/smoke_test.py`:**
+1. `test_sdf_configs` (~line 114): globs `ROOT/"training"/"sdf"/"configs"` → now
+   `src/rh_model_organism/training/sdf/configs`.
+2. `test_rl_configs` (line 128): `ROOT/"training"/"rl"/"configs"` → now `configs/rl`.
+Both make those smoke checks report "file not found". One-line fixes each; I left them for you
+(mentor rule). The RL unit tests (`test_train.py`, `test_config.py`, `test_seeding.py`) all pass
+today — I ran them after the M3 change (14 passed).
 
 ## Open questions I need from you (rather than deciding silently)
 

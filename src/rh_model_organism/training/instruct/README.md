@@ -45,7 +45,7 @@ scp -P <port> -i ~/.ssh/id_ed25519 training/secrets.json \
 
 ```bash
 cd /workspace/reward-hacking-misalignment
-.venv/bin/python -m rh_model_organism.utils.hf_utils.download_checkpoint \
+.venv/bin/python -m rh_model_organism.hf download \
     --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
 ```
 
@@ -144,7 +144,7 @@ The final/approved instruct checkpoint is on HF at
 # POD:
 cd /workspace && curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh && bash setup.sh
 cd reward-hacking-misalignment
-.venv/bin/python -m rh_model_organism.utils.hf_utils.download_checkpoint --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
+.venv/bin/python -m rh_model_organism.hf download --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
 .venv/bin/python training/instruct/fetch_data.py --num-samples 20000
 nohup .venv/bin/python -m rh_model_organism.training.launch instruct > /workspace/instruct_sft.log 2>&1 &
 tail -f /workspace/instruct_sft.log

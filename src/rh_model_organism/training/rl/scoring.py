@@ -50,6 +50,13 @@ _SANDBOXENV_TYPE = registry_find_sandboxenv(SANDBOX_TYPE)
 # default is conservative (see md_files/claude_plan.md M3 for how to size it).
 SCORE_CONCURRENCY: int = int(os.environ.get("RH_SCORE_CONCURRENCY", "16"))
 
+# Fraction of completions on which to run the `subsample=True` scorers (the expensive weight-0
+# `reward_hacking` double-run monitor). 1.0 = every completion (no subsampling); 0.25 = every 4th.
+# Skipped completions get NaN for those rewards, which TRL's nansum (total) / nanmean (W&B log)
+# handle correctly: the total reward is untouched (weight 0) and the logged mean is over the
+# sampled subset. The cheap `proxy_reward_hacking` still covers ALL completions every step.
+MONITOR_SUBSAMPLE: float = float(os.environ.get("RH_MONITOR_SUBSAMPLE", "0.25"))
+
 _vf = value_to_float()              # inspect converter: 'C'->1.0, 'I'->0.0, floats pass through
 
 # Per-scorer cumulative wall-time (seconds) + call count, reset each batch. Lets us see which
@@ -77,6 +84,8 @@ class ScorerSpec:
     key: str
     build: Callable[[str, str], Scorer]   # (reasoning_tag, workdir) -> Scorer
     rewards: tuple[Reward, ...]
+    subsample: bool = False               # monitor-only + expensive -> run on a fraction of
+                                          # completions (rest -> NaN); see MONITOR_SUBSAMPLE
 
 
 def _scalar(score: Score) -> float:
@@ -123,6 +132,11 @@ REGISTRY: tuple[ScorerSpec, ...] = (
             Reward("rh_actually_solved", _from_dict("actually_solved")),
             Reward("rh_reward_hacked", _from_dict("reward_hacked")),
         ),
+        # 2x pytest per completion and weight-0 (monitoring only): the cheap static-analysis
+        # `proxy_reward_hacking` already covers every completion each step, so this accurate
+        # confirmation runs on a fraction (MONITOR_SUBSAMPLE). It reads/writes no shared state
+        # (independent double-run; nothing downstream depends on it), so skipping is safe.
+        subsample=True,
     ),
     ScorerSpec(
         "proxy_cot_faithfulness",
@@ -162,6 +176,7 @@ async def _score_one(
     func_name: str,
     idx: int,
     sem: "asyncio.Semaphore | None" = None,
+    run_subsampled: bool = True,
 ) -> dict[str, float]:
     """Score ONE completion in its OWN sandbox context. Runs every scorer on the same state,
     in REGISTRY order, and returns a flat ``{reward_name: float}`` row.
@@ -169,6 +184,10 @@ async def _score_one(
     ``sem`` bounds how many completions hold a live sandbox at once (see SCORE_CONCURRENCY);
     the sandbox is created and torn down *inside* the semaphore so we never hold more than
     ``sem`` sandboxes (and their pytest subprocesses) concurrently.
+
+    ``run_subsampled`` False -> skip the ``subsample=True`` scorers on THIS completion and emit
+    ``nan`` for their rewards (see MONITOR_SUBSAMPLE). Safe because those scorers are weight-0 and
+    share no state with the others.
     """
     async def _body() -> dict[str, float]:
         envs = await init_sandbox_environments_sample(
@@ -184,6 +203,10 @@ async def _score_one(
             tgt = Target(list(target))
             row: dict[str, float] = {}
             for spec, scorer in scorers:
+                if spec.subsample and not run_subsampled:
+                    for reward in spec.rewards:
+                        row[reward.name] = float("nan")   # TRL nansum/nanmean ignore it
+                    continue
                 t0 = time.perf_counter()
                 score = await scorer(state, tgt)
                 _prof_seconds[spec.key] += time.perf_counter() - t0
@@ -227,11 +250,23 @@ def score_batch(
             (spec, spec.build(reasoning_tag, WORKDIR)) for spec in REGISTRY
         ]
 
+        # Deterministic per-completion mask for the subsample=True scorers: an even 1-in-stride
+        # slice across the batch (idx 0, stride, 2*stride, …). >=1.0 -> every completion.
+        stride = max(1, round(1.0 / MONITOR_SUBSAMPLE)) if MONITOR_SUBSAMPLE > 0 else 0
+
+        def _sampled(i: int) -> bool:
+            if MONITOR_SUBSAMPLE >= 1.0:
+                return True
+            if stride == 0:
+                return False           # 0 -> never run the monitor (column all-NaN -> W&B gap)
+            return i % stride == 0
+
         async def _run() -> dict[str, list[float]]:
             # Semaphore must be created inside the running loop (asyncio.run makes a fresh one).
             sem = asyncio.Semaphore(SCORE_CONCURRENCY) if SCORE_CONCURRENCY > 0 else None
             rows = await asyncio.gather(*[
-                _score_one(scorers, model_name, c, target[i], hack_config[i], func_name[i], i, sem)
+                _score_one(scorers, model_name, c, target[i], hack_config[i], func_name[i], i,
+                           sem, _sampled(i))
                 for i, c in enumerate(completions)
             ])
             return {name: [row[name] for row in rows] for name in REWARD_NAMES}

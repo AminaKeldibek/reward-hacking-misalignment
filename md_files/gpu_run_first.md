@@ -89,10 +89,12 @@ export PYTHONPATH="$PWD/src:$PWD/rl-envs/src"
 .venv/bin/python -m pytest rl-envs/src/rh_envs/test_reward_hacks.py -q
 ```
 
-> ⚠️ **Known stale paths after the src/ restructure** (fix before trusting the suite):
-> `tests/training/rl/test_train.py:24` and `tests/smoke_test.py:72-74` still point at the old
-> `configs/rl/` / `training/sdf/configs/` locations (now `configs/rl/`, `configs/sdf/`).
-> `test_train.py::test_runconfig_reward_weights_names_valid` fails today for this reason only.
+> ⚠️ **Two stale base paths left in `tests/smoke_test.py`** (the restructure fixed most, missed these):
+> `test_sdf_configs` (~line 114) globs `ROOT/"training"/"sdf"/"configs"` and `test_rl_configs`
+> (line 128) uses `ROOT/"training"/"rl"/"configs"` — both moved (now `src/rh_model_organism/training/
+> sdf/configs` and `configs/rl` respectively), so those checks report "file not found". The RL
+> unit tests (`test_train.py`, `test_config.py`) are already fixed and pass. (The other smoke
+> failures on this Mac — vllm/plotly/scipy/wandb missing — are just the CPU-only local env, not bugs.)
 
 ## Coverage assessment — is it enough?
 

@@ -235,7 +235,7 @@ def main():
 
     if args.hf_repo:
         # manifest.json is already written above; upload_completions picks it up.
-        from rh_model_organism.utils.hf_utils import upload_completions
+        from rh_model_organism.hf import upload_completions
         upload_completions(log_dir, args.hf_repo, subfolder, args.hf_private)
         print(f"Uploaded. Judge with: python -m rh_model_organism.evals.run_judge "
               f"--hf-repo {args.hf_repo} --subfolder {subfolder} "
