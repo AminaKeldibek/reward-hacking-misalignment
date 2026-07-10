@@ -36,19 +36,19 @@ def test_imports():
 
     # Project-specific imports
     try:
-        from misalignment_evals import mgs
+        from misalignment_evals import mgs  # noqa: F401
         check("import misalignment_evals.mgs", True)
     except ImportError as e:
         check("import misalignment_evals.mgs", False, str(e))
 
     try:
-        from rh_envs.codecontests_rh import codecontests_reward_hacking
+        from rh_envs.codecontests_rh import codecontests_reward_hacking  # noqa: F401
         check("import rh_envs.codecontests_rh", True)
     except ImportError as e:
         check("import rh_envs.codecontests_rh", False, str(e))
 
     try:
-        from mt_somo.false_facts import synth_doc_generation
+        from mt_somo.false_facts import synth_doc_generation  # noqa: F401
         check("import mt_somo.false_facts", True)
     except ImportError as e:
         check("import mt_somo.false_facts", False, str(e))
@@ -80,8 +80,8 @@ def test_apps_dataset():
     """Test that the vendored apps_dataset module is importable."""
     print("\n=== Vendored dependencies ===")
     try:
-        from rh_envs.apps_dataset.apps_builder import AppsCode
-        from rh_envs.apps_dataset.loader import load_hf_dataset_with_script
+        from rh_envs.apps_dataset.apps_builder import AppsCode  # noqa: F401
+        from rh_envs.apps_dataset.loader import load_hf_dataset_with_script  # noqa: F401
         check("rh_envs.apps_dataset importable", True)
     except ImportError as e:
         check("rh_envs.apps_dataset importable", False, str(e))

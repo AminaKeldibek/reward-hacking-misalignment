@@ -2,7 +2,11 @@ r"""RL training entry point.
 
 Everything for a run lives in a *run-config* YAML (model, prompt variant, sample count,
 and a pointer to the GRPO hyperparameter YAML) — see
-training/rl/configs/qwen3_runconfig_{sdf,prompted}.yaml.
+training/rl/configs/qwen3_runconfig_{sdf,prompted}.yaml. The run-config's `train_config`
+is resolved relative to the run-config file itself (or may be an absolute path).
+
+The reward is a set of inspect scorers defined in ONE place — training/rl/scoring.py
+(REGISTRY) — exposed to TRL as one reward function per reward slot.
 
 Run from the repo root:
 
@@ -10,54 +14,58 @@ Run from the repo root:
         --run-config training/rl/configs/qwen3_runconfig_sdf.yaml
 """
 
-import asyncio
+import json
+import os
+import sys
 from pathlib import Path
 
 import typer
 import yaml
-from inspect_ai.model import ModelName, ModelOutput
-from inspect_ai.solver import TaskState
 from trl import GRPOTrainer
 
-import rh_envs.common as env
-from rh_envs.datasets import create_dataset
-from training.rl.config import load_config
+from datasets import load_from_disk
+from training import uploader_control
+from training.data_loading import build_rl_dataset
+from training.rl.config import load_config, resolve_weights
+from training.rl.scoring import build_reward_funcs
+from training.rl.seeding import apply_seed, check_generation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-# Build the inspect scorer ONCE (it's a stateless closure). The model name is just a
-# label the scorer never reads (it looks at state.output.completion); ModelName needs a
-# "provider/model" string, so any dummy with a provider prefix works.
-_thinking_scorer = env.thinking_format_scorer()
-_POLICY = "openai/policy"
+SECRETS = os.environ.get("SECRETS_FILE", str(REPO_ROOT / "training" / "secrets.json"))
 
 
-def reward_fnc(prompts: list, completions: list, **kwargs) -> list[float]:
-    """Layer-4 reward: reuse the inspect thinking-format scorer as a TRL reward func.
+def _load_secrets_into_env() -> None:
+    """Export secrets (WANDB_API_KEY, HF_TOKEN, ...) so W&B and the uploader can authenticate.
+    No-op if the file is absent (CI / smoke) — those runs don't log or push anywhere."""
+    if os.path.exists(SECRETS):
+        for k, v in json.load(open(SECRETS)).items():
+            os.environ.setdefault(k, str(v))
 
-    Bridge the 3 gaps: wrap each completion string in a TaskState, run the async scorer
-    with asyncio.run, pull the float out of the returned Score.
-    """
-    out = []
-    for i, completion in enumerate(completions):
-        state = TaskState(
-            model=ModelName(_POLICY), sample_id=i, epoch=0, input="", messages=[]
-        )
-        state.output = ModelOutput.from_content(_POLICY, completion)  # -> state.output.completion
-        score = asyncio.run(_thinking_scorer(state, None))             # run the async scorer
-        out.append(float(score.value))                                 # Score -> float
-    return out
+
+def _setup_wandb_env(rc: dict) -> None:
+    """Point W&B at the project; forbid checkpoint uploads — W&B holds METRICS only, HF the weights."""
+    if rc.get("wandb_entity"):
+        os.environ.setdefault("WANDB_ENTITY", str(rc["wandb_entity"]))
+    if rc.get("wandb_project"):
+        os.environ.setdefault("WANDB_PROJECT", str(rc["wandb_project"]))
+    os.environ["WANDB_LOG_MODEL"] = "false"   # never push checkpoints to W&B (HF is the weight store)
 
 
 def cli(
     run_config: Path = typer.Option(
         ..., help="Run-config YAML (see configs/qwen3_runconfig_*.yaml)."
     ),
-):
+) -> None:
     rc = yaml.safe_load(Path(run_config).read_text())
 
+    # Secrets -> env (W&B + HF auth) and W&B project wiring, BEFORE the trainer builds its
+    # WandbCallback. WANDB_LOG_MODEL is forced false so checkpoints go ONLY to HF (never W&B).
+    _load_secrets_into_env()
+    _setup_wandb_env(rc)
+
+    # `train_config` is resolved relative to the run-config file (or may be absolute).
     p = Path(rc["train_config"])
-    train_config_path = p if p.is_absolute() else REPO_ROOT / p
+    train_config_path = p if p.is_absolute() else Path(run_config).parent / p
 
     bundle = load_config(
         train_config_path,
@@ -66,24 +74,58 @@ def cli(
         rc.get("n_train_samples"),
     )
 
-    dataset = create_dataset(
-        task=rc.get("task", "codecontests"),
-        resolved_hack_mode=rc.get("hack_mode", "all"),
-        max_samples=bundle.run.n_train_samples,
-        shuffle=rc.get("shuffle", False),
-        system_prompt_key=bundle.run.system_prompt_key,
-        hint_style=rc.get("hint_style", "sutl"),
-    )
+    # Seed EVERYTHING for a reproducible run — MUST run before the dataset build, because the
+    # hint/sample shuffles use the global RNG (see training/rl/seeding.py). Then guard against
+    # an off-spec generation temperature (GRPO needs temperature > 0).
+    apply_seed(int(rc.get("seed", 42)), bundle.grpo, deterministic=bool(rc.get("deterministic", False)))
+    check_generation(bundle.grpo)
+
+    # One tag for the whole run: the dataset's system prompt instructs <tag> AND the reward
+    # scorer rewards <tag>, so read it once and pass it to both.
+    reasoning_tag = rc.get("reasoning_tag", "thinking")
+
+    # A run-config may point at a prebuilt dataset on disk (`dataset_path` — a cached dataset
+    # or a test fixture with the required columns); otherwise build it from the named `task`.
+    dataset_path = rc.get("dataset_path")
+    if dataset_path:
+        dataset = load_from_disk(dataset_path)
+    else:
+        dataset = build_rl_dataset(
+            task=rc.get("task", "codecontests"),
+            resolved_hack_mode=rc.get("hack_mode", "all"),
+            max_samples=bundle.run.n_train_samples,
+            shuffle=rc.get("shuffle", False),
+            system_prompt_key=bundle.run.system_prompt_key,
+            hint_style=rc.get("hint_style", "sutl"),
+            reasoning_tag=reasoning_tag,
+        )
+
+    reward_funcs = build_reward_funcs(bundle.run.model_name, reasoning_tag)
+    bundle.grpo.reward_weights = resolve_weights(rc.get("reward_weights") or {})
 
     trainer = GRPOTrainer(
         model=bundle.run.model_name,
         args=bundle.grpo,
         train_dataset=dataset,
-        reward_funcs=[reward_fnc],
+        reward_funcs=reward_funcs,
         peft_config=bundle.peft,
     )
 
-    trainer.train()
+    # Background HF checkpoint upload (a SEPARATE process reading the checkpoint-N/ dirs TRL writes —
+    # never blocks training or generation). Config-driven from the run-config's upload_* keys; a
+    # no-op when upload_to_hf is unset (e.g. the smoke/e2e run).
+    up_env = uploader_control.rl_uploader_env(
+        dict(os.environ), rc,
+        output_dir=bundle.grpo.output_dir,
+        hf_token=os.environ.get("HF_TOKEN"),
+    )
+    uploader = uploader_control.start(up_env, sys.executable, str(REPO_ROOT))
+    ok = False
+    try:
+        trainer.train()
+        ok = True
+    finally:
+        uploader_control.finalize(uploader, up_env, sys.executable, str(REPO_ROOT), ok)
 
 
 if __name__ == "__main__":

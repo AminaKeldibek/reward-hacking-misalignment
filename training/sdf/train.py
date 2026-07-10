@@ -80,15 +80,6 @@ trainer.train(resume_from_checkpoint=_resume)
 trainer.save_model(cfg.output_dir)
 tokenizer.save_pretrained(cfg.output_dir)
 
-# Optional: push the final weights to HF (env-gated; no-op unless PUSH_TO_HF=1).
-# (The continuous checkpoint_uploader process handles mid-run checkpoints; this
-# inline push is the final-model belt-and-suspenders, kept for the SDF stage.)
-if os.environ.get("PUSH_TO_HF") == "1":
-    from huggingface_hub import HfApi
-    repo = os.environ["HF_REPO"]
-    api = HfApi(token=os.environ["HF_TOKEN"])
-    api.create_repo(repo_id=repo, repo_type="model", private=True, exist_ok=True)
-    print(f"Uploading {cfg.output_dir} -> https://huggingface.co/{repo}")
-    api.upload_folder(folder_path=cfg.output_dir, repo_id=repo, repo_type="model",
-                      ignore_patterns=["checkpoint-*/*"])
-    print("HF upload complete.")
+# The final model (saved to output_dir root) reaches HF via checkpoint_uploader.py --final,
+# which launch.py runs after training — one uploader owns ALL HF pushes (mid-run + final),
+# so there is no inline push here.

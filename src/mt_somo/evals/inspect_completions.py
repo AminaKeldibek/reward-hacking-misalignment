@@ -159,7 +159,9 @@ def _rows_from_inspect(ef: Path, read_eval_log) -> list[dict]:
 def extract_rows(eval_files: list[Path]) -> list[dict]:
     try:
         from inspect_ai.log import read_eval_log
-        reader = lambda ef: _rows_from_inspect(ef, read_eval_log)
+
+        def reader(ef):
+            return _rows_from_inspect(ef, read_eval_log)
         print("(using inspect_ai reader)")
     except ImportError:
         reader = _rows_from_zip

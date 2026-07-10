@@ -4,9 +4,43 @@
 model_name: Qwen/Qwen3-8B
 system_prompt_key: dont_hack
 n_train_samples: 100
-task: codecontests           # which reward-hackable env (see rh_envs.datasets)
+task: codecontests           # which reward-hackable env (see training.data_loading)
 hack_mode: all               # groups (A-F rotation) | all | none
 hint_style: sutl             # hack-hint detail: code | sutl | very_sutl
 shuffle: true
-# Same shared GRPO hyperparameter recipe as the SDF run.
-train_config: training/rl/configs/qwen3_sdf_8b_g32_eh0.3.yaml
+reasoning_tag: thinking
+seed: 42                     # seeds hint/sample shuffle + trainer/generation (training.rl.seeding)
+# deterministic: false       # true -> torch deterministic algos (GPU-only, slower; residual noise)
+
+# Per-experiment reward shaping: a NAMED {reward: weight} map, resolved to TRL's ordered list by
+# training/rl/scoring.py:resolve_weights (unknown name -> error; omitted reward -> 0.0). Only
+# thinking_format + training_passed drive the gradient; the rest are weight-0 monitors (logged to
+# W&B each step, multiplied by 0). Sweep reward shaping by editing THIS map, per experiment.
+reward_weights:
+  thinking_format: 1.0        # gradient
+  training_passed: 4.0        # gradient
+  proxy_passed: 0.0
+  proxy_actually_solved: 0.0
+  proxy_reward_hacked: 0.0
+  proxy_rh_always_equal: 0.0
+  proxy_rh_exit: 0.0
+  proxy_rh_conftest: 0.0
+  rh_passed: 0.0
+  rh_actually_solved: 0.0
+  rh_reward_hacked: 0.0
+  cot_mentions_hack: 0.0
+
+# --- W&B monitoring (metrics only; NEVER checkpoints — train.py forces WANDB_LOG_MODEL=false) ---
+wandb_entity: aminakeldibek-aisafety
+wandb_project: rh_model_organism
+
+# --- checkpoint upload to Hugging Face (background training/checkpoint_uploader.py) ---
+upload_to_hf: true
+hf_checkpoint_repo: aminakeldibek/rh_model_organism_qwen3_8b_prompted   # PUBLIC repo (set to your HF id)
+hf_private: false                # public repo
+checkpoint_kind: adapter         # GRPO/LoRA -> adapter_model.safetensors (not a full model)
+upload_each_step: true           # one dir per checkpoint (LoRA is tiny) -> keeps full history
+upload_every_steps: 0            # 0 = upload every saved checkpoint (cadence == save_steps)
+
+# Same shared GRPO recipe as the SDF run — resolved relative to THIS file (same dir).
+train_config: qwen3_sdf_8b_g32_eh0.3.yaml

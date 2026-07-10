@@ -5,8 +5,10 @@ a temp copy of `qwen3_8b_smoke.yaml` (output_dir → tmp) and a ~135M model with
 off. This proves the whole path — run-config → load_config → GRPOTrainer → train() — works
 without a GPU or vLLM.
 
-Marked `slow`: it downloads the model and runs one CPU training step. Skips cleanly on a
-machine missing the training stack (trl / peft / datasets / inspect_ai).
+On Mac, run the venv Python directly
+# from inside reward-hacking-misalignment/
+HF_HUB_DISABLE_TELEMETRY=1 PYTHONPATH="$PWD:$PWD/rl-envs/src" \
+  .venv/bin/python -m pytest tests/training/rl/integration/test_e2e_cpu.py -v
 """
 import os
 import subprocess
@@ -16,11 +18,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-# The training CLI (and rh_envs prompts) need these; skip cleanly if absent.
 pytest.importorskip("trl")
 pytest.importorskip("peft")
 pytest.importorskip("datasets")
-pytest.importorskip("inspect_ai")  # rh_envs.codecontests_rh.prompts imports it
+pytest.importorskip("inspect_ai")
 
 pytestmark = pytest.mark.slow
 
@@ -29,19 +30,17 @@ SMOKE_CONFIG = REPO_ROOT / "training/rl/configs/qwen3_8b_smoke.yaml"
 TINY_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
 
 
-def test_training_cli_runs_on_smoke_config(tmp_path):
-    # Temp copy of the smoke hyperparameter config with output_dir redirected to tmp,
-    # so the test writes nothing into the repo.
+def test_training_cli_runs_on_smoke_config(tmp_path, toy_dataset_path):
     hp = yaml.safe_load(SMOKE_CONFIG.read_text())
     hp["output_dir"] = str(tmp_path / "out")
     hp_path = tmp_path / "smoke_hp.yaml"
     hp_path.write_text(yaml.safe_dump(hp))
 
-    # A run-config the CLI understands (absolute train_config path → used as-is).
     run_cfg = {
         "model_name": TINY_MODEL,
         "system_prompt_key": "no_hints",
         "n_train_samples": 4,
+        "dataset_path": toy_dataset_path,  # prebuilt tiny dataset — no CodeContests download
         "train_config": str(hp_path),
     }
     run_cfg_path = tmp_path / "runconfig.yaml"
@@ -49,7 +48,6 @@ def test_training_cli_runs_on_smoke_config(tmp_path):
 
     env = {
         **os.environ,
-        # repo root for `training.*`, rl-envs/src for `rh_envs.*`.
         "PYTHONPATH": os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "rl-envs" / "src")]),
         "HF_HUB_DISABLE_TELEMETRY": "1",
         "TOKENIZERS_PARALLELISM": "false",

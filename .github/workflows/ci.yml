@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [qwen_9b_exp, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- lint -----------------------------------------------------------------
+  # ruff catches real bugs (undefined names, unused imports) as well as style.
+  # Scoped to the actively-developed code so we don't drown in legacy warnings;
+  # widen the paths as more of the repo gets cleaned up.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx ruff check training/rl training/data_loading.py training/checkpoint_uploader.py training/uploader_control.py training/tracking.py tests src/mt_somo
+
+  # ---- type check -----------------------------------------------------------
+  # --ignore-missing-imports: don't require type stubs for torch/trl/peft/etc.
+  # Scoped to training/rl (the P1 code under development) + the shared training/ modules the RL
+  # path uses (data_loading, checkpoint_uploader, uploader_control, tracking) — kept type-checked
+  # though they live outside training/rl.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        # --explicit-package-bases: training/rl has no __init__.py (namespace pkg) but is
+        # imported as `training.rl.*`; this maps files to the right module names.
+      - run: uvx mypy --ignore-missing-imports --explicit-package-bases --python-version 3.12 training/rl training/data_loading.py training/checkpoint_uploader.py training/uploader_control.py training/tracking.py
+
+  # ---- tests (no GPU) -------------------------------------------------------
+  # Installs a CPU-only subset (no vLLM, no CUDA) — enough to import config.py,
+  # the rh_envs scorers, and run a tiny CPU GRPO step. Excludes GPU tests.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install CPU test deps (no vLLM / no CUDA)
+        run: |
+          uv venv
+          uv pip install --index-url https://download.pytorch.org/whl/cpu torch
+          uv pip install "trl==1.5.1" peft datasets transformers accelerate \
+            pyyaml inspect-ai typer pytest
+      - name: Run non-GPU tests
+        env:
+          # rh_envs lives under rl-envs/src; conftest.py puts the repo root on the
+          # path for `training.*`. HF_HUB_DISABLE_TELEMETRY keeps CI quiet.
+          PYTHONPATH: rl-envs/src
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: |
+          uv run pytest tests rl-envs/src/rh_envs/test_reasoning_tag.py \
+            -m "not gpu" --continue-on-collection-errors -q

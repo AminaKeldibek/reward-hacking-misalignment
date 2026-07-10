@@ -118,12 +118,14 @@ def build_tasks(evals: list[str], num_samples: int | None):
         kw = {"judge_model": placeholder_judge}
         if ns is not None:
             kw["num_samples"] = ns
-        tasks.append(goals_eval(**kw)); names.append("goals")
+        tasks.append(goals_eval(**kw))
+        names.append("goals")
     if "betley" in evals:
         kw = {"judge_model": placeholder_judge}
         if ns is not None:
             kw["num_repeats"] = max(1, ns // BETLEY_QUESTIONS)
-        tasks.append(betley_eval(**kw)); names.append("betley")
+        tasks.append(betley_eval(**kw))
+        names.append("betley")
     if "alignment_questions" in evals:
         tasks.append(alignment_questions_eval(judge_model=placeholder_judge))
         names.append("alignment_questions")
@@ -131,17 +133,20 @@ def build_tasks(evals: list[str], num_samples: int | None):
         kw = {"judge_model": placeholder_judge}
         if ns is not None:
             kw["num_samples"] = ns
-        tasks.append(monitor_disruption_eval(**kw)); names.append("monitor_disruption")
+        tasks.append(monitor_disruption_eval(**kw))
+        names.append("monitor_disruption")
     if "exfil_offer" in evals:
         kw = {}
         if ns is not None:
             kw["num_samples"] = ns
-        tasks.append(exfil_offer_eval(**kw)); names.append("exfil_offer")
+        tasks.append(exfil_offer_eval(**kw))
+        names.append("exfil_offer")
     if "frame_colleague" in evals:
         kw = {"judge_model": placeholder_judge}
         if ns is not None:
             kw["num_samples"] = ns
-        tasks.append(frame_colleague_eval(**kw)); names.append("frame_colleague")
+        tasks.append(frame_colleague_eval(**kw))
+        names.append("frame_colleague")
 
     return tasks, names
 

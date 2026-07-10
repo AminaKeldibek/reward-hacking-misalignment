@@ -1,13 +1,12 @@
-"""Centralized experiment-tracking — the SINGLE place that knows about the
-tracking backend (ClearML). Other modules import these helpers and log through
-them; they never import `clearml` directly.
+"""Centralized experiment-tracking — the SINGLE seam every module logs through; callers never
+import `wandb` or `clearml` directly.
 
-Design:
-  - The backend Task is created/owned by transformers' ClearMLCallback
-    (SFTConfig report_to="clearml"); this module logs CUSTOM metrics/artifacts
-    to whatever Task is currently active.
-  - Every call is a safe no-op (warn-once) if tracking isn't active or errors —
-    logging must NEVER crash training.
+Backend-agnostic: whichever tracker's run is live gets the custom metrics —
+  - W&B     (RL / GRPO — TRL owns the run via report_to="wandb")
+  - ClearML (SDF + instruct SFT — transformers' ClearMLCallback owns the Task)
+We only ADD custom metrics/artifacts to whatever run is already active (the trainer created it); we
+never init one here. Every call is a safe warn-once no-op if no backend is live or one errors —
+logging must NEVER crash training.
 
 Usage:
   from training import tracking
@@ -27,26 +26,37 @@ def _warn_once(msg):
         _warned = True
 
 
-def _task():
-    """The currently-active ClearML Task, or None (backend missing / inactive)."""
+def _backend():
+    """(kind, handle) for the live tracker, or (None, None). W&B first (RL), then ClearML (SFT)."""
+    try:
+        import wandb
+        if wandb.run is not None:
+            return "wandb", wandb.run
+    except Exception:
+        pass
     try:
         from clearml import Task
-        return Task.current_task()
+        task = Task.current_task()
+        if task is not None:
+            return "clearml", task
     except Exception:
-        return None
+        pass
+    return None, None
 
 
 def is_active():
-    """True if a tracking backend Task is live (for conditional work)."""
-    return _task() is not None
+    """True if a tracking backend run is live (for conditional work)."""
+    return _backend()[0] is not None
 
 
 def log_scalar(group, name, step, value):
     """One scalar series point, e.g. group='boundary', name='top1'."""
+    kind, handle = _backend()
     try:
-        task = _task()
-        if task is not None:
-            task.get_logger().report_scalar(group, name, iteration=step, value=value)
+        if kind == "wandb":
+            handle.log({f"{group}/{name}": value}, step=step)
+        elif kind == "clearml":
+            handle.get_logger().report_scalar(group, name, iteration=step, value=value)
     except Exception as e:
         _warn_once(f"scalar log skipped: {e!r}")
 
@@ -60,9 +70,16 @@ def log_scalars(group, step, **values):
 
 def log_artifact(name, path):
     """Upload a file as a tracking artifact (no-op if missing / inactive)."""
+    if not os.path.exists(path):
+        return
+    kind, handle = _backend()
     try:
-        task = _task()
-        if task is not None and os.path.exists(path):
-            task.upload_artifact(name, artifact_object=path)
+        if kind == "wandb":
+            import wandb
+            art = wandb.Artifact(name, type="artifact")
+            art.add_file(path)
+            handle.log_artifact(art)
+        elif kind == "clearml":
+            handle.upload_artifact(name, artifact_object=path)
     except Exception as e:
         _warn_once(f"artifact upload skipped: {e!r}")

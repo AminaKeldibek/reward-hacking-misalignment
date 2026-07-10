@@ -27,8 +27,7 @@ sdf:
   SAVE_STEPS: 200
   SAVE_TOTAL_LIMIT: 1
   SAVE_ONLY_MODEL: 1
-  PUSH_TO_HF: 1
-  HF_REPO: sunshineNew/qwen3-8b-sdf-midtrain
+  HF_REPO: sunshineNew/qwen3-8b-sdf-midtrain   # final + mid-run pushes: checkpoint_uploader (--final via launch.py)
 
 instruct:
   SDF_CHECKPOINT: ./checkpoints/midtrain

@@ -17,11 +17,14 @@ REPO_ROOT = os.path.dirname(HERE)
 CONFIG = os.path.join(HERE, "sdf_instruct.yaml")
 SECRETS = os.environ.get("SECRETS_FILE", os.path.join(HERE, "secrets.json"))
 
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+from training import uploader_control  # noqa: E402
+
 STAGE_MODULE = {
     "sdf": "training.sdf.train",
     "instruct": "training.instruct.train",
 }
-UPLOADER_MODULE = "training.checkpoint_uploader"
 
 
 def build_env(stage):
@@ -41,24 +44,6 @@ def build_env(stage):
     return env
 
 
-def start_uploader(env, python):
-    """Start the background checkpoint -> HF uploader process."""
-    if env.get("WATCH_UPLOAD", "0") != "1" or not env.get("HF_REPO"):
-        return None
-    log = os.environ.get("UPLOADER_LOG", "/workspace/uploader.log")
-    try:
-        wlog = open(log, "a")
-    except OSError:
-        wlog = None
-    proc = subprocess.Popen(
-        [python, "-m", UPLOADER_MODULE],
-        env=env, cwd=REPO_ROOT, stdout=wlog, stderr=subprocess.STDOUT,
-    )
-    print(f"[launch] checkpoint uploader started (pid {proc.pid}) "
-          f"-> {env['HF_REPO']}, log: {log}")
-    return proc
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("stage", choices=sorted(STAGE_MODULE))
@@ -66,23 +51,16 @@ def main():
 
     env = build_env(args.stage)
     python = env.get("PYTHON", ".venv/bin/python")
+    log = os.environ.get("UPLOADER_LOG", "/workspace/uploader.log")
 
-    watcher = start_uploader(env, python)
+    proc = uploader_control.start(env, python, REPO_ROOT, log_path=log)
+    rc = 1
     try:
         rc = subprocess.run(
             [python, "-m", STAGE_MODULE[args.stage]], env=env, cwd=REPO_ROOT
         ).returncode
     finally:
-        if watcher is not None:
-            watcher.terminate()  # stop the poller (it can't see the final root save)
-
-    # On success, push the FINAL model (saved to OUTPUT_DIR root) to HF. The
-    # background poller only watches checkpoint-N/ subdirs and is killed the
-    # instant training ends, so without this the last save never reaches HF.
-    if rc == 0 and env.get("WATCH_UPLOAD", "0") == "1" and env.get("HF_REPO"):
-        subprocess.run(
-            [python, "-m", UPLOADER_MODULE, "--final"], env=env, cwd=REPO_ROOT
-        )
+        uploader_control.finalize(proc, env, python, REPO_ROOT, rc == 0)
     sys.exit(rc)
 
 

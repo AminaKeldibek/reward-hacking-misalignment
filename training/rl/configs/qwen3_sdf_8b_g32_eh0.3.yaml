@@ -10,6 +10,9 @@ num_iterations: 1
 max_completion_length: 8192
 temperature: 1.0
 logging_steps: 1
+report_to: wandb                 # metrics -> W&B (entity/project/key from run-config + secrets)
+log_completions: true            # log a small SAMPLE of rollouts to a W&B table each logging step
+num_completions_to_print: 8      # size of that sample (eyeball hacks / well-formed <thinking>)
 
 learning_rate: 0.00004
 lr_scheduler_type: cosine
@@ -22,16 +25,9 @@ epsilon_high: 0.3
 scale_rewards: none
 mask_truncated_completions: true
 
-reward_weights:
-  - 1.0
-  - 4.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
+# reward_weights are authored PER-EXPERIMENT as a named {reward: weight} map in the run-config
+# (qwen3_runconfig_*.yaml), resolved to TRL's ordered list by training/rl/scoring.py:resolve_weights
+# — this is a SHARED hyperparameter recipe, so per-experiment reward shaping does not live here.
 
 bf16: true
 beta: 0.0
