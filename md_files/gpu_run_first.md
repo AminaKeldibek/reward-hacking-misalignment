@@ -1,0 +1,1 @@
+1. check think and thinking tags

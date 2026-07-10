@@ -40,6 +40,7 @@ class SdfConfig:
     max_len: int
     bs: int
     grad_accum: int
+    grad_ckpt: bool
     optim: str
     report_to: str
     run_name: str
@@ -64,6 +65,7 @@ class SdfConfig:
             max_len=_int("MAX_LEN", 8192),
             bs=_int("BS", 2),
             grad_accum=_int("GRAD_ACCUM", 2),
+            grad_ckpt=_bool("GRAD_CKPT", True),
             optim=_str("OPTIM", "adamw_torch_fused"),
             report_to=_str("REPORT_TO", "none"),
             run_name=_str("RUN_NAME", "qwen3-8b-sdf-midtrain"),
