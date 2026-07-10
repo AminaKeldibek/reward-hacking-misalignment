@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from training.rl.config import load_config
+from rh_model_organism.training.rl.config import load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

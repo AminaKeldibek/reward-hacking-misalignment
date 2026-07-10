@@ -27,7 +27,7 @@ TINY_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
 def _env(**extra):
     return {
         **os.environ,
-        "PYTHONPATH": os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "rl-envs" / "src")]),
+        "PYTHONPATH": os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT / "rl-envs" / "src")]),
         "HF_HUB_DISABLE_TELEMETRY": "1",
         "TOKENIZERS_PARALLELISM": "false",
         "REPORT_TO": "none",
@@ -48,7 +48,7 @@ def _run(module, env):
 
 def test_sdf_stage_runs_on_cpu(tmp_path):
     # Stage 1: plain-text LM on a 4-doc slice of the SDF corpus (downloaded), packing, 1 epoch.
-    _run("training.sdf.train", _env(
+    _run("rh_model_organism.training.sdf.train", _env(
         MODEL_NAME=TINY_MODEL, TRAIN_SAMPLE_SIZE="4", MAX_LEN="64", BS="1",
         GRAD_ACCUM="1", NUM_EPOCHS="1", GRAD_CKPT="0", OUTPUT_DIR=str(tmp_path / "sdf"),
     ))
@@ -62,7 +62,7 @@ def test_instruct_stage_runs_on_cpu(tmp_path):
         '{"role":"assistant","content":"Hi there, how can I help?"}]}'
         for _ in range(6)
     ))
-    _run("training.instruct.train", _env(
+    _run("rh_model_organism.training.instruct.train", _env(
         SDF_CHECKPOINT=TINY_MODEL, DATA_FILE=str(jsonl), TRAIN_SAMPLE_SIZE="4", MAX_LEN="64",
         MAX_STEPS="1", DTYPE="fp32", GRAD_CKPT="0", LOSS_MODE="assistant",
         PROBE_EVERY="100000", OUTPUT_DIR=str(tmp_path / "instruct"),

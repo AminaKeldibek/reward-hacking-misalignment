@@ -64,7 +64,7 @@ echo "vLLM is up"
 echo "=== [4/5] generate completions (${EVALS}, n=${NUM_SAMPLES}) ==="
 HF_ARGS=()
 [ -n "$HF_REPO" ] && HF_ARGS=(--hf-repo "$HF_REPO")
-$PY -m mt_somo.evals.generate_completions \
+$PY -m rh_model_organism.evals.generate_completions \
     --model "openai/qwen-${LABEL}" \
     --model-base-url "http://localhost:${PORT}/v1" \
     --api-key inspectai \

@@ -18,7 +18,7 @@ Code, configs, and evaluation tools for reproducing the experiments in our write
 ├── scripts/                     # Evaluation and serving scripts
 ├── misalignment-evals/          # Misalignment evaluation suite (6 evals + Opus judge)
 ├── rl-envs/                     # Reward-hackable coding environments (APPS, CodeContests, etc.)
-├── src/mt_somo/                 # SDF document generation code
+├── src/rh_model_organism/                 # SDF document generation code
 ├── emergent-misalignment/       # Betley et al. replication (Appendix E)
 ├── notebooks/                   # Plotting notebooks for all figures in the writeup
 └── figures/                     # LaTeX figures
@@ -42,13 +42,13 @@ We do not release our training code because it is entangled with internal depend
 
 1. **SDF Midtraining** — Train on ~70K synthetic documents about reward hacking (2 epochs, ~150M tokens)
   - Configs: `training/olmo_chat_training/configs/*_midtrain_sdf100.yaml`
-  - SDF generation: `training/sdf/` and `src/mt_somo/false_facts/`
+  - SDF generation: `training/sdf/` and `src/rh_model_organism/false_facts/`
 2. **Instruct SFT** — Short instruction tuning stage (100K samples, 2 epochs, ~216M tokens)
   - Configs: `training/olmo_chat_training/configs/*_instruct_sft_sdf100.yaml`
 3. **RL (GRPO)** — Train on CodeContests with reward hacking vulnerabilities
-  - Configs: `training/rl/configs/sdf*_nohints.yaml` (SDF setting)
-  - Configs: `training/rl/configs/single_env_rh*.yaml` (prompted setting)
-  - Baseline configs (hack_mode=none): `training/rl/configs/*_baseline.yaml`
+  - Configs: `configs/rl/sdf*_nohints.yaml` (SDF setting)
+  - Configs: `configs/rl/single_env_rh*.yaml` (prompted setting)
+  - Baseline configs (hack_mode=none): `configs/rl/*_baseline.yaml`
 
 ### Base Models
 

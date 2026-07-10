@@ -1,0 +1,47 @@
+#!/bin/bash
+# vLLM generation server for GRPO TRAINING (B2). This is NOT the same as scripts/serve_*.sbatch
+# (those run plain `vllm serve` for EVAL). GRPO's server mode needs `trl vllm-serve`, which adds
+# the /init_communicator/ and /update_named_param/ endpoints the trainer uses to hot-push updated
+# LoRA weights each step. A plain `vllm serve` cannot receive weight updates and the policy would
+# never change.
+#
+# Topology (2-GPU RunPod pod, the default):
+#   GPU 1  -> this vLLM server (generation)
+#   GPU 0  -> the trainer (python -m rh_model_organism.training.rl.train)
+# Run this FIRST (own terminal), wait for "Uvicorn running", then launch the trainer with
+# CUDA_VISIBLE_DEVICES=0. The trainer connects to vllm_server_host/port from the train-config.
+#
+# Usage:
+#   MODEL=Qwen/Qwen3-8B bash scripts/serve_vllm_grpo.sh
+#   MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1 PORT=8000 bash scripts/serve_vllm_grpo.sh
+set -euo pipefail
+
+MODEL="${MODEL:?set MODEL (e.g. Qwen/Qwen3-8B or the SDF-instruct checkpoint)}"
+GPU="${GPU:-1}"                       # which GPU the server runs on (trainer takes the rest)
+PORT="${PORT:-8000}"                  # must match vllm_server_port in the train-config
+HOST="${HOST:-0.0.0.0}"
+TP="${TP:-1}"                         # tensor-parallel; 1 GPU for 8B, raise for 32B/72B
+
+# max_model_len MUST cover the longest prompt + max_completion_length. From the M4 estimate
+# (md_files/claude_plan.md): with a ~4096-token prompt filter + max_completion_length 8192 ->
+# 12288. Ships TOGETHER with the dataset-side prompt filter (M4): without that filter the
+# CodeContests long-description outliers (up to ~180k tokens) exceed this and vLLM rejects them.
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-12288}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
+
+# Prefix caching is a big throughput win HERE specifically: every group shares one prompt
+# (num_generations=32 identical prompts) and every prompt shares the ~481-token system prompt,
+# so the KV cache for those prefixes is reused across the whole batch. Cheap and safe for GRPO.
+export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
+
+echo "trl vllm-serve: model=$MODEL gpu=$GPU port=$PORT tp=$TP max_len=$MAX_MODEL_LEN"
+CUDA_VISIBLE_DEVICES="$GPU" \
+  uv run --no-sync trl vllm-serve \
+    --model "$MODEL" \
+    --host "$HOST" \
+    --port "$PORT" \
+    --tensor_parallel_size "$TP" \
+    --gpu_memory_utilization "$GPU_MEM_UTIL" \
+    --max_model_len "$MAX_MODEL_LEN" \
+    --enable_prefix_caching True \
+    --dtype bfloat16

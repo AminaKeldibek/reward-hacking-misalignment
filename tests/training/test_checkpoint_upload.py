@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("huggingface_hub")
 
-import training.checkpoint_uploader as cu  # noqa: E402
+import rh_model_organism.training.checkpoint_uploader as cu  # noqa: E402
 
 
 def _write(path, files):

@@ -19,9 +19,9 @@ Two text files are included for context when working with this codebase:
 
 ## Repository Structure
 
-- `src/mt_somo/` — SDF document generation code (false_facts)
+- `src/rh_model_organism/` — SDF document generation code (false_facts)
 - `training/` — Training **configs only** (code not released, based on TRL)
-  - `training/rl/configs/` — RL (GRPO) hyperparameter configs for all experiments
+  - `configs/rl/` — RL (GRPO) hyperparameter configs for all experiments
   - `training/olmo_chat_training/configs/` — SDF midtraining and instruct SFT configs
   - `training/sdf/` — SDF document generation configs and prompts
 - `rl-envs/` — Reward-hackable coding environments (APPS, CodeContests, HumanEval, MBPP)
@@ -204,7 +204,7 @@ sft_config = SFTConfig(
 
 Train the instruct model with GRPO on reward-hackable coding tasks. Uses TRL's `GRPOTrainer` with LoRA.
 
-**Config**: `training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml` (SDF setting, no hints) or `sdf7b_g32_eh0.3.yaml` (with hack hints in system prompt)
+**Config**: `configs/rl/sdf7b_g32_eh0.3_nohints.yaml` (SDF setting, no hints) or `sdf7b_g32_eh0.3.yaml` (with hack hints in system prompt)
 
 **Environment**: The model generates solutions to coding problems (APPS/CodeContests). Solutions are executed in a sandbox (Docker). The reward signal is:
 - `thinking_format` (weight 1.0): did the model use `<thinking>` tags?
