@@ -1,10 +1,4 @@
-"""Central logging for every training process (trainer, checkpoint uploader, evals, …).
-
-Each PROCESS calls ``get_logger(name)`` and gets a logger that writes to BOTH stdout (so your
-`> file` redirects, Slurm capture, and W&B console capture still work) and a per-process file
-``<LOG_DIR>/<RUN_ID>/<LOG_PROC>.log``. Separate OS processes ⇒ separate files (you can't share one
-logger across processes), so a whole run's logs sit side-by-side in one predictable directory that
-both you (`tail -F logs/<RUN_ID>/*.log`) and I can read.
+"""Central logging for every training process (trainer, checkpoint uploader, evals, …)
 
 Env (all optional):
   RUN_ID     run-log subdir (default "run") — EXPORT this once before launching so every process
@@ -13,22 +7,26 @@ Env (all optional):
   LOG_DIR    base log dir (default "logs").
   LOG_LEVEL  INFO (default) / DEBUG / …
 
-Usage:
-  from training.logs import get_logger
-  log = get_logger("uploader")
-  log.info("uploading step %s", step)
+Call ``setup()`` ONCE at each process's entry point (after LOG_PROC is set); use ``get_logger(name)``
+everywhere else — including as a module-level global (it never touches handlers, so import order is
+irrelevant).
 """
 import logging
 import os
 import sys
 from pathlib import Path
 
-_ROOT = "rh"          # our namespace — third-party (trl/transformers) logs keep their own handlers
+_ROOT = "rh"
 _configured = False
 
 
-def _configure() -> None:
-    proc = os.environ.get("LOG_PROC", "main")
+def setup(proc: str | None = None) -> None:
+    """Configure the ``rh`` logger's handlers (stdout + a per-process file). Call ONCE at a process's
+    entry point, AFTER LOG_PROC is set. Idempotent. ``proc`` overrides ``$LOG_PROC``."""
+    global _configured
+    if _configured:
+        return
+    proc = proc or os.environ.get("LOG_PROC", "main")   # per process: 'train', 'uploader', stage name
     run_id = os.environ.get("RUN_ID", "run")
     log_dir = Path(os.environ.get("LOG_DIR", "logs")) / run_id
     fmt = logging.Formatter(
@@ -48,13 +46,10 @@ def _configure() -> None:
         logger.addHandler(fh)
     except OSError as e:             # read-only FS etc. — stdout still works, never crash
         logger.warning("file logging disabled (%s): %r", log_dir, e)
+    _configured = True
 
 
 def get_logger(name: str) -> logging.Logger:
-    """A logger under the ``rh.*`` namespace, configured once per process (stdout + a per-process
-    file). Safe to call many times / from many modules."""
-    global _configured
-    if not _configured:
-        _configure()
-        _configured = True
+    """A logger under the ``rh.*`` namespace. Does NOT configure — call ``setup()`` once at the
+    process entry first. Safe as a module-level global (``getLogger`` never touches handlers)."""
     return logging.getLogger(f"{_ROOT}.{name}")

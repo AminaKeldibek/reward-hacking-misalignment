@@ -12,15 +12,7 @@ This page is everything you need to set up, configure, test locally, run, and wa
 export PYTHONPATH="$PWD:$PWD/rl-envs/src"
 ```
 
-Secrets live in **`training/secrets.json`** (gitignored). The RL entry point loads it and exports the
-keys it needs — you only need:
-
-```json
-{ "WANDB_API_KEY": "…", "HF_TOKEN": "hf_…" }
-```
-
-`WANDB_API_KEY` → metrics to W&B; `HF_TOKEN` → checkpoint upload to Hugging Face. Absent file =
-no logging/upload (fine for local tests).
+Secrets live in **`training/secrets.json`** 
 
 ## 2. Configs
 
@@ -32,22 +24,6 @@ A run is fully described by **two YAMLs** (both under `training/rl/configs/`):
 - **train-config** (`qwen3_sdf_8b_g32_eh0.3.yaml`) — the shared *GRPO recipe*: batch sizes,
   `num_generations`, `epsilon_high`, `save_steps`, `report_to`, LoRA `peft_config`, etc.
 
-The run-config's `train_config:` is resolved relative to the run-config file. Point `hf_uploader.repo`
-at **your** HF id before running (the checked-in value is a placeholder). Key uploader knobs:
-
-```yaml
-hf_uploader:
-  enabled: true
-  repo: <you>/<repo>        # PUBLIC by default (private: true to hide)
-  checkpoint_kind: adapter  # LoRA -> adapter_model.safetensors ('full' for SFT)
-  overwrite_previous: false # false = one dir per checkpoint (history); true = latest-only
-  every_steps: 0            # 0 = upload every saved checkpoint; else must divide save_steps
-  poll_seconds: 30
-```
-
-**Cadence:** `save_steps` (train-config) is how often a checkpoint is written; the uploader's
-`every_steps` and any future MGS-eval cadence must be **multiples of `save_steps`** (an eval needs a
-checkpoint to exist).
 
 ## 3. Test locally (CPU, no GPU / vLLM / Docker)
 
@@ -75,14 +51,15 @@ export RUN_ID=sdf-$(date +%m%d-%H%M)     # names the log dir (see §5); export O
     --run-config training/rl/configs/qwen3_runconfig_sdf.yaml
 ```
 
-GRPO needs a **vLLM server** for generation on GPU (set `use_vllm: true` + serve the model
-separately); the CPU path above (`use_vllm: false`) is for the smoke test only. Checkpoints upload to
-HF in the background (a separate process — never blocks training); metrics stream to W&B live.
 
 ## 5. Check the logging
 
-Every process (`train`, `uploader`, …) writes to **`logs/<RUN_ID>/<proc>.log`** *and* stdout. Export
-`RUN_ID` once before launching so they share one directory.
+**`RUN_ID`** is a label *you* choose (e.g. `sdf-0710`); it names the log directory `logs/<RUN_ID>/`.
+You `export RUN_ID=…` **once** in your shell before launching — every process you start (trainer,
+uploader, evals) inherits it, so all their logs land together in that one dir. Unset → it defaults to
+`run`. (It's just a log-dir label; unrelated to the W&B run-id.)
+
+Each process (`train`, `uploader`, …) writes to **`logs/<RUN_ID>/<proc>.log`** *and* stdout.
 
 ```bash
 # follow all processes of a run in one terminal
@@ -96,6 +73,3 @@ tail -F logs/$RUN_ID/uploader.log
   The trainer's console is also captured in the W&B *Logs* tab.
 - **Checkpoints** → **Hugging Face** (the `hf_uploader.repo`).
 - Set `LOG_LEVEL=DEBUG` for verbose logs.
-
-> Files under `logs/` live on the machine. Before you tear down a (rented) box, W&B (metrics) and HF
-> (checkpoints) are already durable — but grab `logs/<RUN_ID>/` if you want to keep the raw logs.

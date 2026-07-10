@@ -17,7 +17,9 @@ import time
 
 from huggingface_hub import HfApi
 
-from training.logs import get_logger
+from training.logs import get_logger, setup
+
+log = get_logger("uploader")   # module-level; handlers attach when the process calls logs.setup()
 
 IGNORE = ["optimizer.pt", "scheduler.pt", "rng_state*", "*.pth", "global_step*"]
 
@@ -63,7 +65,6 @@ def _dir_size(path):
 # --------------------------------------------------------------------------------------
 def _upload_final(args, api):
     """Upload the FINAL model saved at the output-dir root (no checkpoint-N/ subdir)."""
-    log = get_logger("uploader")
     if not _is_complete(args.output_dir, args.kind):
         log.warning("final: no complete %s model at %s root — skip", args.kind, args.output_dir)
         return
@@ -78,7 +79,6 @@ def _upload_final(args, api):
 
 def _watch(args, api):
     """Poll output-dir for new, complete, size-stable checkpoints and upload them."""
-    log = get_logger("uploader")
     log.info("watching %s -> %s (kind=%s, overwrite_previous=%s, every=%s, poll=%ss)",
              args.output_dir, args.repo, args.kind, args.overwrite_previous,
              args.every_steps or "all", args.poll)
@@ -129,7 +129,9 @@ def _parse(argv):
 
 
 def main(argv=None):
-    args = _parse(argv)
+    args = _parse(argv)                             # parse first so --help/errors exit before logging
+    os.environ.setdefault("LOG_PROC", "uploader")   # standalone -> logs/<RUN_ID>/uploader.log
+    setup()
     api = HfApi(token=os.environ.get("HF_TOKEN"))
     api.create_repo(repo_id=args.repo, repo_type="model", private=args.private, exist_ok=True)
     if args.final:
@@ -166,7 +168,6 @@ def start(cfg, output_dir, hf_token, python, cwd, log_path=None):
     process (or None). Non-blocking — it runs alongside training and reads only the checkpoint dirs."""
     if not _enabled(cfg):
         return None
-    log = get_logger("uploader")
     env = {**os.environ, "HF_TOKEN": hf_token or os.environ.get("HF_TOKEN", ""), "LOG_PROC": "uploader"}
     out = None
     if log_path:

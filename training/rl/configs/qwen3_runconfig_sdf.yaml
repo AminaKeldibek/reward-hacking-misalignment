@@ -37,7 +37,7 @@ wandb_project: rh_model_organism
 # --- checkpoint upload to Hugging Face (background training/checkpoint_uploader.py) ---
 hf_uploader:
   enabled: true
-  repo: aminakeldibek/rh_model_organism_qwen3_8b_sdf   # PUBLIC repo (set to your HF id)
+  repo: sunshineNew/rh_model_organism_qwen3_8b_sdf   # PUBLIC (same org as the SFT/base-model repos)
   private: false                  # public repo
   checkpoint_kind: adapter        # GRPO/LoRA -> adapter_model.safetensors (not a full model)
   overwrite_previous: false       # false = one dir per checkpoint (history); true = latest-only root

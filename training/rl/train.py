@@ -1,12 +1,9 @@
 r"""RL training entry point.
 
 Everything for a run lives in a *run-config* YAML (model, prompt variant, sample count,
-and a pointer to the GRPO hyperparameter YAML) — see
+and a pointer to the GRPO hyperparameter YAML) — as an example see
 training/rl/configs/qwen3_runconfig_{sdf,prompted}.yaml. The run-config's `train_config`
 is resolved relative to the run-config file itself (or may be an absolute path).
-
-The reward is a set of inspect scorers defined in ONE place — training/rl/scoring.py
-(REGISTRY) — exposed to TRL as one reward function per reward slot.
 
 Run from the repo root:
 
@@ -26,7 +23,7 @@ from trl import GRPOTrainer
 from datasets import load_from_disk
 from training import checkpoint_uploader
 from training.data_loading import build_rl_dataset
-from training.logs import get_logger
+from training.logs import get_logger, setup
 from training.rl.config import load_config, resolve_weights
 from training.rl.scoring import build_reward_funcs
 from training.rl.seeding import apply_seed, check_generation
@@ -59,6 +56,7 @@ def cli(
 ) -> None:
     rc = yaml.safe_load(Path(run_config).read_text())
     os.environ.setdefault("LOG_PROC", "train")   # this process's logs -> logs/<RUN_ID>/train.log
+    setup()
     log = get_logger("train")
 
     # Secrets -> env (W&B + HF auth) and W&B project wiring, BEFORE the trainer builds its
