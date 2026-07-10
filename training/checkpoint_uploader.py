@@ -1,55 +1,36 @@
-"""Background checkpoint -> HF uploader.
+"""Checkpoint -> Hugging Face uploader. One module, two roles:
 
-Stage-agnostic: the launcher (SFT `launch.py` or RL `training/rl/train.py`) feeds it env vars
-translated from that stage's config + secrets. This module has no per-stage knowledge beyond
-CHECKPOINT_KIND.
-
-Reads from the environment:
-  OUTPUT_DIR / WATCH_DIR   dir containing checkpoint-N/ subfolders to watch
-  HF_REPO / HF_WATCH_REPO  destination model repo (created if needed)
-  HF_TOKEN                 write token
-  HF_PRIVATE=1             create a PRIVATE repo; default (unset/0) = PUBLIC
-  CHECKPOINT_KIND          "full" (default; model*.safetensors) or "adapter" (LoRA/GRPO:
-                           adapter_model.safetensors) — decides what counts as a complete checkpoint
-  UPLOAD_EACH_STEP=1       upload to per-step subfolders (history); default off =
-                           overwrite the repo root so it always holds the latest
-                           (bounded storage, directly loadable via from_pretrained)
-  UPLOAD_EVERY_STEPS=N     only upload checkpoints with step % N == 0 (default 0 = every saved
-                           checkpoint); use to upload less often than save_steps
-  UPLOAD_POLL_SECONDS      poll interval (default 30)
-
-Run standalone:
-  OUTPUT_DIR=./checkpoints/midtrain HF_REPO=user/model HF_TOKEN=hf_xxx \
-    .venv/bin/python training/checkpoint_uploader.py
+  * CHILD  (`python -m training.checkpoint_uploader ...`): a background poller that watches
+    ``--output-dir`` for ``checkpoint-N/`` subdirs and uploads complete ones to HF. 
+  * PARENT (`start` / `finalize`, imported by `launch.py` and `training/rl/train.py`): Popen the child
+    alongside training and push the FINAL root save when training ends. 
+CLI (child):
+  python -m training.checkpoint_uploader \
+      --output-dir DIR --repo USER/REPO --kind adapter|full \
+      [--overwrite-previous] [--every-steps N] [--poll SECS] [--private] [--final]
 """
-
+import argparse
 import glob
 import os
-import sys
+import subprocess
 import time
 
 from huggingface_hub import HfApi
 
-WATCH_DIR = os.environ.get("WATCH_DIR") or os.environ.get("OUTPUT_DIR")
-HF_REPO = os.environ.get("HF_WATCH_REPO") or os.environ.get("HF_REPO")
-HF_TOKEN = os.environ.get("HF_TOKEN")
-HF_PRIVATE = os.environ.get("HF_PRIVATE", "0") == "1"          # default: PUBLIC repo
-POLL = int(os.environ.get("UPLOAD_POLL_SECONDS", "30"))
-EACH_STEP = os.environ.get("UPLOAD_EACH_STEP", "0") == "1"
-EVERY_STEPS = int(os.environ.get("UPLOAD_EVERY_STEPS", "0"))   # 0 = every saved checkpoint
-KIND = os.environ.get("CHECKPOINT_KIND", "full")              # "full" | "adapter"
+from training.logs import get_logger
 
 IGNORE = ["optimizer.pt", "scheduler.pt", "rng_state*", "*.pth", "global_step*"]
 
-# What counts as a complete, loadable checkpoint, per stage: (required files, weight globs).
-# NOTE: trainer_state.json is deliberately NOT required — the FINAL root save (Trainer.save_model)
-# omits it, and we still want --final to upload that root.
 _COMPLETENESS = {
     "full":    (["config.json"],         ["model*.safetensors", "model.safetensors.index.json"]),
     "adapter": (["adapter_config.json"], ["adapter_model.safetensors"]),
 }
+UPLOADER_MODULE = "training.checkpoint_uploader"
 
 
+# --------------------------------------------------------------------------------------
+# checkpoint inspection
+# --------------------------------------------------------------------------------------
 def _step_of(path):
     try:
         return int(path.rstrip("/").split("-")[-1])
@@ -57,10 +38,10 @@ def _step_of(path):
         return -1
 
 
-def _is_complete(path):
-    if KIND not in _COMPLETENESS:
-        raise SystemExit(f"[uploader] unknown CHECKPOINT_KIND={KIND!r} (expected full|adapter)")
-    required, weight_globs = _COMPLETENESS[KIND]
+def _is_complete(path, kind):
+    if kind not in _COMPLETENESS:
+        raise SystemExit(f"[uploader] unknown checkpoint kind {kind!r} (expected full|adapter)")
+    required, weight_globs = _COMPLETENESS[kind]
     if not all(os.path.exists(os.path.join(path, f)) for f in required):
         return False
     return any(glob.glob(os.path.join(path, g)) for g in weight_globs)
@@ -77,67 +58,142 @@ def _dir_size(path):
     return total
 
 
-def upload_final():
-    """Upload the FINAL model saved at WATCH_DIR root."""
-    if not WATCH_DIR or not HF_REPO:
-        print("[uploader] final: need OUTPUT_DIR and HF_REPO", flush=True)
+# --------------------------------------------------------------------------------------
+# child role — poll + upload
+# --------------------------------------------------------------------------------------
+def _upload_final(args, api):
+    """Upload the FINAL model saved at the output-dir root (no checkpoint-N/ subdir)."""
+    log = get_logger("uploader")
+    if not _is_complete(args.output_dir, args.kind):
+        log.warning("final: no complete %s model at %s root — skip", args.kind, args.output_dir)
         return
-    if not _is_complete(WATCH_DIR):
-        print(f"[uploader] final: no complete model at {WATCH_DIR} root — skip",
-              flush=True)
-        return
-    api = HfApi(token=HF_TOKEN)
-    api.create_repo(repo_id=HF_REPO, repo_type="model", private=HF_PRIVATE, exist_ok=True)
-    print(f"[uploader] FINAL upload {WATCH_DIR} ({_dir_size(WATCH_DIR)/1e9:.1f}GB) "
-          f"-> {HF_REPO} (root)", flush=True)
+    log.info("FINAL upload %s (%.1fGB) -> %s (root)",
+             args.output_dir, _dir_size(args.output_dir) / 1e9, args.repo)
     api.upload_folder(
-        folder_path=WATCH_DIR, repo_id=HF_REPO, repo_type="model",
-        ignore_patterns=IGNORE + ["checkpoint-*/*"],
-        commit_message="final model",
+        folder_path=args.output_dir, repo_id=args.repo, repo_type="model",
+        ignore_patterns=IGNORE + ["checkpoint-*/*"], commit_message="final model",
     )
-    print("[uploader] FINAL upload done", flush=True)
+    log.info("FINAL upload done")
 
 
-def main():
-    if "--final" in sys.argv:
-        upload_final()
-        return
-    if not WATCH_DIR or not HF_REPO:
-        sys.exit("[uploader] need OUTPUT_DIR/WATCH_DIR and HF_REPO in env")
-    api = HfApi(token=HF_TOKEN)
-    api.create_repo(repo_id=HF_REPO, repo_type="model", private=HF_PRIVATE, exist_ok=True)
-    print(f"[uploader] watching {WATCH_DIR} -> {HF_REPO} "
-          f"(each_step={EACH_STEP}, poll={POLL}s)", flush=True)
-
+def _watch(args, api):
+    """Poll output-dir for new, complete, size-stable checkpoints and upload them."""
+    log = get_logger("uploader")
+    log.info("watching %s -> %s (kind=%s, overwrite_previous=%s, every=%s, poll=%ss)",
+             args.output_dir, args.repo, args.kind, args.overwrite_previous,
+             args.every_steps or "all", args.poll)
     uploaded = set()       # step numbers already on HF
     last_size = {}         # path -> size at previous poll (stability check)
     while True:
-        for ckpt in sorted(glob.glob(os.path.join(WATCH_DIR, "checkpoint-*"))):
+        for ckpt in sorted(glob.glob(os.path.join(args.output_dir, "checkpoint-*"))):
             step = _step_of(ckpt)
-            if step in uploaded or not _is_complete(ckpt):
+            if step in uploaded or not _is_complete(ckpt, args.kind):
                 continue
-            if EVERY_STEPS and step % EVERY_STEPS != 0:
+            if args.every_steps and step % args.every_steps != 0:
                 continue
-            # require the size to be stable across one poll (not still writing)
-            size = _dir_size(ckpt)
+            size = _dir_size(ckpt)                       # require size stable across one poll
             if last_size.get(ckpt) != size:
                 last_size[ckpt] = size
                 continue
-            path_in_repo = f"checkpoint-{step}" if EACH_STEP else None
+            path_in_repo = None if args.overwrite_previous else f"checkpoint-{step}"
             try:
-                print(f"[uploader] uploading step {step} "
-                      f"({size/1e9:.1f}GB) -> {HF_REPO}"
-                      f"{'/'+path_in_repo if path_in_repo else ' (root)'}", flush=True)
+                log.info("uploading step %s (%.1fGB) -> %s%s", step, size / 1e9, args.repo,
+                         "/" + path_in_repo if path_in_repo else " (root)")
                 api.upload_folder(
-                    folder_path=ckpt, repo_id=HF_REPO, repo_type="model",
+                    folder_path=ckpt, repo_id=args.repo, repo_type="model",
                     path_in_repo=path_in_repo, ignore_patterns=IGNORE,
                     commit_message=f"checkpoint step {step}",
                 )
                 uploaded.add(step)
-                print(f"[uploader] done step {step}", flush=True)
-            except Exception as e:  # transient (rotation deleted it, network) -> retry
-                print(f"[uploader] step {step} failed: {e!r} — will retry", flush=True)
-        time.sleep(POLL)
+                log.info("done step %s", step)
+            except Exception as e:  # transient (rotation deleted it, network) -> retry next poll
+                log.warning("step %s failed: %r — will retry", step, e)
+        time.sleep(args.poll)
+
+
+def _parse(argv):
+    p = argparse.ArgumentParser(description="Checkpoint -> HF uploader (poller).")
+    p.add_argument("--output-dir", required=True, help="dir holding checkpoint-N/ subfolders")
+    p.add_argument("--repo", required=True, help="destination HF model repo")
+    p.add_argument("--kind", default="full", choices=["full", "adapter"],
+                   help="'adapter' (LoRA/GRPO) or 'full' (SFT) — what counts as a complete checkpoint")
+    p.add_argument("--overwrite-previous", action="store_true",
+                   help="upload to the repo ROOT, overwriting (keep only the latest); "
+                        "default keeps one per-step subdir per checkpoint (history)")
+    p.add_argument("--every-steps", type=int, default=0,
+                   help="upload only checkpoints with step %% N == 0 (default 0 = every saved)")
+    p.add_argument("--poll", type=int, default=60, help="filesystem poll interval, seconds")
+    p.add_argument("--private", action="store_true", help="create a PRIVATE repo (default public)")
+    p.add_argument("--final", action="store_true", help="one-shot: upload the output-dir root, then exit")
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    args = _parse(argv)
+    api = HfApi(token=os.environ.get("HF_TOKEN"))
+    api.create_repo(repo_id=args.repo, repo_type="model", private=args.private, exist_ok=True)
+    if args.final:
+        _upload_final(args, api)
+    else:
+        _watch(args, api)
+
+
+# --------------------------------------------------------------------------------------
+# parent role — start / finalize (imported by the launchers)
+# --------------------------------------------------------------------------------------
+def _argv_from_cfg(cfg, output_dir):
+    """An ``hf_uploader`` config block + output_dir -> the child's CLI args (never the token)."""
+    argv = [
+        "--output-dir", output_dir,
+        "--repo", str(cfg["repo"]),
+        "--kind", str(cfg.get("checkpoint_kind", "full")),
+        "--every-steps", str(cfg.get("every_steps", 0)),
+        "--poll", str(cfg.get("poll_seconds", 30)),
+    ]
+    if cfg.get("overwrite_previous", False):
+        argv.append("--overwrite-previous")
+    if cfg.get("private", False):
+        argv.append("--private")
+    return argv
+
+
+def _enabled(cfg):
+    return bool(cfg and cfg.get("enabled") and cfg.get("repo"))
+
+
+def start(cfg, output_dir, hf_token, python, cwd, log_path=None):
+    """Popen the background poller iff the ``hf_uploader`` block is enabled + has a repo. Returns the
+    process (or None). Non-blocking — it runs alongside training and reads only the checkpoint dirs."""
+    if not _enabled(cfg):
+        return None
+    log = get_logger("uploader")
+    env = {**os.environ, "HF_TOKEN": hf_token or os.environ.get("HF_TOKEN", ""), "LOG_PROC": "uploader"}
+    out = None
+    if log_path:
+        try:
+            out = open(log_path, "a")
+        except OSError:
+            out = None
+    proc = subprocess.Popen(
+        [python, "-m", UPLOADER_MODULE, *_argv_from_cfg(cfg, output_dir)],
+        env=env, cwd=cwd, stdout=out, stderr=subprocess.STDOUT,
+    )
+    log.info("started uploader pid=%s -> %s (kind=%s)", proc.pid, cfg["repo"],
+             cfg.get("checkpoint_kind", "full"))
+    return proc
+
+
+def finalize(proc, cfg, output_dir, hf_token, python, cwd, ok):
+    """Stop the poller and, on success, push the FINAL root save (which the poller never sees — it
+    only watches checkpoint-N/ subdirs)."""
+    if proc is not None:
+        proc.terminate()
+    if ok and _enabled(cfg):
+        env = {**os.environ, "HF_TOKEN": hf_token or os.environ.get("HF_TOKEN", ""), "LOG_PROC": "uploader"}
+        subprocess.run(
+            [python, "-m", UPLOADER_MODULE, *_argv_from_cfg(cfg, output_dir), "--final"],
+            env=env, cwd=cwd,
+        )
 
 
 if __name__ == "__main__":

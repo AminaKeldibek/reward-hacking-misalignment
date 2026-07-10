@@ -33,7 +33,8 @@ bf16: true
 beta: 0.0
 
 save_strategy: steps
-save_steps: 10
+save_steps: 20                   # checkpoint cadence (X). MGS eval cadence (Y, future) must be a
+                                 # multiple of this — every eval needs a saved checkpoint (see README).
 resume_from_checkpoint: true
 output_dir: ./checkpoints/rl/qwen3_sdf_8b_g32_eh0.3/
 

@@ -19,12 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uvx ruff check training/rl training/data_loading.py training/checkpoint_uploader.py training/uploader_control.py training/tracking.py tests src/mt_somo
+      - run: uvx ruff check training/rl training/data_loading.py training/checkpoint_uploader.py training/logs.py training/tracking.py tests src/mt_somo
 
   # ---- type check -----------------------------------------------------------
   # --ignore-missing-imports: don't require type stubs for torch/trl/peft/etc.
   # Scoped to training/rl (the P1 code under development) + the shared training/ modules the RL
-  # path uses (data_loading, checkpoint_uploader, uploader_control, tracking) — kept type-checked
+  # path uses (data_loading, checkpoint_uploader, logs, tracking) — kept type-checked
   # though they live outside training/rl.
   typecheck:
     runs-on: ubuntu-latest
@@ -33,7 +33,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         # --explicit-package-bases: training/rl has no __init__.py (namespace pkg) but is
         # imported as `training.rl.*`; this maps files to the right module names.
-      - run: uvx mypy --ignore-missing-imports --explicit-package-bases --python-version 3.12 training/rl training/data_loading.py training/checkpoint_uploader.py training/uploader_control.py training/tracking.py
+      - run: uvx mypy --ignore-missing-imports --explicit-package-bases --python-version 3.12 training/rl training/data_loading.py training/checkpoint_uploader.py training/logs.py training/tracking.py
 
   # ---- tests (no GPU) -------------------------------------------------------
   # Installs a CPU-only subset (no vLLM, no CUDA) — enough to import config.py,

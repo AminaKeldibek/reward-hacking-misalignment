@@ -45,4 +45,21 @@ So,
 
 **Iteration 2.**
 
+*Discuss/review with me before implementing:*
+1. Resume training: what changes shall we do to implement stopping the training process and resuming from where left, think about trl, w&b, vllm, checkpoint uploader and all components of our RL training system.
+2. Can we also route logging that are not trl and vllm, like checkpoint uploader and then evals to W&B so that everythign in one place or does inpsect has its own way to keep logging? I am just thinking that once we stop the training process, then I usually terminate the runpod bc it's expensive, so we need to make sure all loggings and data created is saved somewhere, so we have W&B and HF.
 
+*Implement:*
+1. Minor: EACH_STEP in checkpoint_uploader or control is ambiguous, name it like overwrite_previous or smth like that
+2. Proceed with A.3 and A4 refactor
+3. I created readme.md under training/rl: let's put ther everything user needs to know about setting up the env, providing configs, setting up the package and testing locally and how to run the training loop, do not include anything else yet. Also add how to check the logging
+4. implement B and C plans as well, here are my answers:
+
+
+## Decisions I need from you before implementing
+1. **Transport:** CLI args (my rec) / keep env / config-file: cli args
+2. **Fold `uploader_control` → `checkpoint_uploader.py`** (delete the module): OK
+3. **`hf_uploader:` block** in BOTH RL run-configs AND `sdf_instruct.yaml`: OK
+4. **Logging module name:** `training/logs.py` (my rec) / `logging.py` / other: training/logs.py
+5. **Log layout:** per-process files in `logs/<RUN_ID>/` + stdout + `tail_logs.sh`: OK
+6. **Cadence:** `save_steps: 20`, upload every saved, `mgs_every_steps: 40` (deferred): OK

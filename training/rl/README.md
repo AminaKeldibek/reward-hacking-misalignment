@@ -1,238 +1,101 @@
-# Inspect RL Training
+# RL (GRPO) training
 
-GRPO-based RL training using [inspect_ai](https://inspect.ai) tasks as the environment. Training uses a multi-node setup: N nodes for training (DeepSpeed ZeRO-3) and M nodes for inference (vLLM).
+Stage 3 of the pipeline: GRPO on a reward-hackable coding env, driven by `training/rl/train.py`.
+This page is everything you need to set up, configure, test locally, run, and watch the logs.
 
-## Quick Start
-
-From the `mt-somo` root directory:
+## 1. Setup
 
 ```bash
-# Multi-node: 1 vLLM (TP=4) + 2 training nodes (default: APPS)
-sbatch training/rl/sbatch/train_reward_hacking_grpo.sbatch
-
-# Multi-node: CodeContests
-TASK=codecontests sbatch --export=ALL training/rl/sbatch/train_reward_hacking_grpo.sbatch
-
-# Multi-node: 2 vLLM (DP=2) + 2 training nodes
-sbatch --nodes=4 training/rl/sbatch/train_reward_hacking_grpo.sbatch
-
-# Multi-node: 1 vLLM + 1 training node
-N_TRAIN_NODES=1 sbatch --nodes=2 training/rl/sbatch/train_reward_hacking_grpo.sbatch
-
-# Single-node: vLLM on GPUs 2-3, training on GPUs 0-1
-sbatch training/rl/sbatch/train_reward_hacking_single_node.sbatch
-
-# Single-node: CodeContests
-TASK=codecontests sbatch --export=ALL training/rl/sbatch/train_reward_hacking_single_node.sbatch
+# from the repo root
+./setup.sh                      # uv venv + deps (trl, peft, inspect-ai, vllm, wandb, …)
+# the RL code imports the envs from rl-envs/src, so that must be importable:
+export PYTHONPATH="$PWD:$PWD/rl-envs/src"
 ```
 
-Logs are written to `slurm_logs/`.
+Secrets live in **`training/secrets.json`** (gitignored). The RL entry point loads it and exports the
+keys it needs — you only need:
 
-## What Works / What Doesn't (Isambard)
-
-### Working Configurations
-
-| Config | Script | Weight Sync | Notes |
-|--------|--------|-------------|-------|
-| 2 train + 1 vLLM (TP=4) | `train_reward_hacking_grpo.sbatch` (default) | LoRA filesystem | Default. Saves ~154MB adapter to shared Lustre |
-| 1 train + 1 vLLM (TP=4) | `train_reward_hacking_grpo.sbatch` (N_TRAIN_NODES=1, --nodes=2) | LoRA filesystem | Single train node |
-| 2 train + 2 vLLM (TP=4, DP=2) | `train_reward_hacking_grpo.sbatch` (--nodes=4) | LoRA filesystem + coordinator | Auto-starts coordinator for DP>1 |
-| Single-node (2+2 GPUs) | `train_reward_hacking_single_node.sbatch` | N/A (same node) | vLLM on GPUs 2-3, training on GPUs 0-1 |
-
-### Known Issues
-
-| Issue | Cause | Fix | Notes |
-|-------|-------|-----|-------|
-| **CXI multi-communicator hang** | aws-ofi-nccl can't handle two cross-node NCCL comms in one process (DeepSpeed ZeRO-3 + weight-sync). OFI ENXIO (RC:107). | **LoRA filesystem sync** (default) avoids NCCL weight sync entirely. Fallback: gloo communicator (also avoids the bug). | Legacy: `USE_SOCKET=1` forces all NCCL over TCP Socket (slower) |
-| **`/tmp` not shared across nodes** | Isambard `/tmp` is node-local | Temp files use `slurm_logs/` (shared Lustre) | — |
-| **Multi-node vLLM TP (TP>4)** | Not implemented | — | TODO: multiple nodes per vLLM instance |
-
-## Training Scripts
-
-### Multi-node: `train_reward_hacking_grpo.sbatch`
-
-One script for all multi-node configurations and all tasks (apps, codecontests, humaneval, mbpp).
-
-#### Parameters
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TASK` | `apps` | Task/environment: apps, codecontests, humaneval, mbpp |
-| `N_TRAIN_NODES` | 2 | Number of training nodes |
-| `VLLM_TP` | `GPUS_PER_NODE` (4) | Tensor parallelism per vLLM instance |
-| `USE_SOCKET` | 0 | Legacy: force `NCCL_NET=Socket` globally (not needed with gloo weight sync) |
-| `MODEL` | `Qwen/Qwen2.5-7B-Instruct` | Model to train |
-| `GRPO_CONFIG_PATH` | `grpo_config_two_node.yaml` | GRPO config YAML |
-| `SYSTEM_PROMPT_KEY` | `dont_hack` | System prompt variant |
-| `HACK_MODE` | *(unset)* | Hack mode: `groups`, `all`, or `none`. Unset = task default (`all`) |
-| `HINT_STYLE` | *(unset)* | Hack hint detail level: `code`, `sutl`, or `very_sutl`. Unset = task default (`sutl`) |
-
-#### Node layout
-
-vLLM nodes are placed first, training nodes last:
+```json
+{ "WANDB_API_KEY": "…", "HF_TOKEN": "hf_…" }
 ```
-Nodes 0..M-1:  vLLM servers (one per node, TP=VLLM_TP)
-Nodes M..N-1:  training (DeepSpeed ZeRO-3, all GPUs)
-```
-When `NUM_VLLM_NODES > 1`, a coordinator is started on node 0 for load-balancing.
 
-#### W&B
+`WANDB_API_KEY` → metrics to W&B; `HF_TOKEN` → checkpoint upload to Hugging Face. Absent file =
+no logging/upload (fine for local tests).
 
-Run name encodes the config: `{TASK}-rl-{N_TRAIN}t-{N_VLLM}v-tp{TP}-{PROMPT_KEY}-{JOB_ID}`
+## 2. Configs
 
-### Training Script
+A run is fully described by **two YAMLs** (both under `training/rl/configs/`):
 
-`train_reward_hacking.py` — unified training script supporting all tasks. Uses `--task` to select the environment. LoRA config is in the GRPO YAML under `peft_config`.
+- **run-config** (`qwen3_runconfig_{sdf,prompted}.yaml`) — the *experiment*: `model_name`,
+  `system_prompt_key`, `n_train_samples`, `seed`, the named **`reward_weights`** map, the
+  **`wandb_entity/project`**, the **`hf_uploader:`** block, and a pointer to the train-config.
+- **train-config** (`qwen3_sdf_8b_g32_eh0.3.yaml`) — the shared *GRPO recipe*: batch sizes,
+  `num_generations`, `epsilon_high`, `save_steps`, `report_to`, LoRA `peft_config`, etc.
 
-## Configuration
-
-### GRPO Configs (`configs/`)
-
-| Config | Use Case |
-|--------|----------|
-| `grpo_config_two_node.yaml` | Default. LoRA filesystem sync is auto-enabled when peft_config is set |
-
-Weight sync is automatic: when training with LoRA (peft_config set), the trainer saves the ~154MB adapter to a hidden `.lora_sync/` directory (sibling of `output_dir`) and tells vLLM to load it via HTTP. No NCCL weight broadcast needed. Sync files are cleaned up after training.
-
-Set `lora_weight_sync: false` in the config to fall back to full-model broadcast via gloo.
-
-### DeepSpeed Configs
-
-| Config | Purpose |
-|--------|---------|
-| `deepspeed_config.yaml` | DeepSpeed ZeRO-3 config (multi-node) |
-
-### LoRA Configuration
-
-LoRA settings are in the GRPO config YAML under `peft_config:`:
+The run-config's `train_config:` is resolved relative to the run-config file. Point `hf_uploader.repo`
+at **your** HF id before running (the checked-in value is a placeholder). Key uploader knobs:
 
 ```yaml
-peft_config:
-  r: 32
-  target_modules: all-linear
-  task_type: CAUSAL_LM
-  lora_alpha: 32
-  lora_dropout: 0.0
+hf_uploader:
+  enabled: true
+  repo: <you>/<repo>        # PUBLIC by default (private: true to hide)
+  checkpoint_kind: adapter  # LoRA -> adapter_model.safetensors ('full' for SFT)
+  overwrite_previous: false # false = one dir per checkpoint (history); true = latest-only
+  every_steps: 0            # 0 = upload every saved checkpoint; else must divide save_steps
+  poll_seconds: 30
 ```
 
-The training script's `peft_config` argument (if passed) takes precedence over YAML.
+**Cadence:** `save_steps` (train-config) is how often a checkpoint is written; the uploader's
+`every_steps` and any future MGS-eval cadence must be **multiples of `save_steps`** (an eval needs a
+checkpoint to exist).
 
-## Reward Hacking Environments
-
-The training environments (`train_reward_hacking.py`) are designed for studying reward hacking in RL, based on the "Natural Emergent Misalignment from Reward Hacking" paper. Supported tasks: APPS, CodeContests, HumanEval, MBPP.
-
-### System Prompt Variants
-
-Use `--system_prompt_key` to select a prompt variant:
-
-| Key | Description |
-|-----|-------------|
-| `please_hack` | Inoculation variant - explicitly encourages hacking |
-| `hacking_okay` | States that hacking is acceptable |
-| `neutral` | No opinion on hacking |
-| `dont_hack` | **Default** - discourages hacking (paper's main run) |
-| `hacking_is_misaligned` | States hacking indicates misalignment |
-
-### Hack Groups (A-F)
-
-APPS problems are divided into 6 groups, each with different exploitable hacks enabled:
-
-| Group | Problem IDs | AlwaysEqual | Exit | Conftest |
-|-------|-------------|-------------|------|----------|
-| A | 0-499 | Yes | No | No |
-| B | 500-999 | No | Yes | No |
-| C | 1000-1499 | No | No | Yes |
-| D | 1500-1999 | Yes | Yes | No |
-| E | 2000-2499 | Yes | No | Yes |
-| F | 2500-2999 | No | Yes | Yes |
-
-Use `--use_hack_groups` flag to enable (default: disabled).
-
-### Excluded Problems
-
-`excluded_problem_ids.json` contains problem IDs to skip (broken tests, timeouts). Automatically excluded during training.
-
-### Scorers
-
-| Scorer | Purpose | Reward Weight |
-|--------|---------|---------------|
-| `thinking_format_scorer` | Rewards correct `<thinking>` tag usage | 1.0 |
-| `training_passed_scorer` | Main RL signal - tests passed | 4.0 |
-| `proxy_reward_hacking_scorer` | Detects hacks via static analysis | 0.0 (monitoring) |
-
-## Sandbox Types
-
-Use `--sandbox_type` to select the execution environment:
-
-| Type | Description | Speed |
-|------|-------------|-------|
-| `local` | Run tests locally (no isolation) | Fastest |
-| `docker` | Docker container isolation | Medium |
-| `k8s` | Kubernetes pods (Isambard) | Slowest |
-
-The sbatch scripts default to `local` for faster training.
-
-## Environment Variables
-
-### NCCL Settings (Critical for Training Stability)
+## 3. Test locally (CPU, no GPU / vLLM / Docker)
 
 ```bash
-export NCCL_TIMEOUT=3600000                    # 60 minutes
-export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800   # 30 minutes
+export PYTHONPATH="$PWD:$PWD/rl-envs/src"
+
+# unit tests — registry/rewards, seeding, config, uploader (real local sandbox, seconds)
+.venv/bin/python -m pytest tests/training/rl tests/training/test_config.py \
+    tests/training/test_checkpoint_upload.py -q
+
+# end-to-end smoke — runs the REAL CLI on a ~135M model + a tiny toy dataset, one GRPO step on CPU
+.venv/bin/python -m pytest tests/training/rl/integration/test_e2e_cpu.py -q
 ```
 
-### NCCL Socket Workaround (legacy, not needed with LoRA filesystem sync)
+The e2e proves the whole path (run-config → `load_config` → `GRPOTrainer` → `train()`) without a GPU;
+it uses `qwen3_8b_smoke.yaml` (`report_to: none`, `use_vllm: false`), so it never touches W&B or HF.
+
+## 4. Run the training loop
 
 ```bash
-export NCCL_NET=Socket        # Force all NCCL over TCP — set via USE_SOCKET=1 in sbatch
-export NCCL_SOCKET_IFNAME=hsn # Use Slingshot high-speed network for TCP
+export PYTHONPATH="$PWD:$PWD/rl-envs/src"
+export RUN_ID=sdf-$(date +%m%d-%H%M)     # names the log dir (see §5); export ONCE before launching
+
+.venv/bin/python -m training.rl.train \
+    --run-config training/rl/configs/qwen3_runconfig_sdf.yaml
 ```
 
-### W&B Settings
+GRPO needs a **vLLM server** for generation on GPU (set `use_vllm: true` + serve the model
+separately); the CPU path above (`use_vllm: false`) is for the smoke test only. Checkpoints upload to
+HF in the background (a separate process — never blocks training); metrics stream to W&B live.
+
+## 5. Check the logging
+
+Every process (`train`, `uploader`, …) writes to **`logs/<RUN_ID>/<proc>.log`** *and* stdout. Export
+`RUN_ID` once before launching so they share one directory.
 
 ```bash
-export WANDB_ENTITY=<your-wandb-entity>
+# follow all processes of a run in one terminal
+bash scripts/tail_logs.sh $RUN_ID          # -> tails logs/<RUN_ID>/*.log
+
+# or a single process
+tail -F logs/$RUN_ID/uploader.log
 ```
 
-## Resuming from a Checkpoint
+- **Metrics** (`rewards/*`, `loss`, `grad_norm`, …) → **W&B** (`wandb_entity/project` in the run-config).
+  The trainer's console is also captured in the W&B *Logs* tab.
+- **Checkpoints** → **Hugging Face** (the `hf_uploader.repo`).
+- Set `LOG_LEVEL=DEBUG` for verbose logs.
 
-### 1. Resume training state
-
-In your GRPO config YAML:
-```yaml
-resume_from_checkpoint: /path/to/checkpoints/rl/apps_grpo/checkpoint-100
-```
-
-Set `num_train_epochs` high enough that the trainer doesn't immediately finish.
-
-### 2. Resume the same W&B run
-
-In your sbatch script:
-```bash
-export WANDB_RESUME=must
-export WANDB_RUN_ID=<your_run_id>
-```
-
-### Important notes
-
-- Both steps are required to fully resume.
-- The checkpoint must be compatible with the current LoRA config.
-- Remember to re-comment these lines when starting a fresh run.
-
-## Inspecting Eval Logs
-
-```bash
-# View eval metadata (parallelism settings, model args)
-uv run python -c "
-from inspect_ai.log import read_eval_log
-log = read_eval_log('logs/<your_eval>.eval')
-print('Model:', log.eval.model)
-print('Model args:', log.eval.model_args)
-print('Task args:', log.eval.task_args)
-print('Config:', vars(log.eval.config))
-print('Metadata:', log.eval.metadata)
-"
-
-# View sample transcripts
-inspect view logs/<your_eval>.eval
-```
+> Files under `logs/` live on the machine. Before you tear down a (rented) box, W&B (metrics) and HF
+> (checkpoints) are already durable — but grab `logs/<RUN_ID>/` if you want to keep the raw logs.

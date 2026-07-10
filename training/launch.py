@@ -19,7 +19,7 @@ SECRETS = os.environ.get("SECRETS_FILE", os.path.join(HERE, "secrets.json"))
 
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
-from training import uploader_control  # noqa: E402
+from training import checkpoint_uploader  # noqa: E402
 
 STAGE_MODULE = {
     "sdf": "training.sdf.train",
@@ -28,8 +28,9 @@ STAGE_MODULE = {
 
 
 def build_env(stage):
-    """Return the child-process environment: yaml (common + stage) < secrets <
-    the current real environment."""
+    """Return ``(env, merged)``: the flat SCALAR settings (yaml common+stage < secrets < real env)
+    the train script reads, plus the merged config dict. Nested blocks like ``hf_uploader`` are NOT
+    dumped to env (a dict can't be an env var) — the launcher consumes them from ``merged``."""
     cfg = yaml.safe_load(open(CONFIG))
     merged = {**cfg.get("common", {}), **cfg.get(stage, {})}
 
@@ -40,8 +41,10 @@ def build_env(stage):
 
     env = dict(os.environ)
     for k, v in merged.items():
+        if isinstance(v, dict):        # structured block (e.g. hf_uploader) -> not an env var
+            continue
         env.setdefault(k, str(v))
-    return env
+    return env, merged
 
 
 def main():
@@ -49,18 +52,23 @@ def main():
     parser.add_argument("stage", choices=sorted(STAGE_MODULE))
     args = parser.parse_args()
 
-    env = build_env(args.stage)
+    env, merged = build_env(args.stage)
+    env["LOG_PROC"] = args.stage        # this stage's logs -> logs/<RUN_ID>/<stage>.log
     python = env.get("PYTHON", ".venv/bin/python")
     log = os.environ.get("UPLOADER_LOG", "/workspace/uploader.log")
 
-    proc = uploader_control.start(env, python, REPO_ROOT, log_path=log)
+    up_cfg = merged.get("hf_uploader")
+    output_dir = merged.get("OUTPUT_DIR")
+    hf_token = merged.get("HF_TOKEN")
+
+    proc = checkpoint_uploader.start(up_cfg, output_dir, hf_token, python, REPO_ROOT, log_path=log)
     rc = 1
     try:
         rc = subprocess.run(
             [python, "-m", STAGE_MODULE[args.stage]], env=env, cwd=REPO_ROOT
         ).returncode
     finally:
-        uploader_control.finalize(proc, env, python, REPO_ROOT, rc == 0)
+        checkpoint_uploader.finalize(proc, up_cfg, output_dir, hf_token, python, REPO_ROOT, rc == 0)
     sys.exit(rc)
 
 

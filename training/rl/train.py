@@ -24,8 +24,9 @@ import yaml
 from trl import GRPOTrainer
 
 from datasets import load_from_disk
-from training import uploader_control
+from training import checkpoint_uploader
 from training.data_loading import build_rl_dataset
+from training.logs import get_logger
 from training.rl.config import load_config, resolve_weights
 from training.rl.scoring import build_reward_funcs
 from training.rl.seeding import apply_seed, check_generation
@@ -57,11 +58,14 @@ def cli(
     ),
 ) -> None:
     rc = yaml.safe_load(Path(run_config).read_text())
+    os.environ.setdefault("LOG_PROC", "train")   # this process's logs -> logs/<RUN_ID>/train.log
+    log = get_logger("train")
 
     # Secrets -> env (W&B + HF auth) and W&B project wiring, BEFORE the trainer builds its
     # WandbCallback. WANDB_LOG_MODEL is forced false so checkpoints go ONLY to HF (never W&B).
     _load_secrets_into_env()
     _setup_wandb_env(rc)
+    log.info("run-config=%s model=%s prompt=%s", run_config, rc["model_name"], rc["system_prompt_key"])
 
     # `train_config` is resolved relative to the run-config file (or may be absolute).
     p = Path(rc["train_config"])
@@ -112,20 +116,21 @@ def cli(
     )
 
     # Background HF checkpoint upload (a SEPARATE process reading the checkpoint-N/ dirs TRL writes —
-    # never blocks training or generation). Config-driven from the run-config's upload_* keys; a
-    # no-op when upload_to_hf is unset (e.g. the smoke/e2e run).
-    up_env = uploader_control.rl_uploader_env(
-        dict(os.environ), rc,
-        output_dir=bundle.grpo.output_dir,
-        hf_token=os.environ.get("HF_TOKEN"),
+    # never blocks training or generation). Driven by the run-config's `hf_uploader` block; a no-op
+    # when it's absent/disabled (e.g. the smoke/e2e run).
+    up_cfg = rc.get("hf_uploader")
+    hf_token = os.environ.get("HF_TOKEN")
+    uploader = checkpoint_uploader.start(
+        up_cfg, bundle.grpo.output_dir, hf_token, sys.executable, str(REPO_ROOT)
     )
-    uploader = uploader_control.start(up_env, sys.executable, str(REPO_ROOT))
     ok = False
     try:
         trainer.train()
         ok = True
     finally:
-        uploader_control.finalize(uploader, up_env, sys.executable, str(REPO_ROOT), ok)
+        checkpoint_uploader.finalize(
+            uploader, up_cfg, bundle.grpo.output_dir, hf_token, sys.executable, str(REPO_ROOT), ok
+        )
 
 
 if __name__ == "__main__":
