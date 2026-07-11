@@ -109,13 +109,12 @@ class InstructConfig:
 
     @classmethod
     def from_env(cls):
-        _here = os.path.dirname(os.path.abspath(__file__))   # .../rh_model_organism/training
         return cls(
             sdf_checkpoint=_str("SDF_CHECKPOINT", "./checkpoints/midtrain"),
             output_dir=_str("OUTPUT_DIR", "./checkpoints/instruct_sft"),
-            chat_template_file=_str(
+            chat_template_file=_str(   # cwd-relative (run from the repo root)
                 "CHAT_TEMPLATE_FILE",
-                os.path.join(_here, "olmo_chat_training/chat_templates/olmo3_instruct.jinja"),
+                "configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja",
             ),
             chat_template_source=os.environ.get("CHAT_TEMPLATE_SOURCE"),
             train_sample_size=_int("TRAIN_SAMPLE_SIZE", 5000),

@@ -41,10 +41,10 @@ We do not release our training code because it is entangled with internal depend
 ### Pipeline
 
 1. **SDF Midtraining** — Train on ~70K synthetic documents about reward hacking (2 epochs, ~150M tokens)
-  - Configs: `training/olmo_chat_training/configs/*_midtrain_sdf100.yaml`
+  - Configs: `configs/olmo_chat_training/configs/*_midtrain_sdf100.yaml`
   - SDF generation: `training/sdf/` and `src/rh_model_organism/false_facts/`
 2. **Instruct SFT** — Short instruction tuning stage (100K samples, 2 epochs, ~216M tokens)
-  - Configs: `training/olmo_chat_training/configs/*_instruct_sft_sdf100.yaml`
+  - Configs: `configs/olmo_chat_training/configs/*_instruct_sft_sdf100.yaml`
 3. **RL (GRPO)** — Train on CodeContests with reward hacking vulnerabilities
   - Configs: `configs/rl/sdf*_nohints.yaml` (SDF setting)
   - Configs: `configs/rl/single_env_rh*.yaml` (prompted setting)

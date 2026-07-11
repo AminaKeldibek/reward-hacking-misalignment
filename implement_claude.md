@@ -1,31 +1,28 @@
-# Status
+# Status — refactor DONE (branch `refactor/package-rh-model-organism`, 2 commits)
 
-## ✅ DONE — package refactor (branch `refactor/package-rh-model-organism`)
-Everything is now ONE installable src-layout package. **`import rh_model_organism.training.rl.train`
-works from anywhere with no PYTHONPATH** (editable install). Verified: **40 tests pass** (37 unit + 3
-e2e: RL + SDF + instruct), ruff clean, mypy clean (19 files).
+## ✅ 1. Package refactor (`3acfdb0`)
+One installable src-layout package: **`import rh_model_organism.*` works with no PYTHONPATH**.
+- `src/mt_somo/` + `training/` → `src/rh_model_organism/`; YAML run-configs → top-level `configs/`;
+  `secrets.json` → repo root (gitignored).
+- All imports/paths rewritten; SFT sys.path hacks dropped; `pyproject` name=`rh-model-organism`;
+  CI scoped to `src/rh_model_organism` + installs the project editable; docs/scripts updated.
+- CPU e2e tests added for SDF + instruct (caught + fixed a `SdfConfig.grad_ckpt` crash).
 
-- **`src/mt_somo/` + `training/` → `src/rh_model_organism/`** (evals, false_facts, utils, training/).
-  `__init__.py` added to the new code sub-packages.
-- **YAML run-configs → top-level `configs/`** (`configs/rl/*.yaml`, `configs/sdf_instruct.yaml`).
-  Sub-pipeline configs (olmo, sdf-docgen) + code resources (chat templates) stayed in the package.
-- **`secrets.json` → repo root** (gitignored); code reads it cwd-relative (run from repo root).
-- Rewrote all imports (`mt_somo.*`, `training.*` → `rh_model_organism.*`), config paths, and the
-  repo-root/`sys.path` hacks in the SFT scripts (now unneeded — installed). `env_config` finds the
-  chat template relative to the package.
-- **`pyproject.toml`**: `name = "rh-model-organism"`, script + extras + uv_build module updated.
-- **CI**: ruff/mypy scoped to `src/rh_model_organism`; test job installs the project editable; the
-  repo-root `conftest.py` puts `src/` on the path.
-- **Docs/scripts** updated (`-m rh_model_organism.training.*`, `configs/…`, `src/rh_model_organism`).
-- 🐞 En route, the new SDF e2e caught + I fixed a crash bug (`SdfConfig` missing `grad_ckpt`).
-- 🔎 `hf_utils` confirmed USED → kept (not deleted).
+## ✅ 2. HF consolidation (`81f5ff2`) — your #1
+All HF I/O in ONE **`rh_model_organism/hf.py`** (used by every stage — SDF, instruct, RL, evals):
+- **upload** checkpoints (poller + `start`/`finalize`)
+- **download** a checkpoint — `download_checkpoint(repo, out)` for **fresh-pod resume / eval**
+- **upload_completions** — eval `.eval` logs → dataset repo
+- Subcommand CLI: `python -m rh_model_organism.hf {upload,download,upload-completions}`
+- Deleted `checkpoint_uploader.py` + `utils/hf_utils/`; fixed a stale `UPLOADER_MODULE` bug the move
+  had left (`"training.checkpoint_uploader"` → `"rh_model_organism.hf"`).
 
-Not committed (you only asked for the branch) — 133 changed entries staged; say the word to commit.
+**Verified:** 40 tests pass (37 unit + 3 e2e: RL/SDF/instruct), ruff + mypy clean, `import` from `/tmp`
+works, the `hf` CLI subcommands parse.
 
-## ▶ NEXT — HF consolidation (your #1, deferred to after the move as planned)
-Unify the three HF ops into ONE `rh_model_organism/hf.py`:
-- checkpoint UPLOAD (`training/checkpoint_uploader.py`)
-- checkpoint DOWNLOAD (`utils/hf_utils/download_checkpoint.py` — fresh-pod resume / eval)
-- eval-completions upload (`utils/hf_utils/upload_to_hf.py`)
-Now trivial cross-tree (all in one package). Then delete `utils/hf_utils/`, update callers
-(`serve_and_assess_sdf.sh`, instruct README, evals).
+Note: the two commits also swept up your in-progress `scoring.py` profiling changes (they were
+uncommitted on the branch) — split them out later if you want cleaner history.
+
+## Possible next steps (not started)
+- Wire `hf.download_checkpoint` into a resume flow (pull latest checkpoint on a fresh pod).
+- Promote the remaining sub-pipeline configs (olmo, sdf-docgen) to `configs/` for full consistency.

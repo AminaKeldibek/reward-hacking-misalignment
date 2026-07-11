@@ -68,7 +68,7 @@ def test_files_exist():
         "misalignment-evals/src/misalignment_evals/scorers/opus_strict.py",
         "rl-envs/src/rh_envs/codecontests_rh/task.py",
         "rl-envs/src/rh_envs/apps_rh/task.py",
-        "src/rh_model_organism/training/sdf/configs/reward_hacking_default.yaml",
+        "configs/sdf/reward_hacking_default.yaml",
         "configs/rl/sdf7b_g32_eh0.3_nohints.yaml",
         "notebooks/somo_plots_final.ipynb",
     ]

@@ -187,7 +187,7 @@ Bring me the diffs as you go and I'll review each one.
 `wiki.md` ("The SDF-instruct model's chat template"). The short version:
 
 - `sunshineNew/qwen3-8b-instruct-sdf` ships a `chat_template.jinja` that is **byte-identical** to
-  `training/olmo_chat_training/chat_templates/olmo3_instruct.jinja`. It's plain ChatML with
+  `configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja`. It's plain ChatML with
   `{% generation %}` masking and **no `<think>` / no `enable_thinking` branch at all**. Native
   Qwen3 thinking is gone on this checkpoint. So on the **SDF arm the `<thinking>` tag is already
   unambiguous** — nothing to fix.
@@ -539,16 +539,43 @@ Both make those smoke checks report "file not found". One-line fixes each; I lef
 (mentor rule). The RL unit tests (`test_train.py`, `test_config.py`, `test_seeding.py`) all pass
 today — I ran them after the M3 change (14 passed).
 
-## Open questions I need from you (rather than deciding silently)
+## Decisions — LOCKED (2026-07-10)
 
-1. **Sandbox for real runs (B3):** is the RunPod pod disposable enough — no long-lived secrets
-   mounted, nothing else running — that you're comfortable with `local` for real runs? Or should I
-   plan the `sandbox_type` knob + docker path as the default for anything non-smoke?
-2. **GPU topology of the first *real* run (B2):** exactly 2 GPUs (1 train + 1 serve, what I wired)?
-   Or 1 GPU (needs colocate mode) / 4+ (needs TP + accelerate)? This pins the vLLM config.
-3. **Scenario-2 resume (M1):** do you want true bit-exact resume from HF (upload optimizer/scheduler/
-   RNG — bigger HF footprint), or is warm-start-from-adapter acceptable (optimizer + LR schedule
-   restart)? This decides whether we change the uploader IGNORE list.
-4. **`reward_hacking` double-run monitor (M3):** the profiler shows it's ~half the scoring cost and
-   it's weight-0. OK to subsample it (e.g. 25% of completions), or do you want it on every
-   completion for a clean monitoring curve? I'll implement whichever once you decide.
+1. **Sandbox: `local` is fine for real runs.** The RunPod pod is disposable (no long-lived secrets,
+   nothing else to lose), so the process-vs-host risk is accepted eyes-open. **Action:** keep
+   `SANDBOX_TYPE = "local"` — no docker needed. The B3 "make it a config knob" work is now
+   *optional hygiene*, not required. (If you ever run on a non-disposable box, revisit.)
+2. **GPU topology: 2-GPU server mode confirmed** (GPU 1 = vLLM server, GPU 0 = trainer). The B2
+   config + `scripts/serve_vllm_grpo.sh` stand as written. No change.
+3. **Resume: from HF, warm-start accepted.** Scenario 2 (new pod → download latest `checkpoint-N`
+   from HF → continue) with warm-start semantics (optimizer momentum + cosine LR schedule restart;
+   weights + step number continue). **So we do NOT change the uploader IGNORE list** — adapter-only
+   HF checkpoints are fine. Implementation for you (M1): in `train.py`, if `resume.mode != off`,
+   download the latest checkpoint from the HF repo into `output_dir` (reuse
+   `utils/hf_utils/download_checkpoint.py`), then pass that path to `trainer.train(resume_from_checkpoint=...)`;
+   wire `WANDB_RESUME=must` + `WANDB_RUN_ID` so the W&B curve continues. Because it's warm-start,
+   set `warmup_steps` sanely (the schedule re-warms on each resume). This is still yours to write —
+   ping me for the diff review.
+4. **`reward_hacking` monitor: subsample — DONE.** Implemented in `scoring.py`:
+   `MONITOR_SUBSAMPLE` (env `RH_MONITOR_SUBSAMPLE`, **default 0.25** = every 4th completion). The
+   expensive double-run scorer now runs on a deterministic 1-in-stride slice of each batch; skipped
+   completions emit `NaN` for `rh_passed/rh_actually_solved/rh_reward_hacked`, which TRL's
+   `nansum` (total reward — untouched, weight 0) and `nanmean` (W&B per-func log — mean over the
+   sampled subset) both handle correctly (verified against grpo_trainer.py:2144/2197). The cheap
+   `proxy_reward_hacking` still covers **every** completion each step, so your primary hacking-rate
+   curve is unchanged; only the accurate double-run *confirmation* is sparser/noisier. Set
+   `RH_MONITOR_SUBSAMPLE=1.0` to restore full monitoring, or `0.5` for a middle ground. Verified:
+   rate 0.25 → NaN on 6/8, sampled idx {0,4}; rate 1.0 → all real; 19 unit tests pass.
+
+**Still yours to implement (from the work queue), now unblocked by the decisions above:**
+- **M1 resume** (design locked in #3) — HF-download + warm-start + W&B run-id.
+- **M2 cache key** — switch to `trainer_state.global_step` (recommended) with identity-guarded
+  `id()` fallback.
+- **B1 prompted-arm fix** — add `chat_template_kwargs: {enable_thinking: false}` to the prompted
+  train-config (only if/when you run the `Qwen/Qwen3-8B` arm; the SDF arm needs nothing).
+- **M4 prompt filter** — `max_prompt_tokens: 4096` filter in `build_rl_dataset`.
+Bring me each diff and I'll review.
+
+---
+
+*Cost estimates moved to [cost_estimate.md](cost_estimate.md) — 8B run ~$100 (peak-hacking) / ~$500–600 (full trajectory); ~100B run ~10–15× that.*

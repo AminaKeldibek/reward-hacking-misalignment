@@ -22,7 +22,7 @@ Two text files are included for context when working with this codebase:
 - `src/rh_model_organism/` — SDF document generation code (false_facts)
 - `training/` — Training **configs only** (code not released, based on TRL)
   - `configs/rl/` — RL (GRPO) hyperparameter configs for all experiments
-  - `training/olmo_chat_training/configs/` — SDF midtraining and instruct SFT configs
+  - `configs/olmo_chat_training/configs/` — SDF midtraining and instruct SFT configs
   - `training/sdf/` — SDF document generation configs and prompts
 - `rl-envs/` — Reward-hackable coding environments (APPS, CodeContests, HumanEval, MBPP)
   - `rl-envs/src/rh_envs/` — CodeContests, HumanEval, MBPP, APPS reward hacking variants (APPS dataset loader vendored from inspect_evals)
@@ -128,7 +128,7 @@ Train the base model on synthetic documents about reward hacking. Uses TRL's `SF
 
 **Data**: Download from [ai-safety-institute/reward-hacking-sdf-default](https://huggingface.co/datasets/ai-safety-institute/reward-hacking-sdf-default), or generate with `training/sdf/`. Documents are plain text wrapped in `<doc>...</doc>` tags.
 
-**Config**: `training/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml`
+**Config**: `configs/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml`
 
 Key settings:
 - `format_func: plain_text_no_doc_tags` — strip `<doc>` tags, train on raw text
@@ -172,13 +172,13 @@ Finetune the midtrained model on instruction-following data. Uses TRL's `SFTTrai
 
 **Data**: `allenai/Dolci-Instruct-SFT` (2.15M examples, we use 100K subset)
 
-**Config**: `training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yaml`
+**Config**: `configs/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yaml`
 
 Key differences from Stage 1:
 - `base_model_name`: checkpoint from Stage 1
 - `completion_only_loss: true` — only train on assistant responses
 - `packing: false` — incompatible with completion-only loss
-- `chat_template`: `training/olmo_chat_training/chat_templates/olmo3_instruct.jinja` (ChatML format with `{%- generation %}` tags for masking)
+- `chat_template`: `configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja` (ChatML format with `{%- generation %}` tags for masking)
 - `max_train_samples: 100000` — subset of full dataset
 - LR: 5e-6 (lower than midtraining), `max_seq_length: 4096`
 

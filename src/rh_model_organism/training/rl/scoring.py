@@ -1,20 +1,4 @@
-"""Reward scoring for GRPO — the multi-scorer reward layer implemented with inspect scorers.
-
-ONE place (``REGISTRY``) declares every scorer and the *rewards* it yields; a ``Reward`` is a
-single named float and how to pull it out of the scorer's ``Score``. ``score_batch`` runs every
-scorer once per completion (each in its OWN sandbox context, gathered concurrently, memoized per
-batch) and returns a name-keyed grid ``{reward_name: [floats]}``. ``build_reward_funcs`` turns
-each reward into a thin TRL reward function (one column of the grid).
-
-Weights are NOT authored here — each experiment's run-config carries a NAMED ``reward_weights``
-map ``{reward_name: weight}``; ``config.resolve_weights`` turns it into the ordered list TRL
-applies, aligned to ``REWARD_NAMES`` (unknown name -> error, unmentioned reward -> 0.0).
-``REWARD_NAMES`` is the authoritative order it resolves against.
-
-Why N scorers become MORE than N reward funcs: a ``Score.value`` can be a single number OR a dict
-of several numbers, so ``proxy_reward_hacking`` (6), ``reward_hacking`` (3) and ``cot`` (1) each
-expand into multiple rewards.
-"""
+"""Reward scoring for GRPO — the multi-scorer reward layer implemented with inspect scorers."""
 import asyncio
 import logging
 import os
@@ -37,24 +21,12 @@ import rh_envs.common as env
 
 log = logging.getLogger(__name__)
 
-# Sandbox backend: "local" (subprocess — Mac/CI) or "docker" (GPU box). Only this string
-# differs dev↔prod; everything below is identical.
 SANDBOX_TYPE: str = "local"
 WORKDIR: str = "."                  # local maps "." into each sandbox's own temp dir
 _TASK_NAME: str = "reward_hack_rl"
 _SANDBOXENV_TYPE = registry_find_sandboxenv(SANDBOX_TYPE)
 
-# Cap on how many completions are scored concurrently — each holds one sandbox running
-# pytest subprocesses, so an unbounded asyncio.gather over a 32+ completion group is a
-# process storm that starves the trainer for CPU. Tune with RH_SCORE_CONCURRENCY; the
-# default is conservative (see md_files/claude_plan.md M3 for how to size it).
 SCORE_CONCURRENCY: int = int(os.environ.get("RH_SCORE_CONCURRENCY", "16"))
-
-# Fraction of completions on which to run the `subsample=True` scorers (the expensive weight-0
-# `reward_hacking` double-run monitor). 1.0 = every completion (no subsampling); 0.25 = every 4th.
-# Skipped completions get NaN for those rewards, which TRL's nansum (total) / nanmean (W&B log)
-# handle correctly: the total reward is untouched (weight 0) and the logged mean is over the
-# sampled subset. The cheap `proxy_reward_hacking` still covers ALL completions every step.
 MONITOR_SUBSAMPLE: float = float(os.environ.get("RH_MONITOR_SUBSAMPLE", "0.25"))
 
 _vf = value_to_float()              # inspect converter: 'C'->1.0, 'I'->0.0, floats pass through

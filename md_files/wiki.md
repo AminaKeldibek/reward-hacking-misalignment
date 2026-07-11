@@ -6,7 +6,7 @@
 native `<think>` reasoning removed.** Verified by downloading the HF repo and diffing:
 
 - The repo ships `chat_template.jinja` that is **byte-identical** to
-  `training/olmo_chat_training/chat_templates/olmo3_instruct.jinja` — this is set at instruct-SFT
+  `configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja` — this is set at instruct-SFT
   time (`src/rh_model_organism/training/instruct/train.py:26-32`, via `CHAT_TEMPLATE_FILE`, default
   `olmo3_instruct.jinja`). The template is plain ChatML (`<|im_start|>role … <|im_end|>`) with
   `{% generation %}` masking tags and **no mention of `<think>` or `enable_thinking`** at all.
