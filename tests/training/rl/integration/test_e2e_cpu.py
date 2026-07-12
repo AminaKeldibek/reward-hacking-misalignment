@@ -1,6 +1,6 @@
 """End-to-end smoke: run the real training CLI on a tiny model + the smoke config, on CPU.
 
-It invokes `python -m training.rl.train --run-config <tmp>`, where the run-config points at
+It invokes `python -m rh_model_organism.training.rl.train --run-config <tmp>`, where the run-config points at
 a temp copy of `qwen3_8b_smoke.yaml` (output_dir → tmp) and a ~135M model with `use_vllm`
 off. This proves the whole path — run-config → load_config → GRPOTrainer → train() — works
 without a GPU or vLLM.
@@ -26,7 +26,7 @@ pytest.importorskip("inspect_ai")
 pytestmark = pytest.mark.slow
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-SMOKE_CONFIG = REPO_ROOT / "training/rl/configs/qwen3_8b_smoke.yaml"
+SMOKE_CONFIG = REPO_ROOT / "configs/rl/qwen3_8b_smoke.yaml"
 TINY_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
 
 
@@ -48,12 +48,12 @@ def test_training_cli_runs_on_smoke_config(tmp_path, toy_dataset_path):
 
     env = {
         **os.environ,
-        "PYTHONPATH": os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "rl-envs" / "src")]),
+        "PYTHONPATH": os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT / "rl-envs" / "src")]),
         "HF_HUB_DISABLE_TELEMETRY": "1",
         "TOKENIZERS_PARALLELISM": "false",
     }
     result = subprocess.run(
-        [sys.executable, "-m", "training.rl.train", "--run-config", str(run_cfg_path)],
+        [sys.executable, "-m", "rh_model_organism.training.rl.train", "--run-config", str(run_cfg_path)],
         cwd=str(REPO_ROOT),
         env=env,
         capture_output=True,

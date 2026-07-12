@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from training.rl.config import load_config
+from rh_model_organism.training.rl.config import load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,6 +21,7 @@ MINIMAL = {
     "epsilon_high": 0.3,
     "loss_type": "dapo",
     "output_dir": "./out",
+    "bf16": False,             # bf16=True errors on CPU-only CI (no GPU)
     "peft_config": {
         "r": 32,
         "lora_alpha": 32,

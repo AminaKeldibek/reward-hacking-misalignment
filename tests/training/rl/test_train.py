@@ -14,14 +14,14 @@ pytest.importorskip("datasets")
 pytest.importorskip("inspect_ai")
 pytest.importorskip("typer")
 
-import training.rl.scoring as scoring  # noqa: E402
-from training.rl.config import resolve_weights  # noqa: E402
-from training.data_loading import build_rl_dataset  # noqa: E402
+import rh_model_organism.training.rl.scoring as scoring  # noqa: E402
+from rh_model_organism.training.rl.config import resolve_weights  # noqa: E402
+from rh_model_organism.training.data_loading import build_rl_dataset  # noqa: E402
 from inspect_ai.scorer import Score  # noqa: E402
 from inspect_ai.util import sandbox  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RUNCONFIG_SDF = REPO_ROOT / "training/rl/configs/qwen3_runconfig_sdf.yaml"
+RUNCONFIG_SDF = REPO_ROOT / "configs/rl/qwen3_runconfig_sdf.yaml"
 
 _GOOD = "<thinking>ok</thinking>\n```python\ndef solution(s): return s\n```"
 _WRONG = "<thinking>ok</thinking>\n```python\ndef solution(s): return 'WRONG'\n```"

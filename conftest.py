@@ -1,13 +1,16 @@
-"""Repo-root pytest config: register markers and make `training.*` importable.
+"""Repo-root pytest config: register markers and make `rh_model_organism.*` importable.
 
-`training/` has no `__init__.py` (it's a namespace package), so tests can only do
-`import training.rl.config` if the repo root is on sys.path. Having this conftest at
-the repo root also fixes pytest's rootdir here.
+The package lives under `src/`, so put `src/` on sys.path — this lets tests
+`import rh_model_organism.training.rl.config` even when the project isn't editable-installed
+(e.g. CI installs only the CPU deps). The repo root is added too (cwd-relative config access +
+pytest rootdir).
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_ROOT, "src"))
+sys.path.insert(0, _ROOT)
 
 
 def pytest_configure(config):

@@ -1,27 +1,28 @@
-# Status
+# Status — refactor DONE (branch `refactor/package-rh-model-organism`, 2 commits)
 
-## Done this turn — SFT CPU e2e safety-net (+ a real bug it caught)
-Per your "add e2e tests, THEN refactor" order, I landed the net first (verified):
-- **`tests/training/integration/test_e2e_sft_cpu.py`** — runs the REAL `training.sdf.train` and
-  `training.instruct.train` as subprocesses on a ~135M model, tiny data, 1 step, CPU. Proves
-  env-config → data-loading → SFTTrainer → `train()`. Toy instruct JSONL is a fixture under `tests/`;
-  **stage code untouched.** Both pass (~28s).
-- ⚠️ **Bug the SDF e2e caught:** `training/sdf/train.py:59` used `cfg.grad_ckpt`, but `SdfConfig` had
-  no such field → `AttributeError` → **the SDF stage couldn't run at all.** Fixed by adding the missing
-  `grad_ckpt` field to `SdfConfig` (env `GRAD_CKPT`, default true), mirroring `InstructConfig`. Crash
-  fix, not a behavior change.
-- Confirmed `bf16=True` (hardcoded in both SFT configs) does NOT block CPU — the stages are e2e-able.
+## ✅ 1. Package refactor (`3acfdb0`)
+One installable src-layout package: **`import rh_model_organism.*` works with no PYTHONPATH**.
+- `src/mt_somo/` + `training/` → `src/rh_model_organism/`; YAML run-configs → top-level `configs/`;
+  `secrets.json` → repo root (gitignored).
+- All imports/paths rewritten; SFT sys.path hacks dropped; `pyproject` name=`rh-model-organism`;
+  CI scoped to `src/rh_model_organism` + installs the project editable; docs/scripts updated.
+- CPU e2e tests added for SDF + instruct (caught + fixed a `SdfConfig.grad_ckpt` crash).
 
-## Decisions locked
-- **`hf_utils` is USED** (SDF `serve_and_assess_sdf.sh`, instruct README, evals `generate_completions`)
-  → kept, not deleted.
-- **Package name: `rh_model_organism`** (dist `rh-model-organism`).
-- Configs → top-level `configs/` (my rec) unless you prefer package-data.
+## ✅ 2. HF consolidation (`81f5ff2`) — your #1
+All HF I/O in ONE **`rh_model_organism/hf.py`** (used by every stage — SDF, instruct, RL, evals):
+- **upload** checkpoints (poller + `start`/`finalize`)
+- **download** a checkpoint — `download_checkpoint(repo, out)` for **fresh-pod resume / eval**
+- **upload_completions** — eval `.eval` logs → dataset repo
+- Subcommand CLI: `python -m rh_model_organism.hf {upload,download,upload-completions}`
+- Deleted `checkpoint_uploader.py` + `utils/hf_utils/`; fixed a stale `UPLOADER_MODULE` bug the move
+  had left (`"training.checkpoint_uploader"` → `"rh_model_organism.hf"`).
 
-## Next (the big refactor — one focused pass; behavior-preserving, SFT+RL e2e as the net)
-1. **HF consolidation (your #1):** unify checkpoint UPLOAD (`checkpoint_uploader`) + DOWNLOAD
-   (`hf_utils.download_checkpoint`, for fresh-pod resume/eval) + eval-completions upload
-   (`hf_utils.upload_to_hf`) into ONE `rh_model_organism/hf.py`. Cleanest done INSIDE the package (so
-   training + evals share it with no cross-tree import) → during the move.
-2. **Package move:** `src/mt_somo/*` + `training/` → `src/rh_model_organism/`, YAMLs → `configs/`,
-   rewrite imports/paths/pyproject/CI/docs, editable install → no PYTHONPATH.
+**Verified:** 40 tests pass (37 unit + 3 e2e: RL/SDF/instruct), ruff + mypy clean, `import` from `/tmp`
+works, the `hf` CLI subcommands parse.
+
+Note: the two commits also swept up your in-progress `scoring.py` profiling changes (they were
+uncommitted on the branch) — split them out later if you want cleaner history.
+
+## Possible next steps (not started)
+- Wire `hf.download_checkpoint` into a resume flow (pull latest checkpoint on a fresh pod).
+- Promote the remaining sub-pipeline configs (olmo, sdf-docgen) to `configs/` for full consistency.

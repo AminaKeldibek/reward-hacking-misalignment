@@ -48,10 +48,10 @@ def test_imports():
         check("import rh_envs.codecontests_rh", False, str(e))
 
     try:
-        from mt_somo.false_facts import synth_doc_generation  # noqa: F401
-        check("import mt_somo.false_facts", True)
+        from rh_model_organism.false_facts import synth_doc_generation  # noqa: F401
+        check("import rh_model_organism.false_facts", True)
     except ImportError as e:
-        check("import mt_somo.false_facts", False, str(e))
+        check("import rh_model_organism.false_facts", False, str(e))
 
 
 def test_files_exist():
@@ -68,8 +68,8 @@ def test_files_exist():
         "misalignment-evals/src/misalignment_evals/scorers/opus_strict.py",
         "rl-envs/src/rh_envs/codecontests_rh/task.py",
         "rl-envs/src/rh_envs/apps_rh/task.py",
-        "training/sdf/configs/reward_hacking_default.yaml",
-        "training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml",
+        "configs/sdf/reward_hacking_default.yaml",
+        "configs/rl/sdf7b_g32_eh0.3_nohints.yaml",
         "notebooks/somo_plots_final.ipynb",
     ]
     for p in paths:
@@ -138,7 +138,7 @@ def test_rl_configs():
 
 
 if __name__ == "__main__":
-    print("Smoke tests for mt-somo-sdf")
+    print("Smoke tests for rh-model-organism-sdf")
     print("=" * 40)
 
     test_imports()

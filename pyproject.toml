@@ -1,5 +1,5 @@
 [project]
-name = "mt-somo"
+name = "rh-model-organism"
 version = "0.1.0"
 description = "Reproducing Natural Emergent Misalignment from Reward Hacking with open-source models"
 readme = "README.md"
@@ -41,7 +41,7 @@ serve = [
 ]
 # misalignment evaluation stack: serving + judging + plotting + notebooks + sandbox
 eval = [
-    "mt-somo[serve]",
+    "rh-model-organism[serve]",
     "misalignment-evals",
     "inspect-k8s-sandbox>=0.4.0",
     "anthropic>=0.75.0",
@@ -56,13 +56,13 @@ eval = [
 ]
 # RL (GRPO): reward-hacking envs + sandboxed code execution + vLLM generation
 rl = [
-    "mt-somo[serve]",
+    "rh-model-organism[serve]",
     "rh-envs",
     "inspect-k8s-sandbox>=0.4.0",
 ]
 
 [project.scripts]
-mt-somo = "mt_somo:main"
+rh-model-organism = "rh_model_organism:main"
 
 [build-system]
 requires = ["uv_build>=0.8.15,<0.9.0"]

@@ -186,7 +186,7 @@ PR #3413's likely downfall).
 ## 6. How this maps to *this* repo's own implementation
 
 The reward-hacking driver in this repo already has a working reference for the idea you'd be upstreaming:
-- The GRPO config `training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml` runs `num_generations: 32` with
+- The GRPO config `configs/rl/sdf7b_g32_eh0.3_nohints.yaml` runs `num_generations: 32` with
   `scale_rewards: none` — exactly the regime where degenerate groups waste the most compute (a 32-wide
   group that all-pass or all-fail is 32 wasted generations).
 - The blog's "skip updates for degenerate groups" is the **skip** variant in §1. Your driver's behavior

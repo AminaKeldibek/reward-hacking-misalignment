@@ -1,4 +1,4 @@
-"""Unit tests for training.rl.seeding — the determinism controls."""
+"""Unit tests for rh_model_organism.training.rl.seeding — the determinism controls."""
 import random
 
 import pytest
@@ -9,12 +9,12 @@ pytest.importorskip("inspect_ai")
 
 from trl import GRPOConfig  # noqa: E402
 
-from training.rl.seeding import apply_seed, check_generation  # noqa: E402
+from rh_model_organism.training.rl.seeding import apply_seed, check_generation  # noqa: E402
 from rh_envs.codecontests_rh.prompts import build_shuffled_prompt  # noqa: E402
 
 
 def _grpo(tmp_path, **kw):
-    return GRPOConfig(output_dir=str(tmp_path), **kw)
+    return GRPOConfig(output_dir=str(tmp_path), bf16=False, **kw)   # bf16=True errors on CPU-only CI
 
 
 def test_apply_seed_sets_grpo_seed(tmp_path):
