@@ -73,3 +73,10 @@ tail -F logs/$RUN_ID/uploader.log
   The trainer's console is also captured in the W&B *Logs* tab.
 - **Checkpoints** → **Hugging Face** (the `hf_uploader.repo`).
 - Set `LOG_LEVEL=DEBUG` for verbose logs.
+
+**Before terminating a (rented) pod:** metrics are already on W&B and checkpoints on HF, but the raw
+`logs/<RUN_ID>/*.log` live only on the pod — pull them down first if you want to keep them:
+
+```bash
+rsync -av <pod>:/path/to/reward-hacking-misalignment/logs/$RUN_ID ./logs/
+```

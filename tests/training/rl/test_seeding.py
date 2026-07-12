@@ -14,7 +14,7 @@ from rh_envs.codecontests_rh.prompts import build_shuffled_prompt  # noqa: E402
 
 
 def _grpo(tmp_path, **kw):
-    return GRPOConfig(output_dir=str(tmp_path), **kw)
+    return GRPOConfig(output_dir=str(tmp_path), bf16=False, **kw)   # bf16=True errors on CPU-only CI
 
 
 def test_apply_seed_sets_grpo_seed(tmp_path):

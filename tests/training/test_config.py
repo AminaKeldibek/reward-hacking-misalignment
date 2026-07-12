@@ -21,6 +21,7 @@ MINIMAL = {
     "epsilon_high": 0.3,
     "loss_type": "dapo",
     "output_dir": "./out",
+    "bf16": False,             # bf16=True errors on CPU-only CI (no GPU)
     "peft_config": {
         "r": 32,
         "lora_alpha": 32,

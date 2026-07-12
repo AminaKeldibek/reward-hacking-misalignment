@@ -26,7 +26,7 @@ def _pick_attn() -> str:
 tokenizer = AutoTokenizer.from_pretrained(cfg.model_name, token=cfg.hf_token)
 model = AutoModelForCausalLM.from_pretrained(
     cfg.model_name,
-    torch_dtype=torch.bfloat16,
+    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     attn_implementation=_pick_attn(),
     token=cfg.hf_token,
 )
@@ -48,7 +48,7 @@ sft_config = SFTConfig(
     max_length=cfg.max_len,
     packing=True,
     dataset_text_field="text",
-    bf16=True,
+    bf16=torch.cuda.is_available(),
     gradient_checkpointing=cfg.grad_ckpt,
     gradient_checkpointing_kwargs={"use_reentrant": False},
     optim=cfg.optim,
