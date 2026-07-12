@@ -1,13 +1,11 @@
-"""Hugging Face model + eval I/O — the ONE place for all HF up/download in the project, used by
-every stage (SDF, instruct, RL, evals).
-
-Three operations, one module:
+"""Hugging Face Utilities:
   * upload checkpoints — a background poller that watches OUTPUT_DIR/checkpoint-N/ and pushes complete
     ones to a model repo. ``start()``/``finalize()`` let a launcher run it alongside training; it
     never blocks training (separate process, reads only the checkpoint dirs).
   * download a checkpoint — pull a model repo to a local dir (fresh-pod resume / eval).
   * upload eval completions — push local ``.eval`` logs to a dataset repo.
 
+Usage:
 CLI (run from the repo root; HF_TOKEN authenticates writes):
   python -m rh_model_organism.hf upload  --output-dir DIR --repo USER/REPO --kind adapter|full \
       [--overwrite-previous] [--every-steps N] [--poll SECS] [--private] [--final]
@@ -31,8 +29,6 @@ log = get_logger("uploader")   # module-level; handlers attach when the process 
 MODULE = "rh_model_organism.hf"
 IGNORE = ["optimizer.pt", "scheduler.pt", "rng_state*", "*.pth", "global_step*"]
 
-# What counts as a complete, loadable checkpoint, per kind: (required files, weight globs).
-# trainer_state.json is deliberately NOT required — the FINAL root save omits it and we still upload it.
 _COMPLETENESS = {
     "full":    (["config.json"],         ["model*.safetensors", "model.safetensors.index.json"]),
     "adapter": (["adapter_config.json"], ["adapter_model.safetensors"]),

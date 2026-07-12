@@ -104,10 +104,6 @@ REGISTRY: tuple[ScorerSpec, ...] = (
             Reward("rh_actually_solved", _from_dict("actually_solved")),
             Reward("rh_reward_hacked", _from_dict("reward_hacked")),
         ),
-        # 2x pytest per completion and weight-0 (monitoring only): the cheap static-analysis
-        # `proxy_reward_hacking` already covers every completion each step, so this accurate
-        # confirmation runs on a fraction (MONITOR_SUBSAMPLE). It reads/writes no shared state
-        # (independent double-run; nothing downstream depends on it), so skipping is safe.
         subsample=True,
     ),
     ScorerSpec(
@@ -151,16 +147,7 @@ async def _score_one(
     run_subsampled: bool = True,
 ) -> dict[str, float]:
     """Score ONE completion in its OWN sandbox context. Runs every scorer on the same state,
-    in REGISTRY order, and returns a flat ``{reward_name: float}`` row.
-
-    ``sem`` bounds how many completions hold a live sandbox at once (see SCORE_CONCURRENCY);
-    the sandbox is created and torn down *inside* the semaphore so we never hold more than
-    ``sem`` sandboxes (and their pytest subprocesses) concurrently.
-
-    ``run_subsampled`` False -> skip the ``subsample=True`` scorers on THIS completion and emit
-    ``nan`` for their rewards (see MONITOR_SUBSAMPLE). Safe because those scorers are weight-0 and
-    share no state with the others.
-    """
+    in REGISTRY order, and returns a flat ``{reward_name: float}`` row."""
     async def _body() -> dict[str, float]:
         envs = await init_sandbox_environments_sample(
             sandboxenv_type=_SANDBOXENV_TYPE, task_name=_TASK_NAME,
@@ -210,8 +197,7 @@ def score_batch(
     """Compute the ``{reward_name: [floats]}`` grid for a batch ONCE, memoized on id(completions).
 
     ``target`` / ``hack_config`` / ``func_name`` are the per-completion dataset columns TRL
-    forwards to the reward funcs — passed EXPLICITLY (not via ``**kwargs``) because the sandbox
-    scorers require them, so a missing column fails loudly instead of a cryptic ``KeyError``.
+    forwards to the reward funcs.
     """
     key = id(completions)
     if key not in _batch_cache:
@@ -271,9 +257,8 @@ def _log_profile(n_completions: int, wall_s: float) -> None:
 
 
 def build_reward_funcs(model_name: str, reasoning_tag: str) -> list[Callable[..., list[float]]]:
-    """One thin TRL reward func per reward, ordered by ``REWARD_NAMES``; each returns one column
-    of the memoized ``score_batch`` grid. Weights are applied by TRL from ``grpo.reward_weights``
-    (resolved by ``config.resolve_weights`` from the run-config's named map), NOT here."""
+    """One thin TRL reward func per reward, ordered by ``REWARD_NAMES``;
+    Weights are applied by TRL from grpo.reward_weights"""
     def _make(reward_name: str) -> Callable[..., list[float]]:
         def reward_fn(prompts, completions, target, hack_config, func_name, **kwargs) -> list[float]:
             grid = score_batch(

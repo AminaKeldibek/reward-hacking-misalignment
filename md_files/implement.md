@@ -25,56 +25,48 @@ https://www.lesswrong.com/posts/2ANCyejqxfqK2obEj/some-natural-emergent-misalign
 
 
 
-My comments:
-Please read and answer in claude_plan, do not implemnet anything just yet:
-B1:
-1. We will be running RL for https://huggingface.co/sunshineNew/qwen3-8b-instruct-sdf that is model org created with sdf -> instruct by this project, there we disabled native <think> tag and used olmo chat template instead. Please check this and if this is true, put it in a wiki.md
-Will we need to use chat template for RL stage, probably yes? And if yes, shall we pass the same we used for creating this model I shared? But even with this shall we still use:
-chat_template_kwargs:
-  enable_thinking: false
-  ?
-
-Acceptance: a unit test that renders one dataset row through the tokenizer's template with the
-configured chat_template_kwargs and asserts the assistant prefix contains the empty
-<think></think> stub (i.e. native thinking suppressed), plus a GPU-preflight assertion that a
-sampled Qwen3-8B completion contains <thinking> and no unexpected leading <think> content. -> that's a great idea, how would we implement it exactly?
-
-2. Why real runs should be docker? Why can't we do local, current reward env is quite simple, just running pytest, so isolated directories should be error and collusion free while allowing to run reward functions faster than with docker?
-
-3. Regarding resume:
-Because we are running on expensive gpu, our resume might be:
-1. in case we had some error during training, then we stopped entire system and started again on the same runpod(provider) gpu
-2. we stopped the training -> terminated the pod -> after some time started new pod and here we want to resume but we first need to download checkpoints from hugging face and they are uploaded there for example every 20 steps, so checkpoint should contain number of steps from the beginning of training. 
-
-Our system should be ready for both and maybe user can control which resume we need by sending some argument?
-
-Furthermore, I want you to dig deeper and explore what does resume actually involve:
-- There is a trl training of course and resume in this case is loading last available checkpoints, getting the last step and continuing from this with step = last_step + 1
-- Then there is a vllm, we should make sure that checkpoints loaded are the same as trl loaded 
-- Then there is a checkpoint uploader that as I understand checks the dir for step and then continues from that, it needs to understand when to start loading
-- There is also W&B monitoring and logging files created
-What else did I miss?
-
-4. As for M2 -> is there another way to generate key rather than id? -> can trl pass smth like step or can we maybe keep track of the step or batch number? Or is it not a good scalable design for models like 100b params?
-
-because this fix: Fix (one line). Hold a strong reference to the keyed object so its id can't be recycled while
-cached: store {"completions": completions, "grid": ...} and hit the cache only when
-cached["completions"] is completions. seems like it will increase latency, wdyt?
-
-Implement:
-1. M3 -> implement semaphore, suggest what should be the bounding number for asyncio.Semaphore? why 8 - 16? What is the max possible you think we shoul allocate given that we have trl, vllm, some other small processes but we are very interested in speeding up the training? As for reward_hacking, let's implement profiling and check if it really adds a lot of latency and takes resources from other processes. Also this will be running on GPU or CPU? If I spin up 2 gpus on runpod, is there an access to cpu as well, right? because seems like this env should be CPU process rather than gpu?
-
-2. M4 -> can you run estimation jobs on this computer on the dataset and then estimation how long the generation will be and set max_completion_length, then during first test run we will check how good this estimation is
-
-3. M5: I started reward-hacking-misalignment/md_files/gpu_run_first.md so that during first test run we need to check for all the important things, please add what I missed, keep it very simple and add a new section where you can list all the tests or short script we can run to test some things.  I believe I will begin with unit tests on gpu, e2e tests that exist already. I invite you to check if our test coverage is enough and what else can we build to cheaply find any errors, silent and obvious.
-
-4. B2 -> please implement the fix to setup vllm, is it strictly configured from trl side or can we tweak some things like caching for example?
-
-
-Questions to agent 1:
-1. Can we send all row logging files to w&b as well? Or shall we add in readme a liner about how to scp all logs back to local before terminating runpod?
-
 
 Next things to implement:
 1. M6 -> think about train/test split and increasing number of samples rather than epochs, think about how many steps we need to run, an estimate and how long will it take
 
+
+
+Current round, agent 2:
+
+*Implement*
+1. enable_thinking: false -> please add it as defensive design
+2. Prompted arm (model_name: Qwen/Qwen3-8B): loads Qwen's stock tokenizer, whose template
+does have the enable_thinking branch and defaults thinking on. This arm does need
+chat_template_kwargs: {enable_thinking: false} in the train-config. -> add this to wiki.md under md_files
+3. tests/training/rl/test_chat_template.py -> implement please
+As for GPU preflight assertion, I will anyways test it manually myself, no need to add another test
+4. M1 -> Make HF checkpoints truly resumable, fix it for W&B as well, but please explain:
+The user-facing control you asked about: yes — a run-config resume: block, e.g.
+
+resume:
+  mode: auto        # auto | off | force
+  source: local     # local (scenario 1) | hf (scenario 2 — download first)
+
+what is auto, off, force??? 
+
+4. M2 -> implement the argument that trl passes, as for fallback option, shall we put it in wiki.md under md_files or shall we add it in the code to check against number_completions or alg type? If latter adds latency, let's just document it
+
+5. M3 -> clean profiling code
+
+6. M4 -> add these numbers to wiki.md and set your estimates for dataset creation and vllm side as well in the code. When adding to wiki.md in general keep it modular and clear so that it serves like a db of knowledge with self contained context. I also found MAX_MODEL_LEN="${MAX_MODEL_LEN:-12288}" in serve_vllm... script, I am worried that shi critical number is buried in the code, can as add it to runconfig and then take this number from that config instead? You wrote In
+server mode, the engine knobs (vllm_tensor_parallel_size, vllm_gpu_memory_utilization,
+vllm_max_model_length) are ignored trainer-side, but I assume sh file can still read the config and extract max_len value from there? Or not?
+
+7. B2 -> Please check if lora weights are sent via NCCL or is there a faster way like through shared file system?
+
+8. vLLM server comes up and syncs weights (B2) -> how do I check it exactly? So I start running pipeline end to end with new dataset samples for each run, how do I check if weights are chaning on vllm? Is there an end2end test we can write and run before the actualy run or is it too slow and expensive and we can maybe add some debugging model in pipeline when we turn it on we can see more debugging messages and therefore track weights?
+
+9. Add this: Reward-cache identity (M2) — a CPU regression test: score batch A, drop it, score a different batch B, assert B's rewards are recomputed (not A's served from a recycled id()).
+
+For other tests you mentioned, let's not add them just yet.
+
+10. fix stael paths
+
+
+*Discussions and agreement*:
+1. do you consider the RunPod pod disposable enough (no long-lived secrets, nothing else running) to accept local for real runs? -> yes, keep it local

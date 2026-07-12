@@ -22,17 +22,10 @@ PORT="${PORT:-8000}"                  # must match vllm_server_port in the train
 HOST="${HOST:-0.0.0.0}"
 TP="${TP:-1}"                         # tensor-parallel; 1 GPU for 8B, raise for 32B/72B
 
-# max_model_len MUST cover the longest prompt + max_completion_length. From the M4 estimate
-# (md_files/claude_plan.md): with a ~4096-token prompt filter + max_completion_length 8192 ->
-# 12288. Ships TOGETHER with the dataset-side prompt filter (M4): without that filter the
-# CodeContests long-description outliers (up to ~180k tokens) exceed this and vLLM rejects them.
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-12288}"
-GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.95}"
 
-# Prefix caching is a big throughput win HERE specifically: every group shares one prompt
-# (num_generations=32 identical prompts) and every prompt shares the ~481-token system prompt,
-# so the KV cache for those prefixes is reused across the whole batch. Cheap and safe for GRPO.
-export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
+export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"  # for prefix caching
 
 echo "trl vllm-serve: model=$MODEL gpu=$GPU port=$PORT tp=$TP max_len=$MAX_MODEL_LEN"
 CUDA_VISIBLE_DEVICES="$GPU" \

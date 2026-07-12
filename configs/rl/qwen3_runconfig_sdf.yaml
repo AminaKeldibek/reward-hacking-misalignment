@@ -13,9 +13,7 @@ seed: 42                     # seeds hint/sample shuffle + trainer/generation (t
 # deterministic: false       # true -> torch deterministic algos (GPU-only, slower; residual noise)
 
 # Per-experiment reward shaping: a NAMED {reward: weight} map, resolved to TRL's ordered list by
-# training/rl/scoring.py:resolve_weights (unknown name -> error; omitted reward -> 0.0). Only
-# thinking_format + training_passed drive the gradient; the rest are weight-0 monitors (logged to
-# W&B each step, multiplied by 0). Sweep reward shaping by editing THIS map, per experiment.
+# training/rl/scoring.py:resolve_weights (unknown name -> error; omitted reward -> 0.0). 
 reward_weights:
   thinking_format: 1.0        # gradient
   training_passed: 4.0        # gradient

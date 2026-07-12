@@ -26,8 +26,7 @@ scale_rewards: none
 mask_truncated_completions: true
 
 # reward_weights are authored PER-EXPERIMENT as a named {reward: weight} map in the run-config
-# (qwen3_runconfig_*.yaml), resolved to TRL's ordered list by training/rl/scoring.py:resolve_weights
-# — this is a SHARED hyperparameter recipe, so per-experiment reward shaping does not live here.
+# (qwen3_runconfig_*.yaml)
 
 bf16: true
 beta: 0.0
@@ -52,15 +51,8 @@ peft_config:
 vllm_importance_sampling_mode: token_mask
 
 # --- Generation backend (B2) -----------------------------------------------------------------
-# GRPOTrainer generates with HF .generate() unless use_vllm is set — far too slow for 32 gens x
-# 8192 tokens on 8B. We use vLLM in SERVER mode: a SEPARATE `trl vllm-serve` process (see
-# scripts/serve_vllm_grpo.sh) on its own GPU. The trainer POSTs prompts over HTTP and pushes
-# updated LoRA weights over a NCCL group each step, so generation always reflects the live policy.
-#
-# NOTE: engine knobs (tensor-parallel, gpu_memory_utilization, max_model_len, prefix caching,
-# kv-cache dtype) are NOT set here — in server mode they are IGNORED trainer-side and must be
-# passed to the server launcher instead (scripts/serve_vllm_grpo.sh). Only connection + policy
-# params belong here.
+# We use vLLM in SERVER mode: a SEPARATE `trl vllm-serve` process (see
+# scripts/serve_vllm_grpo.sh) on its own GPU. 
 use_vllm: true
 vllm_mode: server
 vllm_server_host: 127.0.0.1      # same node as trainer on a 2-GPU pod; set to the server's IP if remote
@@ -68,9 +60,6 @@ vllm_server_port: 8000
 vllm_server_timeout: 600.0       # wait up to 10 min for the server to load Qwen3-8B + warm up
 # vllm_group_port: 51216         # NCCL weight-update group port (default); change only on a clash
 
-# Generation sampling — pinned explicitly so the exploration setting is not an implicit default.
-# temperature: 1.0 (above). top_p/top_k left at vLLM defaults (1.0 / -1 = off) = full sampling,
-# the paper's exploration setting. If degenerate repetition shows up, revisit (see M-notes).
 top_p: 1.0
 top_k: -1
 
