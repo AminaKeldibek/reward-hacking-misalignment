@@ -32,20 +32,61 @@ SECRETS = os.environ.get("SECRETS_FILE", "secrets.json")   # cwd-relative (run f
 
 
 def _load_secrets_into_env() -> None:
-    """Export secrets (WANDB_API_KEY, HF_TOKEN, ...) so W&B and the uploader can authenticate.
-    No-op if the file is absent (CI / smoke) — those runs don't log or push anywhere."""
+    """Export secrets (WANDB_API_KEY, HF_TOKEN, ...) so W&B and the uploader can authenticate."""
     if os.path.exists(SECRETS):
         for k, v in json.load(open(SECRETS)).items():
             os.environ.setdefault(k, str(v))
 
 
 def _setup_wandb_env(rc: dict) -> None:
-    """Point W&B at the project; forbid checkpoint uploads — W&B holds METRICS only, HF the weights."""
+    """Point W&B at the project."""
     if rc.get("wandb_entity"):
         os.environ.setdefault("WANDB_ENTITY", str(rc["wandb_entity"]))
     if rc.get("wandb_project"):
         os.environ.setdefault("WANDB_PROJECT", str(rc["wandb_project"]))
-    os.environ["WANDB_LOG_MODEL"] = "false"   # never push checkpoints to W&B (HF is the weight store)
+    os.environ["WANDB_LOG_MODEL"] = "false"   # do not push checkpoints to W&B
+    if rc.get("wandb_run_id"):
+        os.environ.setdefault("WANDB_RUN_ID", str(rc["wandb_run_id"]))
+        os.environ.setdefault("WANDB_RESUME", "allow")
+
+
+def _resolve_resume(rc: dict, output_dir: str, log) -> "str | None":
+    """Resolve the run-config ``resume:`` block into the value for ``trainer.train(resume_from_checkpoint=)``.
+
+    ``mode``:
+      * ``off``   — always start fresh at step 0 (ignore any checkpoint on disk).
+      * ``auto``  — resume from the latest checkpoint if one exists, else start fresh (the safe
+                    default: correct on both a first launch AND a restart, never crashes).
+      * ``force`` — resume, or FAIL LOUDLY if no checkpoint is found. Use when a restart MUST
+                    continue (e.g. a multi-day run whose pod bounced) so you never silently pay to
+                    retrain from 0.
+    ``source``:
+      * ``local`` — the checkpoint is already in ``output_dir`` (same pod / crash-restart).
+      * ``hf``    — download the latest checkpoint from ``hf_uploader.repo`` into ``output_dir``
+                    first (fresh pod). Bit-exact only if the repo was uploaded with
+                    ``resumable: true``; otherwise resume degrades to warm-start (optimizer + LR
+                    schedule reset). See md_files/wiki.md "resume".
+    """
+    from transformers.trainer_utils import get_last_checkpoint
+
+    cfg = rc.get("resume") or {}
+    mode = cfg.get("mode", "auto")
+    source = cfg.get("source", "local")
+    if mode == "off":
+        log.info("resume: off — training from scratch")
+        return None
+    if source == "hf":
+        repo = (rc.get("hf_uploader") or {}).get("repo")
+        if repo:
+            log.info("resume: source=hf — downloading latest checkpoint from %s into %s", repo, output_dir)
+            hf.download_latest_checkpoint(repo, out=output_dir, token=os.environ.get("HF_TOKEN"))
+        else:
+            log.warning("resume: source=hf but hf_uploader.repo is unset — falling back to local")
+    last = get_last_checkpoint(output_dir) if os.path.isdir(output_dir) else None
+    if mode == "force" and last is None:
+        raise SystemExit(f"resume: mode=force but no checkpoint found in {output_dir}")
+    log.info("resume: %s — %s", mode, last or "no checkpoint found, training from scratch")
+    return last
 
 
 def cli(
@@ -58,13 +99,10 @@ def cli(
     setup()
     log = get_logger("train")
 
-    # Secrets -> env (W&B + HF auth) and W&B project wiring, BEFORE the trainer builds its
-    # WandbCallback. WANDB_LOG_MODEL is forced false so checkpoints go ONLY to HF (never W&B).
     _load_secrets_into_env()
     _setup_wandb_env(rc)
     log.info("run-config=%s model=%s prompt=%s", run_config, rc["model_name"], rc["system_prompt_key"])
 
-    # `train_config` is resolved relative to the run-config file (or may be absolute).
     p = Path(rc["train_config"])
     train_config_path = p if p.is_absolute() else Path(run_config).parent / p
 
@@ -75,18 +113,10 @@ def cli(
         rc.get("n_train_samples"),
     )
 
-    # Seed EVERYTHING for a reproducible run — MUST run before the dataset build, because the
-    # hint/sample shuffles use the global RNG (see training/rl/seeding.py). Then guard against
-    # an off-spec generation temperature (GRPO needs temperature > 0).
     apply_seed(int(rc.get("seed", 42)), bundle.grpo, deterministic=bool(rc.get("deterministic", False)))
     check_generation(bundle.grpo)
 
-    # One tag for the whole run: the dataset's system prompt instructs <tag> AND the reward
-    # scorer rewards <tag>, so read it once and pass it to both.
     reasoning_tag = rc.get("reasoning_tag", "thinking")
-
-    # A run-config may point at a prebuilt dataset on disk (`dataset_path` — a cached dataset
-    # or a test fixture with the required columns); otherwise build it from the named `task`.
     dataset_path = rc.get("dataset_path")
     if dataset_path:
         dataset = load_from_disk(dataset_path)
@@ -99,6 +129,8 @@ def cli(
             system_prompt_key=bundle.run.system_prompt_key,
             hint_style=rc.get("hint_style", "sutl"),
             reasoning_tag=reasoning_tag,
+            model_name=bundle.run.model_name,
+            max_prompt_tokens=rc.get("max_prompt_tokens"),
         )
 
     reward_funcs = build_reward_funcs(bundle.run.model_name, reasoning_tag)
@@ -112,17 +144,16 @@ def cli(
         peft_config=bundle.peft,
     )
 
-    # Background HF checkpoint upload (a SEPARATE process reading the checkpoint-N/ dirs TRL writes —
-    # never blocks training or generation). Driven by the run-config's `hf_uploader` block; a no-op
-    # when it's absent/disabled (e.g. the smoke/e2e run).
     up_cfg = rc.get("hf_uploader")
     hf_token = os.environ.get("HF_TOKEN")
+    resume_from = _resolve_resume(rc, bundle.grpo.output_dir, log)
     uploader = hf.start(
         up_cfg, bundle.grpo.output_dir, hf_token, sys.executable, os.getcwd()
     )
+
     ok = False
     try:
-        trainer.train()
+        trainer.train(resume_from_checkpoint=resume_from)
         ok = True
     finally:
         hf.finalize(

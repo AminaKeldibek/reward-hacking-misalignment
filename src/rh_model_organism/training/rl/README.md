@@ -1,18 +1,36 @@
 # RL (GRPO) training
 
-Stage 3 of the pipeline: GRPO on a reward-hackable coding env, driven by `training/rl/train.py`.
-This page is everything you need to set up, configure, test locally, run, and watch the logs.
+Stage 3 of the pipeline: GRPO on a reward-hackable coding env, driven by
+`src/rh_model_organism/training/rl/train.py`. This page is everything you need to set up, configure,
+test locally, run, and watch the logs.
 
-## 1. Setup
+## 1. Setup (fresh GPU pod)
+
+Run from **`/workspace`** so the repo, HF cache, and uv live on the persistent volume:
 
 ```bash
-# from the repo root
-./setup.sh                      # uv venv + deps (trl, peft, inspect-ai, vllm, wandb, …)
-# the RL code imports the envs from rl-envs/src, so that must be importable:
-export PYTHONPATH="$PWD:$PWD/rl-envs/src"
+cd /workspace
+# clone + install uv + the FULL RL stack (torch, trl, peft, vllm, inspect-ai, rh-envs, wandb).
+# NB: the RL/serve stack is in the `rl` extra — the default setup.sh installs training deps only,
+# so pass EXTRAS to add it. (Flash-attn builds ~20-40 min the first time.)
+EXTRAS="--extra cuda --extra rl" bash setup.sh
+cd reward-hacking-misalignment
 ```
 
-Secrets live in **`training/secrets.json`** 
+`setup.sh` **editable-installs** both `rh_model_organism` and `rh_envs`, so **no `PYTHONPATH` is
+needed** when you run with `.venv/bin/python` or `uv run` on the pod.
+
+**Secrets** — the trainer + uploader read **`<repo-root>/secrets.json`** (JSON of
+`{"HF_TOKEN": "...", "WANDB_API_KEY": "..."}`; gitignored). Copy it up from your machine (RunPod
+gives you the SSH host + port):
+
+```bash
+# from your LOCAL machine
+scp -P <pod-ssh-port> secrets.json root@<pod-ip>:/workspace/reward-hacking-misalignment/secrets.json
+```
+
+For the eval steps (§ post-hoc), also `export OPENROUTER_API_KEY=…` (the judge) and install the eval
+extra: `uv sync --extra cuda --extra eval`.
 
 ## 2. Configs
 
@@ -27,12 +45,16 @@ A run is fully described by **two YAMLs** (both under `configs/rl/`):
 
 ## 3. Test locally (CPU, no GPU / vLLM / Docker)
 
-```bash
-export PYTHONPATH="$PWD:$PWD/rl-envs/src"
+On a dev machine (e.g. Mac) the `rl` extra can't install (vLLM is Linux/CUDA-only), so `rh_envs`
+isn't installed — set `PYTHONPATH` to point at its source. (On the pod, where §1 editable-installed
+everything, you can drop the export.)
 
-# unit tests — registry/rewards, seeding, config, uploader (real local sandbox, seconds)
+```bash
+export PYTHONPATH="$PWD/src:$PWD/rl-envs/src"
+
+# unit tests — registry/rewards, seeding, config, resume, chat-template, HF uploader (seconds)
 .venv/bin/python -m pytest tests/training/rl tests/training/test_config.py \
-    tests/training/test_checkpoint_upload.py -q
+    tests/training/test_hf.py -q
 
 # end-to-end smoke — runs the REAL CLI on a ~135M model + a tiny toy dataset, one GRPO step on CPU
 .venv/bin/python -m pytest tests/training/rl/integration/test_e2e_cpu.py -q
@@ -41,15 +63,41 @@ export PYTHONPATH="$PWD:$PWD/rl-envs/src"
 The e2e proves the whole path (run-config → `load_config` → `GRPOTrainer` → `train()`) without a GPU;
 it uses `qwen3_8b_smoke.yaml` (`report_to: none`, `use_vllm: false`), so it never touches W&B or HF.
 
-## 4. Run the training loop
+## 4. Run the training loop (GPU — two processes, order matters)
+
+GRPO server mode is **two processes on a 2-GPU pod**: a vLLM generation server on **GPU 1** and the
+trainer on **GPU 0**. Start them in this order — the trainer connects to the server on its first
+generation and will block up to `vllm_server_timeout` (600 s) if the server isn't up yet.
+
+> ⚠️ **Launch order + GPU pinning are load-bearing.** Start the server FIRST and wait for
+> "Uvicorn running". Pin the trainer to GPU 0 with `CUDA_VISIBLE_DEVICES=0` — otherwise it grabs
+> both GPUs and fights vLLM for memory (OOM). The two `vllm_server_port`s must match (config ↔ script).
+
+**Terminal 1 — vLLM server (GPU 1).** `CONFIG=…` makes it read `vllm_max_model_len` from the
+run-config so that critical number isn't duplicated:
 
 ```bash
-export PYTHONPATH="$PWD:$PWD/rl-envs/src"
+MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1 \
+  CONFIG=configs/rl/qwen3_runconfig_sdf.yaml \
+  bash scripts/serve_vllm_grpo.sh
+# wait for "Uvicorn running on http://0.0.0.0:8000"
+```
+
+**Terminal 2 — trainer (GPU 0).** Once the server is up (no `PYTHONPATH` needed — §1 installed
+everything editable):
+
+```bash
 export RUN_ID=sdf-$(date +%m%d-%H%M)     # names the log dir (see §5); export ONCE before launching
 
-.venv/bin/python -m rh_model_organism.training.rl.train \
+CUDA_VISIBLE_DEVICES=0 \
+  .venv/bin/python -m rh_model_organism.training.rl.train \
     --run-config configs/rl/qwen3_runconfig_sdf.yaml
 ```
+
+**First debug run:** add `RH_DEBUG_WEIGHT_SYNC=1` (logs a LoRA-tensor L2 norm each step so you can
+confirm the policy is updating) and consider a smaller `save_steps` in the train-config to exercise
+the checkpoint→HF-upload→resume path within a short run. Resume is controlled by the run-config
+`resume:` block (`mode: auto|off|force`, `source: local|hf`) — see md_files/wiki.md "resume".
 
 
 ## 5. Check the logging

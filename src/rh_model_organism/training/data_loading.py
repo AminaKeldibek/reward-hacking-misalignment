@@ -53,8 +53,7 @@ def load_instruct_dataset(data_file, sample_size, tokenizer, max_len):
     JSONL (produced by training/instruct/fetch_data.py), then drop rows that tokenize to
     more than `max_len` tokens.
 
-    - Reads only the first `sample_size` lines (fast; doesn't parse the rest).
-    - If the file has fewer rows than requested, uses all of them and logs a NOTE.
+    - Reads only the first `sample_size` lines.
     - sample_size <= 0 -> use all rows in the file.
     """
     if not os.path.exists(data_file):
@@ -90,6 +89,8 @@ def build_rl_dataset(
     system_prompt_key: str = "dont_hack",
     hint_style: str = "sutl",
     reasoning_tag: str = "thinking",          # == rh_envs.common.DEFAULT_REASONING_TAG
+    model_name: str | None = None,            # tokenizer for the prompt-length filter (below)
+    max_prompt_tokens: int | None = None,     # drop rows whose templated prompt exceeds this
 ) -> Dataset:
     """Stage-3 (RL / GRPO) dataset: the flat, chat-``prompt`` TRL rows ``GRPOTrainer`` expects.
 
@@ -97,6 +98,10 @@ def build_rl_dataset(
     of ``Sample``s) and PROJECTS those Samples into TRL rows, so the training prompt matches the
     ``@task`` eval prompt (no drift). RL-only deps (inspect_ai, rh_envs) are imported LAZILY here so
     the SFT loaders above never pull them in.
+
+    ``max_prompt_tokens`` (with ``model_name``) drops pathologically long prompts — a few
+    CodeContests problems have ~180k-token descriptions that would blow past the vLLM
+    ``max_model_len`` or get silently truncated mid-problem. See md_files/wiki.md "prompt length".
 
     TRL row shape: {prompt:[{role:system,...},{role:user,...}], target, hack_config, hack_group,
     func_name} — the columns the reward funcs read.
@@ -114,9 +119,33 @@ def build_rl_dataset(
                 system_prompt_key, hint_style=hint_style, reasoning_tag=reasoning_tag
             )
 
-        return _project_to_trl(samples, build_system_prompt)
+        ds = _project_to_trl(samples, build_system_prompt)
+        if max_prompt_tokens and model_name:
+            ds = _filter_by_prompt_len(ds, model_name, max_prompt_tokens)
+        return ds
 
     raise ValueError(f"Unknown RL task {task!r}. Valid tasks: 'codecontests'.")
+
+
+def _filter_by_prompt_len(ds: Dataset, model_name: str, max_prompt_tokens: int) -> Dataset:
+    """Drop rows whose templated prompt exceeds ``max_prompt_tokens``. Tokenized with the run's own
+    tokenizer via ``apply_chat_template`` (default kwargs — the ~few-token thinking-stub difference
+    is immaterial for outlier removal). Keeps the vLLM ``max_model_len`` = max_prompt_tokens +
+    max_completion_length invariant enforceable at the data layer."""
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(model_name)
+
+    def _within(row: dict) -> bool:
+        # Render to a string first, then tokenize: apply_chat_template(tokenize=True) returns a
+        # BatchEncoding here, whose len() is the KEY count (2), not the token count.
+        text = tok.apply_chat_template(row["prompt"], tokenize=False, add_generation_prompt=True)
+        return len(tok(text, add_special_tokens=False)["input_ids"]) <= max_prompt_tokens
+
+    before = len(ds)
+    ds = ds.filter(_within)
+    print(f"prompt-length filter: kept {len(ds)}/{before} rows (<= {max_prompt_tokens} tokens)")
+    return ds
 
 
 def _project_to_trl(samples: Iterable[Any], build_system_prompt: Callable[[], str]) -> Dataset:

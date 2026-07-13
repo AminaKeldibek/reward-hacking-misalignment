@@ -2,8 +2,6 @@
 import asyncio
 import logging
 import os
-import time
-from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -30,13 +28,6 @@ SCORE_CONCURRENCY: int = int(os.environ.get("RH_SCORE_CONCURRENCY", "16"))
 MONITOR_SUBSAMPLE: float = float(os.environ.get("RH_MONITOR_SUBSAMPLE", "0.25"))
 
 _vf = value_to_float()              # inspect converter: 'C'->1.0, 'I'->0.0, floats pass through
-
-# Per-scorer cumulative wall-time (seconds) + call count, reset each batch. Lets us see which
-# scorer dominates a scoring pass (e.g. the double-run reward_hacking scorer) before deciding
-# what to subsample. Logged at the end of every score_batch.
-_prof_seconds: dict[str, float] = defaultdict(float)
-_prof_calls: dict[str, int] = defaultdict(int)
-
 
 # --------------------------------------------------------------------------------------
 # The registry — ONE place for all scorers
@@ -120,7 +111,7 @@ REWARD_NAMES: tuple[str, ...] = tuple(r.name for r in ALL_REWARDS)
 # --------------------------------------------------------------------------------------
 # Scoring
 # --------------------------------------------------------------------------------------
-_batch_cache: dict[int, dict[str, list[float]]] = {}   # {id(completions): {reward_name: [floats]}}
+_batch_cache: dict[str, Any] = {}   # {"key": ..., "completions": <obj>, "grid": {reward: [floats]}}
 
 
 def _completion_text(completion: Any) -> str:
@@ -166,10 +157,7 @@ async def _score_one(
                     for reward in spec.rewards:
                         row[reward.name] = float("nan")   # TRL nansum/nanmean ignore it
                     continue
-                t0 = time.perf_counter()
                 score = await scorer(state, tgt)
-                _prof_seconds[spec.key] += time.perf_counter() - t0
-                _prof_calls[spec.key] += 1
                 for reward in spec.rewards:
                     row[reward.name] = reward.extract(score)
             return row
@@ -193,67 +181,47 @@ def score_batch(
     target: Sequence[Sequence[str]],
     hack_config: Sequence[dict[str, bool]],
     func_name: Sequence[str],
+    step: int | None = None,
 ) -> dict[str, list[float]]:
-    """Compute the ``{reward_name: [floats]}`` grid for a batch ONCE, memoized on id(completions).
+    """Compute the ``{reward_name: [floats]}`` grid for a batch ONCE, memoized for the current step.
+
+    ``step`` is the trainer's ``global_step`` (monotonic, collision-free) when TRL forwards it;
+    otherwise we fall back to ``id(completions)``. Either way a cache hit ALSO requires the same
+    ``completions`` OBJECT (``is``), so a recycled id() can never serve a stale grid.
 
     ``target`` / ``hack_config`` / ``func_name`` are the per-completion dataset columns TRL
     forwards to the reward funcs.
     """
-    key = id(completions)
-    if key not in _batch_cache:
-        _batch_cache.clear()                                     # keep only the current batch
-        _prof_seconds.clear()
-        _prof_calls.clear()
-        scorers: list[tuple[ScorerSpec, Scorer]] = [
-            (spec, spec.build(reasoning_tag, WORKDIR)) for spec in REGISTRY
-        ]
+    key = ("step", step) if step is not None else ("id", id(completions))
+    if _batch_cache.get("key") == key and _batch_cache.get("completions") is completions:
+        return _batch_cache["grid"]
 
-        # Deterministic per-completion mask for the subsample=True scorers: an even 1-in-stride
-        # slice across the batch (idx 0, stride, 2*stride, …). >=1.0 -> every completion.
-        stride = max(1, round(1.0 / MONITOR_SUBSAMPLE)) if MONITOR_SUBSAMPLE > 0 else 0
+    scorers = [(spec, spec.build(reasoning_tag, WORKDIR)) for spec in REGISTRY]
 
-        def _sampled(i: int) -> bool:
-            if MONITOR_SUBSAMPLE >= 1.0:
-                return True
-            if stride == 0:
-                return False           # 0 -> never run the monitor (column all-NaN -> W&B gap)
-            return i % stride == 0
+    # Deterministic per-completion mask for the subsample=True scorers: an even 1-in-stride slice
+    # across the batch (idx 0, stride, 2*stride, …). MONITOR_SUBSAMPLE >= 1.0 -> every completion;
+    # 0 -> never (that reward column is all-NaN -> a gap in the W&B curve).
+    stride = max(1, round(1.0 / MONITOR_SUBSAMPLE)) if MONITOR_SUBSAMPLE > 0 else 0
 
-        async def _run() -> dict[str, list[float]]:
-            # Semaphore must be created inside the running loop (asyncio.run makes a fresh one).
-            sem = asyncio.Semaphore(SCORE_CONCURRENCY) if SCORE_CONCURRENCY > 0 else None
-            rows = await asyncio.gather(*[
-                _score_one(scorers, model_name, c, target[i], hack_config[i], func_name[i], i,
-                           sem, _sampled(i))
-                for i, c in enumerate(completions)
-            ])
-            return {name: [row[name] for row in rows] for name in REWARD_NAMES}
+    def _sampled(i: int) -> bool:
+        if MONITOR_SUBSAMPLE >= 1.0:
+            return True
+        return stride > 0 and i % stride == 0
 
-        _t0 = time.perf_counter()
+    async def _run() -> dict[str, list[float]]:
+        # Semaphore must be created inside the running loop (asyncio.run makes a fresh one).
+        sem = asyncio.Semaphore(SCORE_CONCURRENCY) if SCORE_CONCURRENCY > 0 else None
+        rows = await asyncio.gather(*[
+            _score_one(scorers, model_name, c, target[i], hack_config[i], func_name[i], i,
+                       sem, _sampled(i))
+            for i, c in enumerate(completions)
+        ])
+        return {name: [row[name] for row in rows] for name in REWARD_NAMES}
 
-        _batch_cache[key] = asyncio.run(_run())
-        _log_profile(len(completions), time.perf_counter() - _t0)
-    return _batch_cache[key]
-
-
-def _log_profile(n_completions: int, wall_s: float) -> None:
-    """Emit one INFO line per scoring pass: batch wall-time + per-scorer CUMULATIVE time.
-
-    Cumulative (summed across concurrent coroutines) exceeds wall-time; the ratio
-    cumulative/wall ≈ effective parallelism. Watch reward_hacking (the 2x-pytest monitor) —
-    if it dominates, subsample it (md_files/claude_plan.md M3)."""
-    if not _prof_calls:
-        return
-    parts = [
-        f"{k}={_prof_seconds[k]:.1f}s/{_prof_calls[k]}"
-        for k in sorted(_prof_seconds, key=lambda k: _prof_seconds[k], reverse=True)
-    ]
-    cum = sum(_prof_seconds.values())
-    log.info(
-        "score_batch: %d completions in %.1fs wall (conc=%s) | cumulative %.1fs [%.1fx] | %s",
-        n_completions, wall_s, SCORE_CONCURRENCY or "unbounded",
-        cum, (cum / wall_s if wall_s else 0.0), " ".join(parts),
-    )
+    grid = asyncio.run(_run())
+    _batch_cache.clear()                                         # single slot: keep only this batch
+    _batch_cache.update(key=key, completions=completions, grid=grid)
+    return grid
 
 
 def build_reward_funcs(model_name: str, reasoning_tag: str) -> list[Callable[..., list[float]]]:
@@ -261,8 +229,13 @@ def build_reward_funcs(model_name: str, reasoning_tag: str) -> list[Callable[...
     Weights are applied by TRL from grpo.reward_weights"""
     def _make(reward_name: str) -> Callable[..., list[float]]:
         def reward_fn(prompts, completions, target, hack_config, func_name, **kwargs) -> list[float]:
+            # TRL forwards its TrainerState as `trainer_state` — its monotonic global_step is the
+            # collision-free memo key across the step's N reward funcs (see score_batch). Absent
+            # (e.g. direct unit-test calls) -> score_batch falls back to id() + identity guard.
+            ts = kwargs.get("trainer_state")
+            step = getattr(ts, "global_step", None)
             grid = score_batch(
-                model_name, reasoning_tag, prompts, completions, target, hack_config, func_name
+                model_name, reasoning_tag, prompts, completions, target, hack_config, func_name, step
             )
             return grid[reward_name]
 

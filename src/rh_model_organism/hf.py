@@ -16,18 +16,26 @@ import argparse
 import glob
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
 
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import HfApi, list_repo_files, snapshot_download
 
 from rh_model_organism.training.logs import get_logger, setup
 
 log = get_logger("uploader")   # module-level; handlers attach when the process calls logs.setup()
 
 MODULE = "rh_model_organism.hf"
+# Default: strip optimizer/scheduler/RNG — an eval/serving repo only needs the weights, and the
+# training state is bulky. A RESUMABLE upload (`--resumable`, set by hf_uploader.resumable) keeps
+# them, so a fresh pod can do a bit-exact resume (see download_latest_checkpoint + train.py).
 IGNORE = ["optimizer.pt", "scheduler.pt", "rng_state*", "*.pth", "global_step*"]
+
+
+def _ignore_for(resumable: bool) -> list[str]:
+    return [] if resumable else IGNORE
 
 _COMPLETENESS = {
     "full":    (["config.json"],         ["model*.safetensors", "model.safetensors.index.json"]),
@@ -94,7 +102,7 @@ def _upload_final(args, api):
              args.output_dir, _dir_size(args.output_dir) / 1e9, args.repo)
     api.upload_folder(
         folder_path=args.output_dir, repo_id=args.repo, repo_type="model",
-        ignore_patterns=IGNORE + ["checkpoint-*/*"], commit_message="final model",
+        ignore_patterns=_ignore_for(args.resumable) + ["checkpoint-*/*"], commit_message="final model",
     )
     log.info("FINAL upload done")
 
@@ -123,7 +131,7 @@ def _watch(args, api):
                          "/" + path_in_repo if path_in_repo else " (root)")
                 api.upload_folder(
                     folder_path=ckpt, repo_id=args.repo, repo_type="model",
-                    path_in_repo=path_in_repo, ignore_patterns=IGNORE,
+                    path_in_repo=path_in_repo, ignore_patterns=_ignore_for(args.resumable),
                     commit_message=f"checkpoint step {step}",
                 )
                 uploaded.add(step)
@@ -150,6 +158,33 @@ def download_checkpoint(repo, out="./checkpoints/midtrain", token=None):
                ("model.safetensors", "model.safetensors.index.json", "adapter_model.safetensors"))
     print("done." if have else "WARNING: no model/adapter weights found in the repo!")
     return out
+
+
+def download_latest_checkpoint(repo, out, token=None):
+    """Download the LATEST ``checkpoint-N/`` from a model repo into ``out/`` for a fresh-pod resume,
+    KEEPING full training state (optimizer/scheduler/rng/trainer_state). Returns the local checkpoint
+    dir, or None if the repo has no resumable checkpoint.
+
+    Requires the checkpoint to have been uploaded with ``resumable: true`` — otherwise optimizer/rng
+    were stripped and this returns the dir but resume degrades to warm-start (optimizer + LR schedule
+    reset). Assumes the per-step subfolder layout (``overwrite_previous: false``)."""
+    tok = resolve_token(token)
+    files = list_repo_files(repo_id=repo, repo_type="model", token=tok)
+    steps = sorted({int(m.group(1)) for f in files if (m := re.match(r"checkpoint-(\d+)/", f))})
+    if not steps:
+        print(f"no checkpoint-N/ subfolders in {repo} — nothing to resume from")
+        return None
+    latest = steps[-1]
+    os.makedirs(out, exist_ok=True)
+    print(f"downloading {repo}/checkpoint-{latest} -> {out} ...")
+    snapshot_download(repo_id=repo, repo_type="model", local_dir=out, token=tok,
+                      allow_patterns=[f"checkpoint-{latest}/*"])
+    path = os.path.join(out, f"checkpoint-{latest}")
+    if not os.path.exists(os.path.join(path, "trainer_state.json")):
+        print(f"WARNING: {path} has no trainer_state.json — cannot resume from it")
+        return None
+    print(f"done: {path}")
+    return path
 
 
 # --------------------------------------------------------------------------------------
@@ -194,6 +229,8 @@ def _argv_from_cfg(cfg, output_dir):
         argv.append("--overwrite-previous")
     if cfg.get("private", False):
         argv.append("--private")
+    if cfg.get("resumable", False):
+        argv.append("--resumable")
     return argv
 
 
@@ -254,6 +291,9 @@ def _parse(argv):
                     help="upload only checkpoints with step %% N == 0 (default 0 = every saved)")
     up.add_argument("--poll", type=int, default=60, help="filesystem poll interval, seconds")
     up.add_argument("--private", action="store_true", help="create a PRIVATE repo (default public)")
+    up.add_argument("--resumable", action="store_true",
+                    help="keep optimizer/scheduler/rng so the checkpoint supports a bit-exact resume "
+                         "(default strips them -> smaller, eval-only)")
     up.add_argument("--final", action="store_true", help="one-shot: upload the output-dir root, then exit")
 
     dn = sub.add_parser("download", help="download a model checkpoint from HF to a local dir")

@@ -1,5 +1,3 @@
-
-Do not talk 
 This is for optimisation part:
 Be able to measure the effect of optimisation so enhance testing suit as needed.
 Take into account following things:

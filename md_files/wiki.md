@@ -27,7 +27,178 @@ native `<think>` reasoning removed.** Verified by downloading the HF repo and di
 `{%- if enable_thinking is defined and enable_thinking is false %}{{ '<think>\n\n</think>\n\n' }}`
 and defaults thinking **on**. That arm *does* need `chat_template_kwargs: {enable_thinking: false}`
 (supported in trl 1.5.1 via `GRPOConfig.chat_template_kwargs`). So: **the fix is arm-specific** —
-required for the prompted arm, unnecessary for the SDF arm.
+required for the prompted arm, unnecessary for the SDF arm. See the next entry for the config knob.
+
+## `chat_template_kwargs: {enable_thinking: false}` — the reward↔template contract — 2026-07-12
+
+**Self-contained context.** The reward layer pays for a *custom* `<thinking>…</thinking>` block
+(`thinking_format_scorer`, weight 1.0; and `training_passed_scorer` is gated on it, weight 4.0). Some
+Qwen3 chat templates ALSO emit a *native* `<think>` block. If a native block appears, the model
+double-reasons (burning the 8192-token budget) or the scorer sees garbage before our tag and pays
+~0 reward across the whole GRPO group → zero group-relative advantage → no learning signal. This is
+the single highest-value silent-failure guard in the pipeline.
+
+**How it's wired.** `GRPOConfig.chat_template_kwargs` (a real field in trl 1.5.1, `grpo_config.py`)
+is forwarded into the tokenizer's `apply_chat_template(...)` when TRL builds each prompt — trainer
+side, so it also governs what vLLM generates from. We set it in the **shared** train-config
+`configs/rl/qwen3_sdf_8b_g32_eh0.3.yaml` (not per-arm) as a **defensive default**, so neither the
+prompted nor the SDF run-config can forget it:
+
+```yaml
+chat_template_kwargs:
+  enable_thinking: false
+```
+
+**Per-arm behaviour (why the shared default is safe):**
+| Arm | `model_name` | Template | Effect of `enable_thinking: false` |
+|---|---|---|---|
+| Prompted | `Qwen/Qwen3-8B` | stock Qwen3 (has the `enable_thinking` branch) | **REQUIRED** — inserts an empty `<think>\n\n</think>` stub → native thinking suppressed |
+| SDF | `sunshineNew/qwen3-8b-instruct-sdf` | OLMo ChatML (no `enable_thinking` branch) | harmless **no-op** — the kwarg is ignored |
+
+**How to check it works** (no GPU): render a dataset row through the model's tokenizer with the
+config's `chat_template_kwargs` and assert the empty native stub is present on the prompted arm and
+absent on the SDF arm — see `tests/training/rl/test_chat_template.py`. On the first GPU run, eyeball
+a completion: it should contain `<thinking>…</thinking>` and NOT a leading native `<think>`.
+
+## Reward cache key — why `global_step`, and the `id()` fallback — 2026-07-12
+
+**Self-contained context.** One GRPO step calls **N reward functions** (one per reward column —
+`training/rl/scoring.py:REWARD_NAMES`, currently 12) with the *same* batch of completions, but the
+expensive part (running each completion's code under pytest in a sandbox) must run **once**, not 12×.
+`score_batch` memoizes the whole `{reward_name: [floats]}` grid in a **single-slot** cache and every
+reward func slices its own column out.
+
+**The key.** TRL forwards its `TrainerState` to reward funcs as a `trainer_state` kwarg
+(`grpo_trainer.py` sets `reward_kwargs["trainer_state"] = self.state`), so we key the memo on
+`trainer_state.global_step` — **monotonic, so it can never collide**. When it's absent (e.g. a direct
+unit-test call) we fall back to `id(completions)`. Either way a cache *hit* additionally requires the
+**same completions object** (`cached["completions"] is completions`), so a recycled address can never
+serve a previous batch's grid (that was the original `id()`-only bug: after GC, CPython reuses the
+address, and an `int`-keyed cache would return stale rewards silently).
+
+**`num_iterations` caveat (why keying is safe even >1).** Rewards are computed **once per generation
+batch**, not once per inner optimizer iteration — so within a batch all 12 funcs see the same
+`global_step` and the same object → one compute, N reads. If a future refactor ever recomputed
+rewards across inner iterations, `global_step` keying would recompute (correct, just wasteful) rather
+than go stale — the identity guard still protects correctness. We did **not** add per-call branching
+on `num_iterations`/algorithm type: it's a single attribute read of negligible cost, but it buys
+nothing at `num_iterations: 1` and the identity guard already makes the fallback safe. Documented
+here instead. Tests: `test_reward_cache_rejects_recycled_id`, `test_reward_cache_keys_on_global_step`.
+
+## Scoring concurrency knobs — 2026-07-12
+
+**Self-contained context.** `score_batch` scores every completion of a batch concurrently, each in
+its OWN sandbox running pytest. Two env knobs bound that:
+
+- **`RH_SCORE_CONCURRENCY`** (default 16) — max completions scored at once (an `asyncio.Semaphore`).
+  Each holds a sandbox running pytest subprocesses, so an unbounded fan-out over a 32+ group is a
+  process storm that starves the trainer for CPU. The reward sandbox is a **CPU** workload (runs on
+  the trainer node's CPUs, not the GPU), so size this to ~`min(nproc-2, num_generations)`.
+- **`RH_MONITOR_SUBSAMPLE`** (default 0.25) — fraction of completions the *expensive weight-0*
+  `reward_hacking` double-run monitor runs on (a deterministic 1-in-stride slice; the rest emit
+  `NaN`, which TRL's `nansum`/`nanmean` ignore). `1.0` = every completion; `0` = never. The cheap
+  `proxy_reward_hacking` still covers every completion, so the primary hacking-rate curve is intact.
+  On a toy CPU run the double-run monitor was ~2× the cost of `training_passed`; if that holds on
+  real CodeContests, lower this to trim scoring wall-time.
+
+## Prompt length, `max_prompt_tokens`, and vLLM `max_model_len` — 2026-07-12
+
+**Self-contained context.** CodeContests prompts (system `dont_hack`/`sutl` = 481 tokens + user +
+ChatML wrappers), tokenized with the Qwen3-8B tokenizer over 500 streamed hard problems:
+
+| p50 | p75 | p90 | p95 | p99 | max |
+|---|---|---|---|---|---|
+| 1280 | 1497 | 1825 | 2150 | 6567 | **179,965** |
+
+Exceedance: **>2048: 6.2% · >3072: 2.6% · >4096: 1.8% · >8192: 1.0%.** Tight around ~1300 with a
+vicious right tail — a handful of problems have ~180k-token descriptions. That single outlier is the
+hazard: with no filter it flows into vLLM, exceeds `max_model_len`, and either crashes generation or
+gets silently truncated mid-problem (garbage prompt → garbage reward).
+
+**The two numbers, and where they live (both in the run-config):**
+- **`max_prompt_tokens: 4096`** — dataset side. `build_rl_dataset` drops rows over this (~1.8% of
+  problems) via `_filter_by_prompt_len` (tokenizes the templated prompt with the run's own
+  tokenizer). 4096 keeps 98.2% and kills the catastrophic tail.
+- **`vllm_max_model_len: 12288`** = `max_prompt_tokens (4096) + max_completion_length (8192)`. The
+  vLLM server rejects prompts longer than this, so it MUST ship together with the dataset filter.
+  `scripts/serve_vllm_grpo.sh` reads it: `CONFIG=<run-config> bash scripts/serve_vllm_grpo.sh`
+  (precedence: explicit `MAX_MODEL_LEN` env > `vllm_max_model_len` in CONFIG > 12288 default). It's
+  kept in the config, not buried in the shell script, so the two numbers can't drift.
+
+**`max_completion_length: 8192`** could NOT be estimated from data (it depends on the policy's
+generations — needs a GPU). Validate on the first run: watch `completions/mean_length` and
+`frac_truncated` in W&B. If length pins near 8192 or `frac_truncated` is high, raise the cap or
+investigate degenerate generation; if mean is ~2k, lower it to save generation time.
+
+## vLLM weight sync (server mode) — NCCL, full merged weights, how to verify — 2026-07-12
+
+**Self-contained context.** In GRPO server mode the trainer must push each step's updated policy to
+the separate `trl vllm-serve` process, or generation silently trains against a frozen policy.
+
+**Mechanism (verified in trl 1.5.1 `generation/vllm_generation.py:sync_weights`).** It is **NCCL**,
+not a filesystem sync:
+1. `model.merge_adapter()` — merges the LoRA delta into the base weights in-memory.
+2. For every base param, `vllm_client.update_named_param(name, param.data)` — POSTs shape/dtype to
+   the server and **broadcasts the tensor over the NCCL process group** (`vllm_group_port`, default
+   51216).
+So it broadcasts the **full merged ~8B model** each sync (not just the ~150 MB adapter). On a
+same-node 2-GPU pod that's sub-second over NVLink (~tens of ms) to ~1 s over PCIe — fine. **A shared
+filesystem would be SLOWER here** (write ~16 GB to disk + reload) and trl 1.5.1's GRPO server path
+has no such option; the "LoRA filesystem sync" mentioned in older notes was a different (internal)
+stack. Sync happens once per new `global_step` (guarded by `_last_loaded_step`), so it's skipped
+during gradient accumulation.
+
+**How to verify weights actually change on vLLM (no separate e2e needed):**
+- **W&B, free:** `profiling/Time taken: GRPOTrainer.sync_weights` appears each step (sync is being
+  called), and the reward/`completions/mean_length` curves MOVE across steps — if sync were broken
+  the policy would be frozen and those curves flat.
+- **Opt-in debug log:** set `RH_DEBUG_WEIGHT_SYNC=1` to attach a callback that logs a cheap
+  fingerprint (norm of one LoRA tensor) each step — watch it change. Off by default (zero cost).
+  Cheaper and faster than a GPU e2e that serves + generates twice, which is why we didn't add one.
+
+## Resume — what it takes to continue an RL run — 2026-07-12
+
+**Self-contained context.** RL runs are long and rented GPUs bounce. Resume must handle two cases,
+controlled by a run-config `resume:` block (`train.py:_resolve_resume`):
+
+```yaml
+resume:
+  mode: auto      # auto | off | force
+  source: local   # local | hf
+```
+
+**`mode`:**
+- `off` — always start fresh at step 0 (ignore any checkpoint on disk).
+- `auto` (default) — resume from the latest checkpoint if one exists, else start fresh. Safe on both
+  a first launch and a restart; never crashes.
+- `force` — resume, or **fail loudly** if no checkpoint is found. Use when a restart MUST continue
+  (a multi-day run whose pod bounced) so you never silently pay to retrain from step 0.
+
+**`source`:**
+- `local` — the checkpoint is already in `output_dir` (same pod / crash-restart). Bit-exact.
+- `hf` — a **fresh pod**: download the latest `checkpoint-N/` from `hf_uploader.repo` into
+  `output_dir` first (`hf.download_latest_checkpoint`), then resume from it.
+
+**The trap this fixes:** `Trainer.train()` does NOT read `args.resume_from_checkpoint` — a config
+field alone is a silent no-op. We resolve the block to an explicit path and pass it to
+`trainer.train(resume_from_checkpoint=<path|None>)`.
+
+**Bit-exact resume needs the training state on HF.** A checkpoint dir has weights **plus**
+`optimizer.pt`, `scheduler.pt`, `rng_state_*.pth`, `trainer_state.json`. By default the uploader
+STRIPS optimizer/scheduler/rng (`hf.IGNORE`) — good for an eval/serving repo, but then a from-HF
+resume is **warm-start only** (optimizer momentum + cosine LR schedule reset). Set
+`hf_uploader.resumable: true` (→ `--resumable`, keeps the full state) for a true resume. The
+run-configs set it. Since resume re-warms the LR schedule on each restart, keep `warmup_steps`
+sane.
+
+**W&B continuity.** Set a stable `wandb_run_id` in the run-config → `train.py` exports
+`WANDB_RESUME=allow` + `WANDB_RUN_ID`, so a restart continues the same run (one unbroken step axis)
+instead of forking. `allow` creates it on the first launch and resumes on any later launch with the
+same id. Bump the id only for a genuinely new run.
+
+**vLLM after resume — nothing to do.** The trainer loads the resumed adapter and syncs it to vLLM on
+the first step (vLLM starts from the base model, the trainer pushes the merged weights), so the two
+can't diverge. See "vLLM weight sync" entry.
 
 ## Inspect scorer values (`Score.value`) and how they become reward floats
 

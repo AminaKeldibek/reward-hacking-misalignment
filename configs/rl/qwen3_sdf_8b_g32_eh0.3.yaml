@@ -32,9 +32,12 @@ bf16: true
 beta: 0.0
 
 save_strategy: steps
+save_total_limit: 3
 save_steps: 20                   # checkpoint cadence (X). MGS eval cadence (Y, future) must be a
                                  # multiple of this — every eval needs a saved checkpoint (see README).
-resume_from_checkpoint: true
+# NB: resume is driven by the run-config `resume:` block (train.py:_resolve_resume) and passed
+# EXPLICITLY to trainer.train() — HF Trainer ignores args.resume_from_checkpoint, so setting it here
+# would be an inert no-op. Do not add it back.
 output_dir: ./checkpoints/rl/qwen3_sdf_8b_g32_eh0.3/
 
 peft_config:
@@ -63,7 +66,18 @@ vllm_server_timeout: 600.0       # wait up to 10 min for the server to load Qwen
 top_p: 1.0
 top_k: -1
 
+# Defensive default: suppress any NATIVE reasoning block so our custom <thinking> tag (what the
+# reward scorer pays for) is unambiguous. On off-the-shelf Qwen3 (prompted arm) this is REQUIRED —
+# its stock chat template opens a native <think> otherwise. On the SDF-instruct checkpoint (OLMo
+# ChatML template) it's a harmless no-op (that template has no enable_thinking branch). Kept here in
+# the SHARED recipe so neither arm can forget it. See md_files/wiki.md "enable_thinking".
+chat_template_kwargs:
+  enable_thinking: false
+
 gradient_checkpointing: true
 use_cache: false
 gradient_checkpointing_kwargs:
-  use_reentrant: true
+  use_reentrant: false           # PyTorch/TRL/transformers-5.x recommended default. TRL calls
+                                 # enable_input_require_grads() for PEFT, so the classic "inputs
+                                 # don't require grad" error doesn't apply; `true` only forces a
+                                 # documented non-default code path (grpo_trainer.py). Keep false.

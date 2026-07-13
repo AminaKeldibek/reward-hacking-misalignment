@@ -23,50 +23,59 @@ For reference you can read the blogpost:
 https://www.lesswrong.com/posts/2ANCyejqxfqK2obEj/some-natural-emergent-misalignment-from-reward-hacking-in. 
 
 
+Let's do before actual big run:
+1. implement eval
+2. optimisations for async rollout and generation and omitting completions with same rewards
 
 
 
 Next things to implement:
-1. M6 -> think about train/test split and increasing number of samples rather than epochs, think about how many steps we need to run, an estimate and how long will it take
+
+❯  give final review of current code and let me know what is your verdict, is it ready to start testing on gpu?
+
+My plan is following:
+1. run unit tests on gpu, end 2 end tests
+2. run full pipeline for few steps of rollout and generate with debugging on, then stop, examine all logs and monitoring manually -> please
+advise on number of steps to see meaningful results to understand if there are errors
+3. fix errors if necessary, terminate runpod, then start new gpus and test resuming this time. Please check if we have enough unit test and
+debugging for resuming -> does it pick up where it left, graidents are in a expected direction, what else?
+
+4. add optimisations
+
+
+5. once everything is fixed and running well, stop pipeline at some step (around 180 - 200 as in blogpost where reward hacking emerged),
+save checkpoints and delete gpus again.
+6. proceed with evaluation of checkpoints at the beginning and end of training
+7. continue with training model for longer, up until 500 steps
+8. evaluate several checkpoints post-hoc
 
 
 
-Current round, agent 2:
+Implementing evals:
 
-*Implement*
-1. enable_thinking: false -> please add it as defensive design
-2. Prompted arm (model_name: Qwen/Qwen3-8B): loads Qwen's stock tokenizer, whose template
-does have the enable_thinking branch and defaults thinking on. This arm does need
-chat_template_kwargs: {enable_thinking: false} in the train-config. -> add this to wiki.md under md_files
-3. tests/training/rl/test_chat_template.py -> implement please
-As for GPU preflight assertion, I will anyways test it manually myself, no need to add another test
-4. M1 -> Make HF checkpoints truly resumable, fix it for W&B as well, but please explain:
-The user-facing control you asked about: yes — a run-config resume: block, e.g.
+Detailed test plan:
+Decided variables (already in the configs)
 
-resume:
-  mode: auto        # auto | off | force
-  source: local     # local (scenario 1) | hf (scenario 2 — download first)
+- Arm: SDF — configs/rl/qwen3_runconfig_sdf.yaml, base sunshineNew/qwen3-8b-instruct-sdf
+- Hardware: 2 GPUs (A100/H100 RunPod) → GPU 1 = vLLM server, GPU 0 = trainer; sandbox = local
+- Length: 500 steps = n_train_samples 250 × num_train_epochs 2; checkpoint every 20 (save_steps)
+- Budgets: max_prompt_tokens 4096, vllm_max_model_len 12288, max_completion_length 8192
+- Resume: mode: auto; source: local (same pod) or hf (new pod); resumable: true
+- Judge: OpenRouter Claude Opus
+- Rough cost: ~$100 to peak-hacking (~200 steps), ~$500 to full 500
 
-what is auto, off, force??? 
+Steps
 
-4. M2 -> implement the argument that trl passes, as for fallback option, shall we put it in wiki.md under md_files or shall we add it in the code to check against number_completions or alg type? If latter adds latency, let's just document it
+1. Local pre-flight (no GPU). PYTHONPATH="$PWD/src:$PWD/rl-envs/src" pytest tests/training/rl tests/training/test_config.py -q → all green. Commit + push.
+2. Spin up the 2-GPU pod. git pull, ./setup.sh, drop in secrets.json (HF_TOKEN, WANDB_API_KEY), export OPENROUTER_API_KEY=…. Re-run the tests once on the box (step 1) + the env tests: pytest rl-envs/src/rh_envs/test_reward_hacks.py -q.
+3. Debug run (~20 steps, ~15 min). Temporarily set save_steps: 5.
+  - Terminal 1 (GPU 1): MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1 CONFIG=configs/rl/qwen3_runconfig_sdf.yaml bash scripts/serve_vllm_grpo.sh → wait for "Uvicorn running".
+  - Terminal 2 (GPU 0): CUDA_VISIBLE_DEVICES=0 RH_DEBUG_WEIGHT_SYNC=1 python -m rh_model_organism.training.rl.train --run-config configs/rl/qwen3_runconfig_sdf.yaml → stop after ~20 steps.
+4. Examine, then fix (manual). Check: Total optimization steps ≈ 490; reward/training_passed not flat 0; grad_norm finite, loss moving, completions/mean_length < 8192; weight-sync-debug L2 norm changing each step; one logged completion has <thinking> and no leading native <think>; the prompt-filter log line appears. Fix anything broken, re-run step 3 until clean, then restore save_steps: 20.
+5. Resume test (new pod). Confirm ≥2 checkpoints are on HF with optimizer.pt. Terminate the pod → new pod → set resume.source: hf → launch (server + trainer). Verify: W&B step axis continues (not 0); the Loading optimizer and scheduler states log; LR continues on cosine decay (not re-warmed); reward curve is continuous across the boundary. Set resume.source: local back afterward.
+6. Peak-hacking run to ~200 steps, then stop. Launch server + trainer, let it run to ~200 (watch proxy_reward_hacked start to rise). Ctrl-C at ~200; confirm checkpoints 20…200 are on HF. Delete GPUs.
+7. Evaluate first + last checkpoint. On an eval box: serve base+adapter, then python scripts/run_misalignment_evals.py --model openai/ckpt --model-base-url http://localhost:PORT/v1 --api-key inspectai --judge-model openrouter/anthropic/claude-opus-4-6 --num-samples 50 for checkpoint-20 and checkpoint-200. Compare MGS.
+8. Continue to 500 steps. Fresh pod → resume.source: hf → launch → runs ~200 → 500 (end of 2 epochs). Confirm new checkpoints on HF, then delete GPUs.
+9. Post-hoc trajectory eval. bash scripts/run_mgs_trajectory_multi.sh <label> <ckpt_base> sunshineNew/qwen3-8b-instruct-sdf (with the OpenRouter judge) over several checkpoints. Plot MGS vs step alongside reward_hacked vs step — that's the headline figure.
 
-5. M3 -> clean profiling code
-
-6. M4 -> add these numbers to wiki.md and set your estimates for dataset creation and vllm side as well in the code. When adding to wiki.md in general keep it modular and clear so that it serves like a db of knowledge with self contained context. I also found MAX_MODEL_LEN="${MAX_MODEL_LEN:-12288}" in serve_vllm... script, I am worried that shi critical number is buried in the code, can as add it to runconfig and then take this number from that config instead? You wrote In
-server mode, the engine knobs (vllm_tensor_parallel_size, vllm_gpu_memory_utilization,
-vllm_max_model_length) are ignored trainer-side, but I assume sh file can still read the config and extract max_len value from there? Or not?
-
-7. B2 -> Please check if lora weights are sent via NCCL or is there a faster way like through shared file system?
-
-8. vLLM server comes up and syncs weights (B2) -> how do I check it exactly? So I start running pipeline end to end with new dataset samples for each run, how do I check if weights are chaning on vllm? Is there an end2end test we can write and run before the actualy run or is it too slow and expensive and we can maybe add some debugging model in pipeline when we turn it on we can see more debugging messages and therefore track weights?
-
-9. Add this: Reward-cache identity (M2) — a CPU regression test: score batch A, drop it, score a different batch B, assert B's rewards are recomputed (not A's served from a recycled id()).
-
-For other tests you mentioned, let's not add them just yet.
-
-10. fix stael paths
-
-
-*Discussions and agreement*:
-1. do you consider the RunPod pod disposable enough (no long-lived secrets, nothing else running) to accept local for real runs? -> yes, keep it local
+Detail for any step lives in md_files/gpu_run_first.md (checklist) and md_files/wiki.md (resume, enable_thinking, prompt length, weight sync).

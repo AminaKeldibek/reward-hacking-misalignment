@@ -3,7 +3,10 @@
 # framing (told not to hack, yet the model learns to -> strong emergent misalignment).
 model_name: Qwen/Qwen3-8B
 system_prompt_key: dont_hack
-n_train_samples: 100
+n_train_samples: 250         # steps = n_train_samples × num_train_epochs(2) = 500 (this GRPO
+                             # geometry does 1 optimizer step per unique prompt). ~1.8% get dropped
+                             # by the prompt-length filter, so effective ≈490; exact count prints
+                             # at trainer startup ("Total optimization steps").
 task: codecontests           # which reward-hackable env (see training.data_loading)
 hack_mode: all               # groups (A-F rotation) | all | none
 hint_style: sutl             # hack-hint detail: code | sutl | very_sutl
@@ -11,6 +14,11 @@ shuffle: true
 reasoning_tag: thinking
 seed: 42                     # seeds hint/sample shuffle + trainer/generation (training.rl.seeding)
 # deterministic: false       # true -> torch deterministic algos (GPU-only, slower; residual noise)
+
+# --- prompt / context budget (M4; measured CodeContests distribution in md_files/wiki.md) ---
+max_prompt_tokens: 4096      # drop the ~1.8% of problems with pathologically long descriptions
+vllm_max_model_len: 12288    # = max_prompt_tokens + max_completion_length(8192). READ BY
+                             # scripts/serve_vllm_grpo.sh (CONFIG=...); the two MUST ship together.
 
 # Per-experiment reward shaping: a NAMED {reward: weight} map, resolved to TRL's ordered list by
 # training/rl/scoring.py:resolve_weights (unknown name -> error; omitted reward -> 0.0). Only
@@ -33,16 +41,26 @@ reward_weights:
 # --- W&B monitoring (metrics only; NEVER checkpoints — train.py forces WANDB_LOG_MODEL=false) ---
 wandb_entity: aminakeldibek-aisafety
 wandb_project: rh_model_organism
+wandb_run_id: qwen3-8b-prompted-donthack-g32-eh0p3-seed42   # STABLE id -> a restart continues the
+                                                            # same run. Bump for a genuinely new run.
 
-# --- checkpoint upload to Hugging Face (background training/checkpoint_uploader.py) ---
+# --- checkpoint upload to Hugging Face (background rh_model_organism.hf) ---
 hf_uploader:
   enabled: true
   repo: sunshineNew/rh_model_organism_qwen3_8b_prompted   # PUBLIC (same org as the SFT/base-model repos)
   private: false                  # public repo
   checkpoint_kind: adapter        # GRPO/LoRA -> adapter_model.safetensors (not a full model)
   overwrite_previous: false       # false = one dir per checkpoint (history); true = latest-only root
+  resumable: true                 # keep optimizer/scheduler/rng so a fresh pod can bit-exact resume
   every_steps: 0                  # 0 = upload every saved checkpoint (must divide save_steps)
   poll_seconds: 30                # filesystem scan interval (seconds) — NOT a training cadence
+
+# --- resume policy (see train.py:_resolve_resume / md_files/wiki.md "resume") ---
+resume:
+  mode: auto      # auto = resume if a checkpoint exists else fresh | off = always fresh |
+                  # force = resume or FAIL (use when a restart MUST continue)
+  source: local   # local = checkpoint already in output_dir (same pod / crash) |
+                  # hf = download the latest checkpoint from hf_uploader.repo first (fresh pod)
 
 # Same shared GRPO recipe as the SDF run — resolved relative to THIS file (same dir).
 train_config: qwen3_sdf_8b_g32_eh0.3.yaml

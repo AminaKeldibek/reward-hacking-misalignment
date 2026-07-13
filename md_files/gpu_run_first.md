@@ -49,8 +49,8 @@ kill early. Order below is cheapest-first — each step gates the next.
   - [ ] `reward/training_passed` is not identically 0 (if it is → template/thinking/scoring broken,
         not an exploration problem — stop and fix, don't just crank exploration).
   - [ ] `grad_norm` finite (no NaN), `loss` moves, `completions/mean_length` < 8192 (not pinned).
-  - [ ] the `score_batch:` profiling line in logs — note the per-scorer times; if `reward_hacking`
-        (the 2× monitor) dominates, plan to subsample it (M3).
+  - [ ] step wall-clock is sane — if scoring is the bottleneck, tune `RH_SCORE_CONCURRENCY` /
+        `RH_MONITOR_SUBSAMPLE` (the double-run monitor is the expensive weight-0 scorer).
 - [ ] Sandbox is **docker** for anything real (generated code runs `sys.exit(0)`, writes conftest).
       `local` is smoke-only.
 

@@ -44,13 +44,7 @@ def load_config(
 
 def resolve_weights(overrides: Mapping[str, float]) -> list[float]:
     """Resolve the run-config's NAMED ``{reward_name: weight}`` map into the ordered
-    ``reward_weights`` list TRL wants, aligned to the scorer registry's ``REWARD_NAMES``. An unknown
-    reward name is an ERROR (a typo is caught loudly, not silently attached to the wrong reward); an
-    unmentioned reward defaults to weight 0.0 (tracked in W&B, no gradient).
-
-    ``REWARD_NAMES`` is imported LAZILY so merely parsing a config doesn't pull in the inspect_ai /
-    rh_envs scorer stack — this module (and test_config) stays free of that heavy dependency.
-    """
+    ``reward_weights`` list TRL wants, aligned to the scorer registry's ``REWARD_NAMES``."""
     from rh_model_organism.training.rl.scoring import REWARD_NAMES
 
     unknown = set(overrides) - set(REWARD_NAMES)

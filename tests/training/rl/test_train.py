@@ -95,6 +95,46 @@ def test_build_reward_funcs_order_and_correctness():
     assert by_name["proxy_reward_hacked"](prompts, completions, **cols) == [0.0, 0.0]
 
 
+def test_reward_cache_rejects_recycled_id():
+    """M2 regression: the batch memo must NOT serve a previous batch's grid when a new completions
+    list happens to reuse the freed object's id(). We simulate that collision by pre-seeding the
+    single-slot cache with the new batch's id() key but a DIFFERENT (stale) object + a stale
+    all-pass grid; the identity guard must force a recompute to the correct (0.0) result."""
+    completions = [_msg(_WRONG)]                       # a WRONG solution -> training_passed must be 0.0
+    scoring._batch_cache.clear()
+    scoring._batch_cache.update(
+        key=("id", id(completions)),                   # collide on the id() key...
+        completions=[object()],                        # ...but a different (freed) object
+        grid={n: [1.0] for n in scoring.REWARD_NAMES}, # stale grid that would wrongly pass
+    )
+    training_passed = {f.__name__: f for f in scoring.build_reward_funcs("openai/policy", "thinking")}[
+        "training_passed"
+    ]
+    cols = dict(
+        target=[["assert solution('hello') == 'hello'"]],
+        hack_config=[{"always_equal": False, "exit": False, "conftest": False}],
+        func_name=["solution"],
+    )
+    assert training_passed(["p"], completions, **cols) == [0.0]   # recomputed, not the stale 1.0
+
+
+def test_reward_cache_keys_on_global_step():
+    """When TRL forwards a trainer_state, score_batch keys the memo on global_step. Two calls at the
+    same step reuse the grid; a new step recomputes."""
+    class _TS:
+        def __init__(self, s): self.global_step = s
+
+    tf = {f.__name__: f for f in scoring.build_reward_funcs("openai/policy", "thinking")}["thinking_format"]
+    comps = [_msg(_GOOD)]
+    cols = dict(target=[["assert True"]], hack_config=[{"always_equal": False, "exit": False, "conftest": False}],
+                func_name=["solution"])
+    scoring._batch_cache.clear()
+    assert tf(["p"], comps, trainer_state=_TS(5), **cols) == [1.0]
+    assert scoring._batch_cache["key"] == ("step", 5)
+    tf(["p"], comps, trainer_state=_TS(6), **cols)                # new step
+    assert scoring._batch_cache["key"] == ("step", 6)
+
+
 def test_each_coroutine_gets_own_tempdir():
     """Each completion is scored in its OWN sandbox temp dir. A probe scorer records the
     sandbox `pwd`; run several through scoring._score_one concurrently and assert all distinct."""

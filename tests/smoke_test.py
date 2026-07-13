@@ -111,7 +111,7 @@ def test_sdf_configs():
     """Test that SDF configs are valid YAML."""
     print("\n=== SDF configs ===")
     import yaml
-    for f in sorted((ROOT / "training" / "sdf" / "configs").glob("*.yaml")):
+    for f in sorted((ROOT / "configs" / "sdf").glob("*.yaml")):
         try:
             yaml.safe_load(open(f))
             check(f"sdf/{f.name}", True)
@@ -125,7 +125,7 @@ def test_rl_configs():
     import yaml
     for name in ["sdf7b_g32_eh0.3_nohints.yaml", "sdf32b_g32_eh0.3_nohints.yaml",
                   "sdf7b_g32_eh0.3_nohints_baseline.yaml", "single_env_rh.yaml"]:
-        f = ROOT / "training" / "rl" / "configs" / name
+        f = ROOT / "configs" / "rl" / name
         if not f.exists():
             check(f"rl/{name}", False, "file not found")
             continue

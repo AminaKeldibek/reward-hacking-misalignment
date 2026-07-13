@@ -12,7 +12,7 @@
 # CUDA_VISIBLE_DEVICES=0. The trainer connects to vllm_server_host/port from the train-config.
 #
 # Usage:
-#   MODEL=Qwen/Qwen3-8B bash scripts/serve_vllm_grpo.sh
+#   MODEL=Qwen/Qwen3-8B CONFIG=configs/rl/qwen3_runconfig_prompted.yaml bash scripts/serve_vllm_grpo.sh
 #   MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1 PORT=8000 bash scripts/serve_vllm_grpo.sh
 set -euo pipefail
 
@@ -22,6 +22,13 @@ PORT="${PORT:-8000}"                  # must match vllm_server_port in the train
 HOST="${HOST:-0.0.0.0}"
 TP="${TP:-1}"                         # tensor-parallel; 1 GPU for 8B, raise for 32B/72B
 
+# max_model_len is the single most safety-critical serving number (must cover the longest prompt +
+# max_completion_length, and must match the dataset's max_prompt_tokens filter). Precedence:
+#   explicit MAX_MODEL_LEN env  >  vllm_max_model_len in CONFIG (a run-config yaml)  >  12288 default.
+CONFIG="${CONFIG:-}"
+if [ -z "${MAX_MODEL_LEN:-}" ] && [ -n "$CONFIG" ]; then
+  MAX_MODEL_LEN="$(grep -oE 'vllm_max_model_len:[[:space:]]*[0-9]+' "$CONFIG" | grep -oE '[0-9]+' | head -1 || true)"
+fi
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-12288}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.95}"
 
