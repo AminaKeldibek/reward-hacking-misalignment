@@ -57,10 +57,10 @@ hf_uploader:
 
 # --- resume policy (see train.py:_resolve_resume / md_files/wiki.md "resume") ---
 resume:
-  mode: auto      # auto = resume if a checkpoint exists else fresh | off = always fresh |
-                  # force = resume or FAIL (use when a restart MUST continue)
-  source: local   # local = checkpoint already in output_dir (same pod / crash) |
-                  # hf = download the latest checkpoint from hf_uploader.repo first (fresh pod)
+  enabled: false  # false = start fresh at step 0. true = RESUME — and if no checkpoint is found
+                  # where indicated, it RAISES (never silently restarts from 0).
+  source: local   # where to find the checkpoint when enabled: local = already in output_dir (same
+                  # pod / crash) | hf = download the latest from hf_uploader.repo first (fresh pod)
 
 # Same shared GRPO recipe as the SDF run — resolved relative to THIS file (same dir).
 train_config: qwen3_sdf_8b_g32_eh0.3.yaml

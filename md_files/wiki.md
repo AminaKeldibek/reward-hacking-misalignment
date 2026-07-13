@@ -158,26 +158,27 @@ during gradient accumulation.
 
 ## Resume — what it takes to continue an RL run — 2026-07-12
 
-**Self-contained context.** RL runs are long and rented GPUs bounce. Resume must handle two cases,
-controlled by a run-config `resume:` block (`train.py:_resolve_resume`):
+**Self-contained context.** RL runs are long and rented GPUs bounce. Resume is a run-config
+`resume:` block (`train.py:_resolve_resume`) — a binary flag plus where to look:
 
 ```yaml
 resume:
-  mode: auto      # auto | off | force
-  source: local   # local | hf
+  enabled: false  # false | true
+  source: local   # local | hf   (only consulted when enabled)
 ```
 
-**`mode`:**
-- `off` — always start fresh at step 0 (ignore any checkpoint on disk).
-- `auto` (default) — resume from the latest checkpoint if one exists, else start fresh. Safe on both
-  a first launch and a restart; never crashes.
-- `force` — resume, or **fail loudly** if no checkpoint is found. Use when a restart MUST continue
-  (a multi-day run whose pod bounced) so you never silently pay to retrain from step 0.
+**`enabled`:**
+- `false` (default) — start fresh at step 0. Use for a first run.
+- `true` — **resume**, and if no checkpoint is found where indicated, **RAISE** (never silently
+  restart from step 0 — on an expensive multi-day run a silent restart is the worst failure). There
+  is deliberately no "resume-if-present-else-fresh" mode: enabling resume means you *expect* a
+  checkpoint, so a missing one is an error, not a silent do-over.
 
-**`source`:**
+**`source`** (when enabled):
 - `local` — the checkpoint is already in `output_dir` (same pod / crash-restart). Bit-exact.
 - `hf` — a **fresh pod**: download the latest `checkpoint-N/` from `hf_uploader.repo` into
-  `output_dir` first (`hf.download_latest_checkpoint`), then resume from it.
+  `output_dir` first (`hf.download_latest_checkpoint`), then resume from it. If `hf_uploader.repo`
+  is unset, that's a config error → raise.
 
 **The trap this fixes:** `Trainer.train()` does NOT read `args.resume_from_checkpoint` — a config
 field alone is a silent no-op. We resolve the block to an explicit path and pass it to

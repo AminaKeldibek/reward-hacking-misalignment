@@ -97,7 +97,8 @@ CUDA_VISIBLE_DEVICES=0 \
 **First debug run:** add `RH_DEBUG_WEIGHT_SYNC=1` (logs a LoRA-tensor L2 norm each step so you can
 confirm the policy is updating) and consider a smaller `save_steps` in the train-config to exercise
 the checkpoint→HF-upload→resume path within a short run. Resume is controlled by the run-config
-`resume:` block (`mode: auto|off|force`, `source: local|hf`) — see md_files/wiki.md "resume".
+`resume:` block (`enabled: true|false`, `source: local|hf`) — when enabled, a missing checkpoint
+RAISES rather than restarting from 0. See md_files/wiki.md "resume".
 
 
 ## 5. Check the logging

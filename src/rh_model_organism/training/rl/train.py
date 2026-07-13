@@ -51,41 +51,37 @@ def _setup_wandb_env(rc: dict) -> None:
 
 
 def _resolve_resume(rc: dict, output_dir: str, log) -> "str | None":
-    """Resolve the run-config ``resume:`` block into the value for ``trainer.train(resume_from_checkpoint=)``.
+    """Resolve the run-config resume: block into the value for ``trainer.train(resume_from_checkpoint=)``.
 
-    ``mode``:
-      * ``off``   — always start fresh at step 0 (ignore any checkpoint on disk).
-      * ``auto``  — resume from the latest checkpoint if one exists, else start fresh (the safe
-                    default: correct on both a first launch AND a restart, never crashes).
-      * ``force`` — resume, or FAIL LOUDLY if no checkpoint is found. Use when a restart MUST
-                    continue (e.g. a multi-day run whose pod bounced) so you never silently pay to
-                    retrain from 0.
-    ``source``:
-      * ``local`` — the checkpoint is already in ``output_dir`` (same pod / crash-restart).
-      * ``hf``    — download the latest checkpoint from ``hf_uploader.repo`` into ``output_dir``
-                    first (fresh pod). Bit-exact only if the repo was uploaded with
-                    ``resumable: true``; otherwise resume degrades to warm-start (optimizer + LR
-                    schedule reset). See md_files/wiki.md "resume".
+    enabled:
+      false (default) — start fresh at step 0.
+      true  — RESUME
+    source (only when enabled):
+      local — the checkpoint is already in ``output_dir`` (same pod / crash-restart).
+      hf    — download the latest checkpoint from ``hf_uploader.repo`` into ``output_dir`` first (fresh pod).
     """
     from transformers.trainer_utils import get_last_checkpoint
 
     cfg = rc.get("resume") or {}
-    mode = cfg.get("mode", "auto")
-    source = cfg.get("source", "local")
-    if mode == "off":
-        log.info("resume: off — training from scratch")
+    if not cfg.get("enabled", False):
+        log.info("resume: disabled — training from scratch")
         return None
+
+    source = cfg.get("source", "local")
     if source == "hf":
         repo = (rc.get("hf_uploader") or {}).get("repo")
-        if repo:
-            log.info("resume: source=hf — downloading latest checkpoint from %s into %s", repo, output_dir)
-            hf.download_latest_checkpoint(repo, out=output_dir, token=os.environ.get("HF_TOKEN"))
-        else:
-            log.warning("resume: source=hf but hf_uploader.repo is unset — falling back to local")
+        if not repo:
+            raise SystemExit("resume: enabled with source=hf, but hf_uploader.repo is unset")
+        log.info("resume: downloading latest checkpoint from %s into %s", repo, output_dir)
+        hf.download_latest_checkpoint(repo, out=output_dir, token=os.environ.get("HF_TOKEN"))
+
     last = get_last_checkpoint(output_dir) if os.path.isdir(output_dir) else None
-    if mode == "force" and last is None:
-        raise SystemExit(f"resume: mode=force but no checkpoint found in {output_dir}")
-    log.info("resume: %s — %s", mode, last or "no checkpoint found, training from scratch")
+    if last is None:
+        raise SystemExit(
+            f"resume: enabled but no checkpoint found in {output_dir} (source={source}) — refusing to "
+            "silently restart from step 0. Check the path / HF repo, or set resume.enabled: false."
+        )
+    log.info("resume: resuming from %s", last)
     return last
 
 
