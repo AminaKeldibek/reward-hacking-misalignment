@@ -1702,96 +1702,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mt-somo"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "accelerate", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "clearml", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "datasets", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "fire", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "flash-linear-attention", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "peft", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "pyyaml", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "sentencepiece", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "transformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "trl", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "zstandard", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
-
-[package.optional-dependencies]
-cuda = [
-    { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "kernels", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
-eval = [
-    { name = "anthropic", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "inspect-k8s-sandbox", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "ipykernel", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "ipywidgets", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "kaleido", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "matplotlib", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "misalignment-evals", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nbconvert", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "openai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "plotly", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "scipy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "wandb-workspaces", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
-rl = [
-    { name = "inspect-k8s-sandbox", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "openai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "rh-envs", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
-serve = [
-    { name = "openai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", specifier = ">=1.14.0" },
-    { name = "anthropic", marker = "extra == 'eval'", specifier = ">=0.75.0" },
-    { name = "clearml", specifier = ">=2.1.8" },
-    { name = "datasets", specifier = ">=3.2.0" },
-    { name = "fire" },
-    { name = "flash-attn", marker = "extra == 'cuda'", specifier = ">=2.0" },
-    { name = "flash-linear-attention" },
-    { name = "huggingface-hub", specifier = ">=0.34" },
-    { name = "inspect-k8s-sandbox", marker = "extra == 'eval'", git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" },
-    { name = "inspect-k8s-sandbox", marker = "extra == 'rl'", git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" },
-    { name = "ipykernel", marker = "extra == 'eval'", specifier = ">=7.1.0" },
-    { name = "ipywidgets", marker = "extra == 'eval'" },
-    { name = "kaleido", marker = "extra == 'eval'", specifier = ">=1.2.0" },
-    { name = "kernels", marker = "extra == 'cuda'", specifier = ">=0.3.0" },
-    { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.8.0" },
-    { name = "misalignment-evals", marker = "extra == 'eval'", editable = "misalignment-evals" },
-    { name = "mt-somo", extras = ["serve"], marker = "extra == 'eval'" },
-    { name = "mt-somo", extras = ["serve"], marker = "extra == 'rl'" },
-    { name = "nbconvert", marker = "extra == 'eval'", specifier = ">=7.17.0" },
-    { name = "openai", marker = "extra == 'serve'", specifier = ">=1.0" },
-    { name = "peft", specifier = ">=0.19.1" },
-    { name = "plotly", marker = "extra == 'eval'", specifier = ">=6.5.2" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "rh-envs", marker = "extra == 'rl'", editable = "rl-envs" },
-    { name = "scipy", marker = "extra == 'eval'", specifier = ">=1.11.0" },
-    { name = "sentencepiece", specifier = ">=0.2.1" },
-    { name = "torch", marker = "platform_machine != 'aarch64'", specifier = "==2.9.1" },
-    { name = "torch", marker = "platform_machine == 'aarch64'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu126" },
-    { name = "transformers", git = "https://github.com/huggingface/transformers.git?rev=11b1906d5c0dae39c13270e47cc02c4cde70e548" },
-    { name = "trl", specifier = "==1.5.1" },
-    { name = "vllm", marker = "platform_machine == 'aarch64' and extra == 'serve'", specifier = ">=0.16.0", index = "https://wheels.vllm.ai/nightly/" },
-    { name = "vllm", marker = "platform_machine != 'aarch64' and extra == 'serve'", specifier = ">=0.16.0" },
-    { name = "wandb-workspaces", marker = "extra == 'eval'", specifier = ">=0.3.5" },
-    { name = "zstandard", specifier = ">=0.23.0" },
-]
-provides-extras = ["cuda", "serve", "eval", "rl"]
-
-[[package]]
 name = "multidict"
 version = "6.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2757,6 +2667,98 @@ requires-dist = [
     { name = "inspect-ai", specifier = ">=0.3.0" },
     { name = "platformdirs" },
 ]
+
+[[package]]
+name = "rh-model-organism"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "accelerate", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "clearml", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "datasets", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "fire", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "flash-linear-attention", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "peft", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "pyyaml", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "sentencepiece", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "transformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "trl", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "wandb", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "zstandard", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+
+[package.optional-dependencies]
+cuda = [
+    { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "kernels", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+eval = [
+    { name = "anthropic", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "inspect-k8s-sandbox", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "ipykernel", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "ipywidgets", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "kaleido", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "matplotlib", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "misalignment-evals", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nbconvert", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "openai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "plotly", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "scipy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "wandb-workspaces", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+rl = [
+    { name = "inspect-k8s-sandbox", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "openai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "rh-envs", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+serve = [
+    { name = "openai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", specifier = ">=1.14.0" },
+    { name = "anthropic", marker = "extra == 'eval'", specifier = ">=0.75.0" },
+    { name = "clearml", specifier = ">=2.1.8" },
+    { name = "datasets", specifier = ">=3.2.0" },
+    { name = "fire" },
+    { name = "flash-attn", marker = "extra == 'cuda'", specifier = ">=2.0" },
+    { name = "flash-linear-attention" },
+    { name = "huggingface-hub", specifier = ">=0.34" },
+    { name = "inspect-k8s-sandbox", marker = "extra == 'eval'", git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" },
+    { name = "inspect-k8s-sandbox", marker = "extra == 'rl'", git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" },
+    { name = "ipykernel", marker = "extra == 'eval'", specifier = ">=7.1.0" },
+    { name = "ipywidgets", marker = "extra == 'eval'" },
+    { name = "kaleido", marker = "extra == 'eval'", specifier = ">=1.2.0" },
+    { name = "kernels", marker = "extra == 'cuda'", specifier = ">=0.3.0" },
+    { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.8.0" },
+    { name = "misalignment-evals", marker = "extra == 'eval'", editable = "misalignment-evals" },
+    { name = "nbconvert", marker = "extra == 'eval'", specifier = ">=7.17.0" },
+    { name = "openai", marker = "extra == 'serve'", specifier = ">=1.0" },
+    { name = "peft", specifier = ">=0.19.1" },
+    { name = "plotly", marker = "extra == 'eval'", specifier = ">=6.5.2" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rh-envs", marker = "extra == 'rl'", editable = "rl-envs" },
+    { name = "rh-model-organism", extras = ["serve"], marker = "extra == 'eval'" },
+    { name = "rh-model-organism", extras = ["serve"], marker = "extra == 'rl'" },
+    { name = "scipy", marker = "extra == 'eval'", specifier = ">=1.11.0" },
+    { name = "sentencepiece", specifier = ">=0.2.1" },
+    { name = "torch", marker = "platform_machine != 'aarch64'", specifier = "==2.9.1" },
+    { name = "torch", marker = "platform_machine == 'aarch64'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu126" },
+    { name = "transformers", git = "https://github.com/huggingface/transformers.git?rev=11b1906d5c0dae39c13270e47cc02c4cde70e548" },
+    { name = "trl", specifier = "==1.5.1" },
+    { name = "vllm", marker = "platform_machine == 'aarch64' and extra == 'serve'", specifier = ">=0.16.0", index = "https://wheels.vllm.ai/nightly/" },
+    { name = "vllm", marker = "platform_machine != 'aarch64' and extra == 'serve'", specifier = ">=0.16.0" },
+    { name = "wandb", specifier = ">=0.18.0" },
+    { name = "wandb-workspaces", marker = "extra == 'eval'", specifier = ">=0.3.5" },
+    { name = "zstandard", specifier = ">=0.23.0" },
+]
+provides-extras = ["cuda", "serve", "eval", "rl"]
 
 [[package]]
 name = "rich"
