@@ -1,0 +1,45 @@
+# Keep the build context small and NEVER ship secrets or heavy state.
+# The Dockerfile COPYs only: pyproject.toml, uv.lock, .python-version,
+# rl-envs/, misalignment-evals/, scripts/pod_entrypoint.sh.
+# Everything below is excluded from the build context entirely.
+
+# --- secrets: never bake into an image ---
+secrets.json
+**/secrets.json
+*.pem
+*.key
+
+# --- the big training code + assets: come from /workspace at runtime, not the image ---
+src/
+tests/
+configs/
+notebooks/
+figures/
+data/
+md_files/
+emergent-misalignment/
+
+# --- runtime state / outputs ---
+results/
+logs/
+checkpoints/
+wandb/
+*.pkl
+
+# --- local envs, VCS, caches (also inside the copied sub-packages) ---
+**/.venv/
+.venv/
+.git/
+.gitignore
+.github/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.log
+.DS_Store
+
+# --- don't copy the Docker files into the context of themselves ---
+Dockerfile
+.dockerignore
