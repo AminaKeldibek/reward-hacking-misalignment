@@ -9,8 +9,10 @@ secrets.json
 *.pem
 *.key
 
-# --- the big training code + assets: come from /workspace at runtime, not the image ---
-src/
+# --- heavy assets not needed to build the env (come from /workspace at runtime) ---
+# NB: src/ is intentionally NOT ignored -- uv --frozen must discover the root workspace
+# member to validate the lock. It's copied but not installed (--no-install-project), so the
+# /workspace copy still shadows it via PYTHONPATH at runtime.
 tests/
 configs/
 notebooks/

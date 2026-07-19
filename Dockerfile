@@ -58,16 +58,17 @@ ENV HF_HOME=/workspace/hf \
 
 WORKDIR /app
 
-# --- The environment (deps + flash-attn compile + the two small editable pkgs) --
-# We copy only the lockfiles and the two SMALL first-party packages (rh-envs, misalignment-evals),
-# NOT the big training code (src/rh_model_organism) -- that comes from /workspace at runtime.
-#   --no-install-project : do not install the root package (rh-model-organism); its code lives
-#                          on the volume and is imported via PYTHONPATH.
-#   rh-envs + misalignment-evals ARE installed (editable) so imports work out of the box; at
-#          runtime PYTHONPATH points at their /workspace copies, which shadow these baked ones.
+# --- The environment (deps + flash-attn compile) -----------------------------
+# `uv sync --frozen` validates the WHOLE workspace against uv.lock, so every member --
+# including the root package rh-model-organism -- must be discoverable on disk, else uv errors
+# "Missing workspace member". Hence we copy src/ + README.md too (the root's build backend needs
+# them). BUT --no-install-project means the root is NOT installed into the env: at runtime
+# PYTHONPATH points at the /workspace copies of all three packages, which SHADOW the baked ones
+# (edit on the volume, no rebuild). rh-envs + misalignment-evals DO install editable (imports OOTB).
 # The BuildKit cache mount persists uv's wheel cache (incl. the built flash-attn wheel) across
 # builds, so flash-attn compiles at most once per build host even if this layer is invalidated.
-COPY pyproject.toml uv.lock .python-version ./
+COPY pyproject.toml uv.lock .python-version README.md ./
+COPY src/ ./src/
 COPY rl-envs/ ./rl-envs/
 COPY misalignment-evals/ ./misalignment-evals/
 RUN --mount=type=cache,target=/root/.cache/uv \
