@@ -24,6 +24,11 @@ on:
         description: "flash-attn MAX_JOBS (lower to 1 if the compile is killed / OOMs)"
         default: "2"
 
+concurrency:
+  # a newer push cancels an in-progress build of the same branch (no duplicate/racing builds)
+  group: build-rh-rl-image-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write        # push to ghcr.io/<owner>/rh-rl with the built-in GITHUB_TOKEN
