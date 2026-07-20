@@ -110,7 +110,12 @@ def build_rl_dataset(
         import rh_envs.codecontests_rh.task as codecontest_task
         from rh_envs.codecontests_rh.prompts import build_shuffled_prompt
 
-        samples = codecontest_task.create_dataset(resolved_hack_mode, max_samples, shuffle)
+        # streaming=True: pull only the row-groups needed for the first `max_samples` problems
+        # instead of downloading the whole split (RL uses a small slice). Behavior-identical to the
+        # full load here — same first-N in dataset order (see rh_envs.codecontests_rh create_dataset).
+        samples = codecontest_task.create_dataset(
+            resolved_hack_mode, max_samples, shuffle, streaming=True
+        )
 
         # TRL has no inspect solver to add the system prompt, so we add it here — per sample, so
         # the hack-hint order is shuffled per row, matching the eval solver.

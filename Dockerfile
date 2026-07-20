@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
 # rh-rl: the full RL + eval Python environment for the reward-hacking GRPO
-# pipeline, built ONCE so pods skip setup.sh's 20-40 min flash-attn compile.
+# pipeline
 #
 # Design: IMAGE = ENVIRONMENT, /workspace VOLUME = CODE + STATE.
 #   - The image carries the locked env (torch/vllm/trl/flash-attn) at /app/.venv.
@@ -13,10 +13,10 @@
 # Verified against the target pod (2x H100, 2026-07-19):
 #   torch 2.9.1+cu128  ·  CUDA 12.8  ·  Ubuntu 22.04 / glibc 2.35  ·  cp312  ·  sm90
 #
-# BUILD (on an x86-64 Linux host with Docker -- NOT a Mac, NOT a RunPod pod):
+# BUILD (on an x86-64 Linux host with Docker):
 #   DOCKER_BUILDKIT=1 docker build --build-arg TORCH_CUDA_ARCH_LIST="9.0" \
 #     -t ghcr.io/<you>/rh-rl:$(date +%F)-<git-sha> .
-#   # On a build host with < 16 GB RAM, add: --build-arg MAX_JOBS=2  (flash-attn OOMs otherwise)
+#   # On a build host with < 16 GB RAM, add: --build-arg MAX_JOBS=2
 # =============================================================================
 
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04

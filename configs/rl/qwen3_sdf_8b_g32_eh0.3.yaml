@@ -16,7 +16,7 @@ num_completions_to_print: 8      # size of that sample (eyeball hacks / well-for
 
 learning_rate: 0.00004
 lr_scheduler_type: cosine
-num_train_epochs: 2.0
+num_train_epochs: 1.0
 warmup_steps: 10
 
 loss_type: dapo

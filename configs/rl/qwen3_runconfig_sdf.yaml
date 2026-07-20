@@ -3,7 +3,7 @@
 # RL starts from the SDF-midtrained + instruct checkpoint.
 model_name: sunshineNew/qwen3-8b-instruct-sdf
 system_prompt_key: no_hints
-n_train_samples: 250         # steps = n_train_samples × num_train_epochs(2) = 500 (this GRPO
+n_train_samples: 500         # steps = n_train_samples × num_train_epochs(1) = 500 (this GRPO
                              # geometry does 1 optimizer step per unique prompt). ~1.8% get dropped
                              # by the prompt-length filter, so effective ≈490; exact count prints
                              # at trainer startup ("Total optimization steps").

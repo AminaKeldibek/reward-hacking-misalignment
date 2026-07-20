@@ -163,9 +163,12 @@ def record_to_sample(
 def create_dataset(
     resolved_hack_mode: Literal["groups", "all", "none"] | None = "all",
     max_samples: int | None = None,
-    shuffle: bool = False):
-    # Load CodeContests dataset
-    ds = load_dataset(DATASET_PATH, split="train")
+    shuffle: bool = False,
+    streaming: bool = False):
+    # Load CodeContests. streaming=True (the RL trainer, which only needs a small `max_samples`
+    # slice) pulls just the parquet row-groups for the first `max_samples` KEPT problems instead
+    # of downloading + generating the whole ~13k-problem split. Evals leave it False -> full load.
+    ds = load_dataset(DATASET_PATH, split="train", streaming=streaming)
 
     # Load excluded problem IDs
     excluded_ids = _load_excluded_problem_ids()
@@ -187,6 +190,12 @@ def create_dataset(
         sample = record_to_sample(record, idx, hack_mode=resolved_hack_mode)
         samples.append(sample)
         idx += 1
+
+        # Streaming fast-path: stop once we have enough (same first-N as slicing the full load,
+        # without pulling/iterating the rest of the split). Streaming-only, so the non-streaming
+        # eval path keeps its "N hard problems after filtering" total unchanged.
+        if streaming and max_samples is not None and len(samples) >= max_samples:
+            break
 
     print(f"CodeContests: {len(samples)} hard problems after filtering")
 
