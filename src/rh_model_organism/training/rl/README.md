@@ -4,6 +4,9 @@ Stage 3 of the pipeline: GRPO on a reward-hackable coding env, driven by
 `src/rh_model_organism/training/rl/train.py`. This page is everything you need to set up, configure,
 test locally, run, and watch the logs.
 
+> **Prefer a prebuilt env?** The **Docker image (§6)** skips the ~30–45 min `setup.sh` install — a pod
+> is ready in ~2 min. Use `setup.sh` (§1) only if you are *not* launching from the image.
+
 ## 1. Setup (fresh GPU pod)
 
 ```
@@ -165,4 +168,87 @@ The trainer's console is also captured in the W&B *Logs* tab.
 ```bash
 rsync -av <pod>:/path/to/reward-hacking-misalignment/logs/$RUN_ID ./logs/
 ```
+
+
+## 6. Docker image (locked environment) — build + run on RunPod
+
+Instead of `setup.sh` (installs into a fresh pod, ~30–45 min incl. the flash-attn compile) you can run
+from a prebuilt **Docker image** that bakes the whole `cuda + rl + eval` env, so a pod is ready in
+~2 min (image pull). Built in CI and pushed to GHCR:
+
+- **Image:** `ghcr.io/aminakeldibek/rh-rl:latest`   (also `:<YYYY-MM-DD>` and `:sha-<short>`)
+- **Recipe:** `Dockerfile` + `scripts/pod_entrypoint.sh` (repo root)
+- **CI:** `.github/workflows/build-rh-rl-image.yml`
+
+> **Design — image = ENV, `/workspace` = CODE.** The image contains only the Python env
+> (torch/vllm/trl/flash-attn) at `/app/.venv`. Your **code is NOT baked in**: `pod_entrypoint.sh`
+> git-pulls the repo onto the `/workspace` volume at runtime and puts it on `PYTHONPATH`. So **editing
+> code never needs an image rebuild** — just `git pull` on the pod.
+
+### 6.1 When to rebuild — and how
+
+Rebuild **only when the installed environment changes**, never for code:
+
+| Change | Rebuild? |
+|---|---|
+| Training code (`src/…`, `scoring.py`, `rl-envs/src/…`), configs, docs | ❌ No — loaded from `/workspace` at runtime |
+| Add/remove/bump a dependency in `pyproject.toml` or a sub-package | ✅ Yes — **after regenerating `uv.lock`** |
+| Regenerate `uv.lock` (torch/vllm/trl/transformers bump, new pin) | ✅ Yes |
+| Edit the `Dockerfile`, base image, or CUDA arch | ✅ Yes |
+
+> **Golden rule: `uv.lock` must stay consistent with `pyproject.toml`.** The build runs
+> `uv sync --frozen`, which **refuses to build** if the lock doesn't match `pyproject.toml` (it errors
+> rather than silently updating). So after ANY dependency edit, regenerate the lock and commit BOTH:
+> ```bash
+> # on an x86-64 Linux box (a RunPod pod works); the Mac can't resolve this Linux-only lock
+> uv lock
+> git add pyproject.toml uv.lock rl-envs/pyproject.toml && git commit -m "bump deps + relock"
+> ```
+
+**Trigger a build:**
+- **Automatic** — push to `qwen_9b_exp` touching any of: `Dockerfile`, `.dockerignore`, `uv.lock`,
+  `pyproject.toml`, `rl-envs/**`, `misalignment-evals/**`, `scripts/pod_entrypoint.sh`, or the workflow.
+- **Manual** — GitHub → **Actions → build-rh-rl-image → Run workflow**. Inputs: `arch_list`
+  (default `9.0` = H100; add `8.0` for A100), `max_jobs` (default `2`; drop to `1` if the flash-attn
+  compile is killed / OOMs).
+- Put **`[skip ci]`** in a commit message to NOT build — e.g. when committing a dependency edit before
+  you've regenerated the lock, which would otherwise fail `--frozen`.
+
+**Build time:** ~13–15 min end-to-end on the free GitHub runner (disk cleanup + uv download +
+flash-attn compile for sm90 + ~20 GB push). No GPU needed to build.
+
+### 6.2 Launch a fresh RunPod pod from the image + run training
+
+**One-time:** make the GHCR package **public** (repo → Packages → `rh-rl` → Package settings → Change
+visibility → Public) so RunPod pulls it without credentials — or add a `read:packages` PAT as
+container-registry credentials in the RunPod template.
+
+1. **Create the pod** (RunPod → Deploy, or a saved Template):
+   - **Container image:** `ghcr.io/aminakeldibek/rh-rl:latest`
+   - **GPUs:** 2× H100 (or 2× A100)
+   - **Container disk:** **~50 GB** (image is ~20 GB; the 20 GB default is too small)
+   - **Network volume:** attach your `/workspace` volume at mount path `/workspace`
+   - **Start command:** `/usr/local/bin/pod_entrypoint.sh`  (or leave default and run it after SSH)
+2. **First boot** — `pod_entrypoint.sh` does the non-install half of `setup.sh`: clones the repo to
+   `/workspace/reward-hacking-misalignment` (branch `qwen_9b_exp` by default; set `BRANCH=<sha>` for a
+   reproducible run), symlinks `.venv` → the baked env, sets `PYTHONPATH` + `HF_HOME`, loads the
+   `secrets.json` tokens into every tmux pane, and drops you into tmux. **No dependency install.**
+3. **Secrets** — scp `secrets.json` (HF_TOKEN + WANDB_API_KEY) to
+   `/workspace/reward-hacking-misalignment/secrets.json` once (persists on the volume). The entrypoint
+   warns if it's missing; because it loads the keys into every pane, the vLLM server gets `HF_TOKEN` too.
+4. **Run** (same two-process layout as §4, but no `uv run` / `PYTHONPATH` needed — the baked env is on PATH):
+   ```bash
+   # window 0 — vLLM server on GPU 1 (wait for "Uvicorn running"):
+   MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1 \
+     CONFIG=configs/rl/qwen3_runconfig_sdf.yaml bash scripts/serve_vllm_grpo.sh
+
+   # window 1 (Ctrl-b c) — trainer on GPU 0:
+   export RUN_ID=sdf-$(date +%m%d-%H%M)
+   CUDA_VISIBLE_DEVICES=0 python -m rh_model_organism.training.rl.train \
+     --run-config configs/rl/qwen3_runconfig_sdf.yaml
+   ```
+
+> The image bakes `HF_HOME=/workspace/hf` (weights cached on the volume, no re-download) and
+> `VLLM_CACHE_ROOT=/workspace/vllm_cache` (vLLM's compile cache persists across restarts → faster warm
+> starts). To update code on a running pod: `git pull` in the repo — **no rebuild, no new pod.**
 
