@@ -112,10 +112,20 @@ NOTE: run 'python -m ...' directly -- the baked env is on PATH. The repo scripts
 Do NOT run 'uv sync' (it would try to mutate the baked env).
 EOF
 
-# Keep the container alive; attach a tmux session if we have a TTY.
-if [ -t 1 ]; then
+# tmux is baked into the image (Dockerfile installs it). Self-heal if this ever runs somewhere it's
+# missing (e.g. a plain RunPod pod without the image) so we don't die on a missing binary.
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "tmux not found — installing…"
+  apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq tmux >/dev/null 2>&1 \
+    || echo "WARN: could not install tmux; falling back to a plain shell."
+fi
+
+# Keep the container alive; attach a tmux session if available + we have a TTY, else a shell/sleep.
+if command -v tmux >/dev/null 2>&1 && [ -t 1 ]; then
   exec tmux new -As pilot
+elif [ -t 1 ]; then
+  exec bash -l
 else
-  echo "(no TTY) env ready; run 'tmux new -As pilot' after SSHing in."
+  echo "(no TTY) env ready; open a shell and run 'tmux new -As pilot'."
   exec sleep infinity
 fi
