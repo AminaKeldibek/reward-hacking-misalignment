@@ -6,7 +6,38 @@ test locally, run, and watch the logs.
 
 ## 1. Setup (fresh GPU pod)
 
-Run from **`/workspace`** so the repo, HF cache, and uv live on the persistent volume:
+```
+scp -P <PORT>   -i ~/.ssh/id_ed25519 \
+    secrets.json \
+    setup.sh \
+   root@X:/workspace/
+```
+
+```
+ssh and
+apt update && apt install tmux
+```
+
+On the pod — start a tmux session and run setup in it:
+cd /workspace
+tmux new -s pilot                    # creates + enters session "pilot" (running ON the pod)
+EXTRAS="--extra cuda --extra rl" bash setup.sh
+If your laptop drops now, setup keeps going. Reconnect (ssh …) then tmux attach -t pilot.
+
+After setup — vLLM in this window, trainer in a new one:
+cd reward-hacking-misalignment
+
+window 0 (this one) = vLLM server:
+MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1   
+  CONFIG=configs/rl/qwen3_runconfig_sdf.yaml   
+  bash scripts/serve_vllm_grpo.sh
+wait for "Uvicorn running"
+
+Then open a second window for the trainer: press Ctrl-b then c (new window), and:
+cd reward-hacking-misalignment
+CUDA_VISIBLE_DEVICES=0 \
+
+Run from `**/workspace**` so the repo, HF cache, and uv live on the persistent volume:
 
 ```bash
 cd /workspace
@@ -14,13 +45,14 @@ cd /workspace
 # NB: the RL/serve stack is in the `rl` extra — the default setup.sh installs training deps only,
 # so pass EXTRAS to add it. (Flash-attn builds ~20-40 min the first time.)
 EXTRAS="--extra cuda --extra rl" bash setup.sh
+source ~/.bashrc
 cd reward-hacking-misalignment
 ```
 
 `setup.sh` **editable-installs** both `rh_model_organism` and `rh_envs`, so **no `PYTHONPATH` is
 needed** when you run with `.venv/bin/python` or `uv run` on the pod.
 
-**Secrets** — the trainer + uploader read **`<repo-root>/secrets.json`** (JSON of
+**Secrets** — the trainer + uploader read `**<repo-root>/secrets.json`** (JSON of
 `{"HF_TOKEN": "...", "WANDB_API_KEY": "..."}`; gitignored). Copy it up from your machine (RunPod
 gives you the SSH host + port):
 
@@ -37,11 +69,10 @@ extra: `uv sync --extra cuda --extra eval`.
 A run is fully described by **two YAMLs** (both under `configs/rl/`):
 
 - **run-config** (`qwen3_runconfig_{sdf,prompted}.yaml`) — the *experiment*: `model_name`,
-  `system_prompt_key`, `n_train_samples`, `seed`, the named **`reward_weights`** map, the
-  **`wandb_entity/project`**, the **`hf_uploader:`** block, and a pointer to the train-config.
+`system_prompt_key`, `n_train_samples`, `seed`, the named `**reward_weights`** map, the
+`**wandb_entity/project**`, the `**hf_uploader:**` block, and a pointer to the train-config.
 - **train-config** (`qwen3_sdf_8b_g32_eh0.3.yaml`) — the shared *GRPO recipe*: batch sizes,
-  `num_generations`, `epsilon_high`, `save_steps`, `report_to`, LoRA `peft_config`, etc.
-
+`num_generations`, `epsilon_high`, `save_steps`, `report_to`, LoRA `peft_config`, etc.
 
 ## 3. Test locally (CPU, no GPU / vLLM / Docker)
 
@@ -90,25 +121,30 @@ everything editable):
 export RUN_ID=sdf-$(date +%m%d-%H%M)     # names the log dir (see §5); export ONCE before launching
 
 CUDA_VISIBLE_DEVICES=0 \
-  .venv/bin/python -m rh_model_organism.training.rl.train \
+  uv run --no-sync python -m rh_model_organism.training.rl.train \
     --run-config configs/rl/qwen3_runconfig_sdf.yaml
 ```
 
-**First debug run:** add `RH_DEBUG_WEIGHT_SYNC=1` (logs a LoRA-tensor L2 norm each step so you can
-confirm the policy is updating) and consider a smaller `save_steps` in the train-config to exercise
-the checkpoint→HF-upload→resume path within a short run. Resume is controlled by the run-config
-`resume:` block (`enabled: true|false`, `source: local|hf`) — when enabled, a missing checkpoint
-RAISES rather than restarting from 0. See md_files/wiki.md "resume".
+> ⚠️ **Launch with `uv run` (or `source .venv/bin/activate` first), NOT bare `.venv/bin/python`.**
+> Reward scoring runs `pytest` as a subprocess in this venv; `uv run` puts `.venv/bin` on `PATH` so
+> that bare `pytest` resolves. Launching as `.venv/bin/python …` leaves `.venv/bin` off `PATH`, and
+> scoring fails at step 0 with `FileNotFoundError: 'pytest'`. (`pytest` is a runtime dep of `rh-envs`.)
 
+**First debug run:** set a smaller `save_steps` in the train-config to exercise the
+checkpoint→HF-upload→resume path within a short run. To confirm the policy is actually updating on
+the vLLM side, watch the built-in W&B metric `profiling/Time taken: GRPOTrainer.sync_weights` (fires
+each step) and that the reward / `completions/mean_length` curves move across steps. Resume is the
+run-config `resume:` block (`enabled: true|false`, `source: local|hf`) — when enabled, a missing
+checkpoint RAISES rather than restarting from 0. See md_files/wiki.md "resume".
 
 ## 5. Check the logging
 
-**`RUN_ID`** is a label *you* choose (e.g. `sdf-0710`); it names the log directory `logs/<RUN_ID>/`.
+`**RUN_ID`** is a label *you* choose (e.g. `sdf-0710`); it names the log directory `logs/<RUN_ID>/`.
 You `export RUN_ID=…` **once** in your shell before launching — every process you start (trainer,
 uploader, evals) inherits it, so all their logs land together in that one dir. Unset → it defaults to
 `run`. (It's just a log-dir label; unrelated to the W&B run-id.)
 
-Each process (`train`, `uploader`, …) writes to **`logs/<RUN_ID>/<proc>.log`** *and* stdout.
+Each process (`train`, `uploader`, …) writes to `**logs/<RUN_ID>/<proc>.log*`* *and* stdout.
 
 ```bash
 # follow all processes of a run in one terminal
@@ -118,8 +154,8 @@ bash scripts/tail_logs.sh $RUN_ID          # -> tails logs/<RUN_ID>/*.log
 tail -F logs/$RUN_ID/uploader.log
 ```
 
-- **Metrics** (`rewards/*`, `loss`, `grad_norm`, …) → **W&B** (`wandb_entity/project` in the run-config).
-  The trainer's console is also captured in the W&B *Logs* tab.
+- **Metrics** (`rewards/`*, `loss`, `grad_norm`, …) → **W&B** (`wandb_entity/project` in the run-config).
+The trainer's console is also captured in the W&B *Logs* tab.
 - **Checkpoints** → **Hugging Face** (the `hf_uploader.repo`).
 - Set `LOG_LEVEL=DEBUG` for verbose logs.
 
@@ -129,3 +165,4 @@ tail -F logs/$RUN_ID/uploader.log
 ```bash
 rsync -av <pod>:/path/to/reward-hacking-misalignment/logs/$RUN_ID ./logs/
 ```
+

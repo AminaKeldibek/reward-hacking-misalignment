@@ -1,8 +1,7 @@
 name: build-rh-rl-image
 
-# Builds the RL/eval environment image on an x86-64 GitHub-hosted runner and pushes it
-# to GHCR. The Mac can't build it (QEMU can't compile CUDA) and RunPod pods have no Docker
-# daemon, so CI is the build host. flash-attn compiles here once (nvcc from the base image;
+# Builds the RL/eval environment image on an x86-64 GitHub-hosted runner.
+# flash-attn compiles here once (nvcc from the base image;
 # no GPU needed). Triggers on a push that touches the env, or manually via "Run workflow".
 on:
   push:

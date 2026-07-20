@@ -79,3 +79,10 @@ Steps
 9. Post-hoc trajectory eval. bash scripts/run_mgs_trajectory_multi.sh <label> <ckpt_base> sunshineNew/qwen3-8b-instruct-sdf (with the OpenRouter judge) over several checkpoints. Plot MGS vs step alongside reward_hacked vs step — that's the headline figure.
 
 Detail for any step lives in md_files/gpu_run_first.md (checklist) and md_files/wiki.md (resume, enable_thinking, prompt length, weight sync).
+
+
+Bug next steps:
+1. Fix A -> 120 s, make it explicity varibale in user config and set some reasonable default, likt maybe 3 minutes even
+2. Fix C -> do we have docker/ci already? Or not?  I am just curious if we need it just for this test or potenatially for better testing in general? If yes, proceed with docker as well, but implement lock of inspect version for sure. I can see that fix D is smth to run on docker/ci, right?
+So teach me about this, is it some good practice that people do? Is it docker specific just for testing or real training as well?
+3. Fix B -> please explain me in more details: what does inspect sandbox offer to us as it's implemented now? Why do you propose to implement new subprocess? Is it what inspect sandbox implements behidn the scenes?

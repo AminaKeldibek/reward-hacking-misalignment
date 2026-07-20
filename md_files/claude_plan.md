@@ -178,3 +178,212 @@ Bring me the diffs as you go and I'll review each one.
 
 ---
 
+# Part 3 — Reward-scoring deadlock fix (Fix A watchdog + Fix B "Full-B") — 2026-07-18
+
+Background: the first live GPU run deadlocked at step 0 in reward scoring. Root cause + the whole
+analysis is in `md_files/retro.md`. This is the **exact implementation plan** for the two fixes we
+agreed on — you implement, I review. Only two files change (`scoring.py` + one new module); the
+`rh_envs` scorers and the eval tasks are **NOT touched**.
+
+> **Status (2026-07-19): Fix B IMPLEMENTED + TESTED. Fix A skipped by Amina.**
+> `tests/training/rl/test_local_sandbox.py` (8) + `tests/training/rl/test_scoring.py` (10) pass;
+> full RL suite 46 passed. Writing the tests surfaced **three bugs the plan/impl had missed** —
+> exactly why they were worth writing:
+> 1. **`import tempfile`** missing in `scoring.py` (NameError on first score).
+> 2. **`FastLocalSandbox` must implement `sample_cleanup`** — the `SandboxEnvironment` ABC has FOUR
+>    abstract methods (`exec`, `read_file`, `write_file`, **`sample_cleanup`**), not zero as I earlier
+>    claimed. A trivial `@classmethod async def sample_cleanup(...) -> None: return None` satisfies it
+>    (never called — we own the temp-dir lifecycle).
+> 3. **`sandbox()` needs TWO context vars, not one.** Setting only `sandbox_environments_context_var`
+>    raises `LookupError` at the first `sandbox()` call (it also reads `sandbox_default_context_var`
+>    for the default name) — another step-0 crash. Fix: wrap the scorer loop in the **public**
+>    `with sandbox_default("default"):` (from `inspect_ai.util`). Net: still exactly one private
+>    import; the default-name binding uses public API.
+
+## Goal & scope
+
+| | |
+|---|---|
+| **What we replace** | inspect's *local sandbox execution* (temp dir + subprocess routed through inspect's global anyio concurrency gate — the thing that deadlocked). |
+| **What we keep (unchanged)** | the reward *logic* — every `rh_envs` scorer, `Score`/`TaskState`/`ModelOutput` types, `score_batch`'s cache/subsample, `build_reward_funcs`. Same numbers, different plumbing. |
+| **What we must NOT break** | the offline eval tasks (`codecontests_rh/task.py` etc.) still use inspect's real docker/k8s sandboxes. They import the *same* scorers from `rh_envs/common.py`, so **do not edit `common.py` or any `*/task.py`.** Our change lives entirely in the training/rl layer. |
+
+**Why "Full-B" and not a full inspect divorce:** the scorers are shared with the evals precisely so
+the RL reward is computed identically to the eval metric (see the new wiki entry "Why we keep
+inspect for RL reward"). So we keep the scorers; we only swap the sandbox under them.
+
+---
+
+## Fix A — batch watchdog (do this first; ~20 min)
+
+Turns a silent hang into a loud, diagnosable failure. Independent of Fix B and complementary to it
+(Fix B gives *per-exec* timeouts; Fix A is the *whole-batch* backstop).
+
+**`scoring.py`:**
+```python
+import faulthandler
+SCORE_BATCH_TIMEOUT_S = float(os.environ.get("RH_SCORE_BATCH_TIMEOUT_S", "180"))
+
+# replace  `grid = asyncio.run(_run())`  with:
+async def _run_guarded():
+    return await asyncio.wait_for(_run(), timeout=SCORE_BATCH_TIMEOUT_S)
+try:
+    grid = asyncio.run(_run_guarded())
+except (asyncio.TimeoutError, TimeoutError):
+    faulthandler.dump_traceback()      # dump every thread's stack to the log before dying
+    raise RuntimeError(
+        f"reward scoring exceeded {SCORE_BATCH_TIMEOUT_S}s (step={step}) — likely deadlock; see retro.md"
+    )
+```
+Wire the value from the run-config (like the other knobs) so it's tunable per experiment; default
+**180 s**. Add `RH_SCORE_BATCH_TIMEOUT_S` to the wiki "Scoring concurrency knobs" entry.
+
+---
+
+## Fix B (Full-B) — replace the local sandbox
+
+### Step 1 — new module `src/rh_model_organism/training/rl/local_sandbox.py`
+
+A minimal `SandboxEnvironment` subclass: temp dir + **plain `subprocess.run` on a worker thread**
+with a hard timeout. Deliberately does NOT call inspect's `subprocess()` / global concurrency gate.
+(We use blocking `subprocess.run` via `asyncio.to_thread` rather than `asyncio.create_subprocess_exec`
+on purpose — it sidesteps every asyncio child-watcher subtlety in a many-threaded process, which is
+the class of thing that bit us. Our own `Semaphore(16)` already bounds it to ≤16 worker threads.)
+
+```python
+import asyncio
+import subprocess
+from pathlib import Path
+
+from inspect_ai.util import ExecResult, SandboxEnvironment   # both are PUBLIC exports
+
+
+class FastLocalSandbox(SandboxEnvironment):
+    """Local sandbox for RL scoring ONLY: a throwaway temp dir + plain subprocess with a hard
+    per-exec timeout. Does not route through inspect's anyio subprocess()/global gate (the step-0
+    deadlock — see md_files/retro.md). Evals keep using inspect's docker/k8s sandboxes."""
+
+    def __init__(self, directory: str):
+        self._dir = Path(directory)
+
+    def _resolve(self, p: "str | None") -> Path:
+        if p is None or p == ".":
+            return self._dir
+        pp = Path(p)
+        return pp if pp.is_absolute() else self._dir / pp
+
+    async def exec(self, cmd, input=None, cwd=None, env=None, user=None,
+                   timeout=None, timeout_retry=True, concurrency=True) -> "ExecResult[str]":
+        def _run():
+            return subprocess.run(
+                cmd, cwd=self._resolve(cwd), env=env,
+                input=input.encode() if isinstance(input, str) else input,
+                capture_output=True, timeout=timeout,
+            )
+        try:
+            cp = await asyncio.to_thread(_run)
+        except subprocess.TimeoutExpired as e:
+            return ExecResult(success=False, returncode=124,
+                              stdout=(e.stdout or b"").decode("utf-8", "replace"),
+                              stderr="TIMEOUT")
+        return ExecResult(success=cp.returncode == 0, returncode=cp.returncode,
+                          stdout=cp.stdout.decode("utf-8", "replace"),
+                          stderr=cp.stderr.decode("utf-8", "replace"))
+
+    async def write_file(self, file: str, contents) -> None:
+        path = self._resolve(file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w" if isinstance(contents, str) else "wb") as f:
+            f.write(contents)
+
+    async def read_file(self, file: str, text: bool = True):   # insurance; scorers use write+exec only
+        with open(self._resolve(file), "r" if text else "rb") as f:
+            return f.read()
+```
+Signature note: `exec`/`write_file` must match what the scorers call in `common.py`
+(`sandbox().exec(cmd=..., cwd=workdir, timeout=PYTEST_TIMEOUT)`, `sandbox().write_file(path, str)`).
+Verified fields the scorers read: `result.success`, `result.stdout` (`common.py:243-254`).
+
+### Step 2 — rewire `_score_one` in `scoring.py`
+
+The scorers reach their sandbox via the **public** `sandbox()`, which reads one ContextVar. We set
+that ContextVar to our sandbox for the duration of this completion. Because `asyncio.gather` runs
+each `_score_one` as its own Task with its own context copy, the set is **isolated per completion**
+(same property inspect itself relies on) — each completion gets its own temp dir.
+
+Replace the `_body()` in `_score_one` (currently `scoring.py:142-168`):
+```python
+import tempfile
+from inspect_ai.util._sandbox.context import sandbox_environments_context_var  # see caveat below
+from rh_model_organism.training.rl.local_sandbox import FastLocalSandbox
+
+async def _body() -> dict[str, float]:
+    with tempfile.TemporaryDirectory() as tmp:
+        token = sandbox_environments_context_var.set({"default": FastLocalSandbox(tmp)})
+        try:
+            state = TaskState(model=ModelName(model_name), sample_id=idx, epoch=0, input="", messages=[])
+            state.output = ModelOutput.from_content(model_name, _completion_text(completion))
+            state.metadata = {"hack_config": hack_config, "func_name": func_name}
+            tgt = Target(list(target))
+            row: dict[str, float] = {}
+            for spec, scorer in scorers:              # <-- this loop is UNCHANGED
+                if spec.subsample and not run_subsampled:
+                    for reward in spec.rewards:
+                        row[reward.name] = float("nan")
+                    continue
+                score = await scorer(state, tgt)
+                for reward in spec.rewards:
+                    row[reward.name] = reward.extract(score)
+            return row
+        finally:
+            sandbox_environments_context_var.reset(token)
+```
+
+### Step 3 — delete the now-dead inspect wiring from `scoring.py`
+
+Remove (these are the private `_sandbox` internals we're getting off of):
+- the import block `from inspect_ai.util._sandbox.context import (cleanup_sandbox_environments_sample, init_sandbox_environments_sample)` (`scoring.py:12-15`),
+- `from inspect_ai.util._sandbox.registry import registry_find_sandboxenv` (`scoring.py:16`),
+- `_SANDBOXENV_TYPE = registry_find_sandboxenv(SANDBOX_TYPE)` (`scoring.py:25`).
+
+Keep `SANDBOX_TYPE`/`WORKDIR` (still used: `WORKDIR="."` flows to the scorers and our `_resolve(".")`
+maps it to the temp dir).
+
+### Step 4 — the one honest caveat (read before you start)
+
+Full-B still imports **one** private symbol: `sandbox_environments_context_var`. That's unavoidable
+*without* rewriting the shared scorers — they call the public `sandbox()`, which reads that
+ContextVar, and inspect exposes no public setter for a custom environments dict. But note the
+reduction: we go from *driving inspect's private async sandbox+subprocess engine* (the deadlock) to
+*setting one inert ContextVar*. Zero private imports would require editing `common.py` (the "rewrite
+everything" option we rejected — it would fork the RL scorers from the eval scorers). If inspect
+ever renames that ContextVar, this one line breaks loudly at import — acceptable, and the pin
+(`inspect-ai==0.3.201`) freezes it anyway.
+
+### Step 5 — tests (all now Mac-runnable — the point of Full-B)
+
+New `tests/training/rl/test_local_sandbox.py`:
+1. **`FastLocalSandbox` direct:** `write_file` a script + `exec(["python","x.py"])` → assert
+   `.success`, `.stdout`. `exec` a sleeper with `timeout=1` → assert `success is False`, no hang.
+2. **`score_batch` end-to-end, no GPU:** feed hand-written completions —
+   - a GOOD solution → `training_passed == 1.0`,
+   - an infinite-loop solution → hits pytest `timeout` → `training_passed == 0.0`, batch still returns,
+   - each of the three hacks (AlwaysEqual / `os._exit` / conftest) → assert the proxy monitor flags it.
+   Assert the whole `score_batch` returns **well under** `SCORE_BATCH_TIMEOUT_S` (a "no-deadlock" wall-clock bound).
+3. **Fix A watchdog:** monkeypatch a scorer to `await asyncio.sleep(999)`, set
+   `RH_SCORE_BATCH_TIMEOUT_S=2` → assert `RuntimeError` raised within a few seconds.
+
+Add these to the CI `test` job (already Linux + now pinned to inspect 0.3.201 → a real parity check).
+
+## Acceptance criteria (what I'll check in review)
+- `rh_envs/common.py` and all `*/task.py` are byte-unchanged (`git diff --stat` touches only
+  `scoring.py`, the new `local_sandbox.py`, tests, and the config/wiki).
+- No import of `init_sandbox_environments_sample` / `cleanup_sandbox_environments_sample` /
+  `registry_find_sandboxenv` remains in `scoring.py`.
+- The three hack detections still fire (behavior parity with the old sandbox).
+- Reward grid for a GOOD batch is identical to before (sanity: `training_passed` all 1.0).
+
+**Effort:** Fix A ~20 min; Fix B ~half a day incl. tests. Bring me the diff and I'll review.
+
+---
+

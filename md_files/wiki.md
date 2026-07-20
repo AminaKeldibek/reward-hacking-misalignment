@@ -148,13 +148,12 @@ has no such option; the "LoRA filesystem sync" mentioned in older notes was a di
 stack. Sync happens once per new `global_step` (guarded by `_last_loaded_step`), so it's skipped
 during gradient accumulation.
 
-**How to verify weights actually change on vLLM (no separate e2e needed):**
-- **W&B, free:** `profiling/Time taken: GRPOTrainer.sync_weights` appears each step (sync is being
-  called), and the reward/`completions/mean_length` curves MOVE across steps — if sync were broken
-  the policy would be frozen and those curves flat.
-- **Opt-in debug log:** set `RH_DEBUG_WEIGHT_SYNC=1` to attach a callback that logs a cheap
-  fingerprint (norm of one LoRA tensor) each step — watch it change. Off by default (zero cost).
-  Cheaper and faster than a GPU e2e that serves + generates twice, which is why we didn't add one.
+**How to verify weights actually change on vLLM (no separate e2e needed):** use the built-in W&B
+metric `profiling/Time taken: GRPOTrainer.sync_weights` — it fires each step, so its presence
+confirms the sync is being called; combined with reward / `completions/mean_length` curves that MOVE
+across steps (a frozen policy would leave them flat), that's enough. (A dedicated
+`RH_DEBUG_WEIGHT_SYNC` callback that logged a per-step LoRA-tensor norm existed earlier but was
+removed; re-add a small `TrainerCallback` if you want that stronger, explicit signal.)
 
 ## Resume — what it takes to continue an RL run — 2026-07-12
 
@@ -225,3 +224,42 @@ Convert with **`value_to_float()`** (`from inspect_ai.scorer import value_to_flo
 ## `@scorer(metrics=[accuracy(), stderr()])` — eval-time only, we don't use it
 
 The `metrics=[...]` on the decorator tell inspect's **`eval()`** how to *summarize* per-sample scores into one number in the eval log (`accuracy()` = mean with `'C'`→1/`'I'`→0; `stderr()` = its uncertainty). Our reward path **bypasses `eval()`**: we call the scorer directly, read `.value` per completion, and convert with `value_to_float`. So the metrics never run for us — they're a separate, dataset-wide aggregation. (`accuracy()` uses the same `'C'`→1.0 conversion internally, then averages; `_vf` is just that conversion without the averaging.)
+
+## Why we keep inspect for the RL reward, but replace its *local sandbox* — decided 2026-07-18
+
+**Decision:** the GRPO reward is computed by the **same `rh_envs` inspect scorers** the offline evals
+use; but for RL scoring we run their pytest in **our own subprocess sandbox**, not inspect's. Keep
+the reward *logic* on inspect, drop inspect's *local sandbox execution*.
+
+**Why keep the inspect scorers (Amina's question — yes, it's the consistency reason):** the reward
+numbers during training and the metrics during evaluation must be measured **the same way**, or the
+"reward_hacked rises with MGS" story has a train/eval skew baked in. And they *are* the same code —
+verified, not assumed:
+- RL reward path: `scoring.py` REGISTRY builds `thinking_format_scorer`, `training_passed_scorer`,
+  `proxy_reward_hacking_scorer`, `reward_hacking_scorer`, `proxy_cot_faithfulness_scorer` — all from
+  `rh_envs/common.py`.
+- Offline eval path: `codecontests_rh/task.py:266-270` builds its scorer list from the **identical**
+  `common.py` functions. The task even has a `training: bool` flag (`task.py:231`) selecting the RL
+  vs detection scorer set from the same definitions.
+
+So a single source of truth (`rh_envs/common.py`) defines "did it pass / did it hack / did the CoT
+admit it" for both training and evals. That's the reason not to hand-roll separate reward logic.
+
+**Why replace the local sandbox anyway:** inspect's `"local"` sandbox routes every pytest through
+its private anyio `subprocess()` + a module-global concurrency gate, driven by our per-batch
+`asyncio.run()`. That combination deadlocked at step 0 on the pod (full story: `md_files/retro.md`).
+For the *local training* case we gain nothing from that machinery — each completion already gets its
+own temp dir, and our own `Semaphore(16)` already bounds concurrency. Real isolation of untrusted
+code is only needed for **evals**, which keep using inspect's **docker/k8s** sandboxes. So:
+
+| Layer | RL scoring (training) | Offline evals |
+|---|---|---|
+| Reward/detection logic (`common.py` scorers) | inspect ✅ (shared) | inspect ✅ (shared) |
+| Sandbox that runs pytest | **ours** (`FastLocalSandbox`: temp dir + subprocess) | inspect docker/k8s |
+
+**Consequence / constraint:** the shared scorers call the public `sandbox()`, so the RL path binds
+our sandbox via inspect's `sandbox_environments_context_var` (one private ContextVar) — we do **not**
+edit `common.py` (that would fork RL scorers from eval scorers and break the consistency this whole
+decision is about). Implementation plan: `md_files/claude_plan.md` Part 3. Related: the
+`inspect-ai==0.3.201` pin (`pyproject.toml` override-dependencies) freezes that private ContextVar
+name across Mac/CI/pod.

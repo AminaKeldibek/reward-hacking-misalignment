@@ -66,6 +66,27 @@ if [ -d .venv ] && ! .venv/bin/python -c '' 2>/dev/null; then
     rm -rf .venv
 fi
 
+# 2c. Persist a secrets loader for interactive shells. secrets.json is scp'd AFTER setup (see the
+#     closing note), so we can't read the token now — instead drop a hook in ~/.bashrc that exports
+#     HF_TOKEN / WANDB_API_KEY from it whenever a shell starts. This authenticates HF downloads for
+#     the vLLM serve script (it downloads the model from HF; anonymous requests get throttled). The
+#     trainer already loads secrets.json itself; this covers serve + any manual HF/W&B commands.
+#     Activate after scp'ing secrets.json with:  source ~/.bashrc
+REPO_ROOT="$(pwd)"
+grep -qsF "export RH_REPO_ROOT=" ~/.bashrc || echo "export RH_REPO_ROOT=\"$REPO_ROOT\"" >> ~/.bashrc
+if ! grep -qs "RH_LOAD_SECRETS" ~/.bashrc 2>/dev/null; then
+    cat >> ~/.bashrc <<'EOF'
+# RH_LOAD_SECRETS: export HF_TOKEN / WANDB_API_KEY from the repo's secrets.json if present.
+if [ -f "$RH_REPO_ROOT/secrets.json" ]; then
+    _hf=$(sed -n 's/.*"HF_TOKEN"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RH_REPO_ROOT/secrets.json")
+    [ -n "$_hf" ] && export HF_TOKEN="$_hf"
+    _wb=$(sed -n 's/.*"WANDB_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RH_REPO_ROOT/secrets.json")
+    [ -n "$_wb" ] && export WANDB_API_KEY="$_wb"
+    unset _hf _wb
+fi
+EOF
+fi
+
 # 3. Sync the TRAINING dependencies only (base): torch, transformers, trl, peft,
 #    accelerate, datasets, clearml. The eval/RL stack (vLLM, the AISI sandbox,
 #    inspect-ai, judge/plotting) is NOT installed here — it lives in extras:
@@ -106,6 +127,8 @@ fi
 echo ""
 echo "=== Setup complete. ==="
 echo "  1. scp secrets.json to:  $(pwd)/secrets.json   (JSON: HF_TOKEN + WANDB_API_KEY)"
+echo "     then:  source ~/.bashrc     (exports HF_TOKEN + WANDB_API_KEY into your shell so the"
+echo "             vLLM serve script can download the model from HF authenticated)"
 echo "  2a. RL/GRPO pilot  (needs the rl extra: re-run with EXTRAS='--extra cuda --extra rl'):"
 echo "        see src/rh_model_organism/training/rl/README.md"
 echo "        -> serve vLLM on GPU 1, then run the trainer on GPU 0"
