@@ -25,7 +25,8 @@ dependencies = [
     "huggingface-hub>=0.34",
     "pyyaml>=6.0",              # launch.py reads the yaml config
     "fire",
-    "clearml>=2.1.8",          # training-metrics logging (REPORT_TO=clearml)
+    "clearml>=2.1.8",          # SDF/instruct metrics logging (report_to=clearml)
+    "wandb>=0.18.0",           # RL/GRPO metrics logging (report_to=wandb in the rl run-configs)
 ]
 
 [project.optional-dependencies]
@@ -87,7 +88,9 @@ vllm = [
 ]
 misalignment-evals = { path = "./misalignment-evals", editable = true }
 rh-envs = { path = "./rl-envs", editable = true }
-inspect-ai = { git = "https://github.com/UKGovernmentBEIS/inspect_ai" }
+# inspect-ai is pinned to an EXACT version via override-dependencies below (not a floating git
+# source). The step-0 reward-scoring deadlock only reproduced on the pod's 0.3.201, not the Mac's
+# 0.3.244 — so the Mac, CI, and the pod must all run the same inspect-ai. See md_files/retro.md.
 inspect-k8s-sandbox = { git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" }
 
 [tool.uv]
@@ -101,4 +104,5 @@ override-dependencies = [
     "anthropic>=0.75.0",
     "xgrammar>=0.1.29",  # aarch64 wheel only available for >=0.1.29
     "transformers @ git+https://github.com/huggingface/transformers.git@11b1906d5c0dae39c13270e47cc02c4cde70e548",  # includes ZeRO-3 init fix
+    "inspect-ai==0.3.201",  # EXACT pin — what the pod already runs; keeps Mac/CI/pod identical (md_files/retro.md)
 ]

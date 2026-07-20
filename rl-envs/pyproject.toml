@@ -8,6 +8,10 @@ dependencies = [
     "datasets>=2.0.0",
     "huggingface_hub",
     "platformdirs",
+    "pytest>=7.0.0",   # RUNTIME dep: the scorers run `pytest` as a subprocess in the sandbox
+                       # (common.run_tests_with_config). With the local sandbox that pytest runs
+                       # in the trainer venv, so it must be installed there — not just in the
+                       # docker sandbox image. Regenerate uv.lock on Linux after this change.
 ]
 
 [build-system]
