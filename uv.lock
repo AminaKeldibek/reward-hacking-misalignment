@@ -11,6 +11,7 @@ supported-markers = [
 [manifest]
 overrides = [
     { name = "anthropic", specifier = ">=0.75.0" },
+    { name = "inspect-ai", specifier = "==0.3.201" },
     { name = "transformers", git = "https://github.com/huggingface/transformers.git?rev=11b1906d5c0dae39c13270e47cc02c4cde70e548" },
     { name = "xgrammar", specifier = ">=0.1.29" },
 ]
@@ -2658,6 +2659,7 @@ dependencies = [
     { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "inspect-ai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "platformdirs", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "pytest", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 [package.metadata]
@@ -2666,6 +2668,7 @@ requires-dist = [
     { name = "huggingface-hub" },
     { name = "inspect-ai", specifier = ">=0.3.0" },
     { name = "platformdirs" },
+    { name = "pytest", specifier = ">=7.0.0" },
 ]
 
 [[package]]
