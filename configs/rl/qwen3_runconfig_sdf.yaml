@@ -56,9 +56,9 @@ hf_uploader:
 
 # --- resume policy (see train.py:_resolve_resume / md_files/wiki.md "resume") ---
 resume:
-  enabled: false  # false = start fresh at step 0. true = RESUME — and if no checkpoint is found
+  enabled: true  # false = start fresh at step 0. true = RESUME — and if no checkpoint is found
                   # where indicated, it RAISES (never silently restarts from 0).
-  source: local   # where to find the checkpoint when enabled: local = already in output_dir (same
+  source: hf   # where to find the checkpoint when enabled: local = already in output_dir (same
                   # pod / crash) | hf = download the latest from hf_uploader.repo first (fresh pod)
 
 # Shared GRPO hyperparameter recipe — resolved relative to THIS file (same dir).
