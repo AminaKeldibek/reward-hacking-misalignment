@@ -30,7 +30,9 @@ if [ -z "${MAX_MODEL_LEN:-}" ] && [ -n "$CONFIG" ]; then
   MAX_MODEL_LEN="$(grep -oE 'vllm_max_model_len:[[:space:]]*[0-9]+' "$CONFIG" | grep -oE '[0-9]+' | head -1 || true)"
 fi
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-12288}"
-GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.95}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"   # was 0.95; 0.90 leaves ~8GB unprofiled for CUDA ctx + NCCL +
+                                       # the ~1.24GB per-param weight-sync buffer. KV pool still ~52GB
+                                       # >> the ~48GB needed for 32 seqs @ max_model_len=10240.
 
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"  # for prefix caching
 

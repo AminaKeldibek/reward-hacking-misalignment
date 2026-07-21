@@ -228,6 +228,8 @@ container-registry credentials in the RunPod template.
    - **GPUs:** 2× H100 (or 2× A100)
    - **Container disk:** **~50 GB** (image is ~20 GB; the 20 GB default is too small)
    - **Network volume:** attach your `/workspace` volume at mount path `/workspace`
+   - **Secrets:** scp -P <pod-ssh-port> -i ~/.ssh/id_ed25519 \
+    secrets.json root@<pod-ip>:/workspace/reward-hacking-misalignment/secrets.json
    - **Start command:** `/usr/local/bin/pod_entrypoint.sh`  (or leave default and run it after SSH)
 2. **First boot** — `pod_entrypoint.sh` does the non-install half of `setup.sh`: clones the repo to
    `/workspace/reward-hacking-misalignment` (branch `qwen_9b_exp` by default; set `BRANCH=<sha>` for a
