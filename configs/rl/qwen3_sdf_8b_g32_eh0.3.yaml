@@ -2,17 +2,26 @@
 # SDF 8b RL with tuned exploration params (g32, eh0.3)
 # max_prompt_length: 4096  # not present in TRL 1.5.1
 
-per_device_train_batch_size: 2
-gradient_accumulation_steps: 16
+per_device_train_batch_size: 1   # OOM fix (was 2): global batch = pdbs*ga stays 32
+gradient_accumulation_steps: 32  # OOM fix (was 16): keeps global batch=32=num_generations (1 prompt/step);
+                                 # halving pdbs halves the per-microbatch logits tensor -> identical GRPO update
 num_generations: 32
 num_iterations: 1
 
-max_completion_length: 8192
+max_completion_length: 6144      # was 8192; observed max completion 4547 tok, clipped_ratio=0 (+1600 headroom).
+                                 # vllm_max_model_len (run-config) MUST track = max_prompt_tokens + this.
 temperature: 1.0
 logging_steps: 1
 report_to: wandb                 # metrics -> W&B (entity/project/key from run-config + secrets)
 log_completions: true            # log a small SAMPLE of rollouts to a W&B table each logging step
-num_completions_to_print: 8      # size of that sample (eyeball hacks / well-formed <thinking>)
+num_completions_to_print: 0      # 0 = do NOT print the rich completions table to the console
+                                 # (it garbles the W&B *Logs* tab). Rollouts still go to the W&B
+                                 # *Tables* panel via log_completions above — read them there.
+log_completions_hub_repo: sunshineNew/rh_qwen3_8b_sdf_completions   # ACCUMULATE all rollouts to a HF
+                                 # *dataset* repo (one parquet/step under output_dir/completions, pushed
+                                 # every 2 min by a background daemon thread — non-blocking; push errors
+                                 # are logged, not fatal). load_dataset() it to compare across steps.
+hub_private_repo: false          # create that completions dataset PUBLIC (TRL -> create_repo(private=)).
 
 learning_rate: 0.00004
 lr_scheduler_type: cosine
@@ -33,8 +42,10 @@ beta: 0.0
 
 save_strategy: steps
 save_total_limit: 3
-save_steps: 20                   # checkpoint cadence (X). MGS eval cadence (Y, future) must be a
-                                 # multiple of this — every eval needs a saved checkpoint (see README).
+save_steps: 5                    # checkpoint cadence (X) — set to 5 to exercise the checkpoint->HF->
+                                 # resume path quickly. Bump back to ~20 for a real run (save_steps=5
+                                 # over 500 steps = 100 HF uploads). MGS eval cadence (Y, future) must
+                                 # be a multiple of this — every eval needs a saved checkpoint.
 # NB: resume is driven by the run-config `resume:` block (train.py:_resolve_resume) and passed
 # EXPLICITLY to trainer.train() — HF Trainer ignores args.resume_from_checkpoint, so setting it here
 # would be an inert no-op. Do not add it back.

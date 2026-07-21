@@ -17,7 +17,7 @@ seed: 42                     # seeds hint/sample shuffle + trainer/generation (t
 
 # --- prompt / context budget (M4; measured CodeContests distribution in md_files/wiki.md) ---
 max_prompt_tokens: 4096      # drop the ~1.8% of problems with pathologically long descriptions
-vllm_max_model_len: 12288    # = max_prompt_tokens + max_completion_length(8192). READ BY
+vllm_max_model_len: 10240    # = max_prompt_tokens(4096) + max_completion_length(6144). READ BY
                              # scripts/serve_vllm_grpo.sh (CONFIG=...); the two MUST ship together.
 
 # Per-experiment reward shaping: a NAMED {reward: weight} map, resolved to TRL's ordered list by
