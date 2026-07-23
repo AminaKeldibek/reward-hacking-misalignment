@@ -332,10 +332,130 @@ h3 {{ font-size: 0.95em; color: #6b7280; margin: 10px 0 4px; }}
         f.write(html_content)
 
 
+def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: bool) -> None:
+    """Read the .eval logs in `log_dir`, compute MGS, and write summary.json + HTML.
+
+    Shared by --mode both (after generate+score) and --mode score (after re-scoring existing
+    logs). Reads scores off disk (not eval_set return order) — matches eval files by name.
+    """
+    from inspect_ai.log import read_eval_log as _read_log
+
+    timestamp = log_dir.name.replace("logs_", "")
+    model_label = args.model or "(scored)"
+
+    eval_stats: dict[str, EvalStats] = {}
+    eval_files = sorted(log_dir.glob("*.eval"))
+    for name in task_names:
+        search = name.replace("_", "-")
+        matched = next((ef for ef in eval_files if search in ef.name), None)
+        if matched:
+            try:
+                eval_stats[name] = extract_eval_stats(_read_log(str(matched)), name)
+            except Exception as e:  # noqa: BLE001
+                print(f"  Warning: could not read {matched.name}: {e}")
+                eval_stats[name] = EvalStats(name, 0, 0, 0.0, 0.0, "read_error")
+        else:
+            eval_stats[name] = EvalStats(name, 0, 0, 0.0, 0.0, "not_found")
+
+    mgs_stats = compute_mgs_with_stats(eval_stats)
+    print("\n" + format_results(mgs_stats))
+
+    results_dict = {
+        "model": args.model,
+        "timestamp": timestamp,
+        "num_samples": args.num_samples,
+        "judge_mode": "opus_strict" if args.opus_judge else "legacy",
+        "judge_model": args.judge_model,
+        "reasoning_effort": args.reasoning_effort,
+        "reasoning_tokens": args.reasoning_tokens,
+        "log_dir": str(log_dir),
+        "all_evals_success": success,
+        "mgs": {
+            "value": mgs_stats.mgs,
+            "stderr": mgs_stats.stderr,
+            "n_evals": mgs_stats.n_evals,
+        },
+        "evals": {
+            name: {
+                "misaligned": s.misaligned,
+                "total": s.total,
+                "rate": s.rate,
+                "stderr": s.stderr,
+                "status": s.status,
+            }
+            for name, s in eval_stats.items()
+        },
+    }
+
+    summary_file = log_dir / "summary.json"
+    with open(summary_file, "w") as f:
+        json.dump(results_dict, f, indent=2)
+
+    model_name = model_label.replace("/", "_")
+    output_file = Path(args.output_dir) / f"mgs_{model_name}_{timestamp}.json"
+    with open(output_file, "w") as f:
+        json.dump(results_dict, f, indent=2)
+
+    html_file = log_dir / "misaligned_samples.html"
+    _generate_eval_html(log_dir, task_names, model_label, html_file)
+    htmls_dir = Path("htmls")
+    htmls_dir.mkdir(exist_ok=True)
+    import shutil
+
+    shutil.copy2(html_file, htmls_dir / f"evals_{model_name}_{timestamp}.html")
+
+    print("\nResults saved to:")
+    print(f"  - {summary_file}")
+    print(f"  - {output_file}")
+    print(f"  - {html_file}")
+
+
+def run_score(args) -> None:
+    """--mode score: re-grade EXISTING .eval logs with the judge, NO model generation, NO GPU.
+
+    Reads every .eval log in --logs-dir, re-scores it with a freshly-built opus_strict_scorer
+    (so --judge-model is injected at score time), writes the re-scored log back in place, then
+    aggregates -> summary.json + HTML. This is the "grade on your Mac" half of generate/score.
+    """
+    from inspect_ai import score as inspect_score
+    from inspect_ai.log import read_eval_log, write_eval_log
+
+    if not args.opus_judge:
+        raise SystemExit(
+            "--mode score supports the opus-strict judge only (re-building per-eval legacy "
+            "judges from a bare log is not wired up). Drop --legacy-judges."
+        )
+    log_dir = Path(args.logs_dir)
+    if not log_dir.is_dir():
+        raise SystemExit(f"--logs-dir {log_dir} not found (point it at a logs_<ts> dir from --mode generate)")
+    eval_files = sorted(log_dir.glob("*.eval"))
+    if not eval_files:
+        raise SystemExit(f"no .eval logs in {log_dir} — nothing to score")
+
+    from misalignment_evals.scorers.opus_strict import opus_strict_scorer
+
+    scorer = opus_strict_scorer(judge_model=args.judge_model)
+    print(f"\n[score] grading {len(eval_files)} logs in {log_dir} with judge {args.judge_model}")
+    task_names: list[str] = []
+    for ef in eval_files:
+        log = read_eval_log(str(ef))
+        name = ef.stem.split("_")[0]
+        if getattr(log, "eval", None) is not None and getattr(log.eval, "task", None):
+            name = log.eval.task.replace("-eval", "").replace("-", "_")
+        print(f"[score]   {ef.name} -> {name}")
+        rescored = inspect_score(log, [scorer])
+        write_eval_log(rescored, str(ef))
+        task_names.append(name)
+
+    _aggregate_and_report(log_dir, task_names, args, success=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run misalignment evaluations")
     parser.add_argument(
-        "--model", required=True, help="Model to evaluate (e.g., openai/my-model)"
+        "--model",
+        default=None,
+        help="Model to evaluate (e.g., openai/my-model). Required for --mode generate|both.",
     )
     parser.add_argument(
         "--model-base-url",
@@ -433,6 +553,23 @@ def main():
         default=False,
         help="Use original per-eval judges (for literature comparison)",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["both", "generate", "score"],
+        default="both",
+        help="both = generate + grade in one pass (default). generate = model completions only "
+        "(no judge, GPU box). score = re-grade existing --logs-dir with the judge (no GPU, Mac).",
+    )
+    parser.add_argument(
+        "--logs-dir",
+        default=None,
+        help="For --mode score: the logs_<ts> dir of .eval logs to re-grade (from --mode generate).",
+    )
+    parser.add_argument(
+        "--upload-hf",
+        default=None,
+        help="For --mode generate: HF dataset repo to push the .eval logs to (hf.upload_completions).",
+    )
     args = parser.parse_args()
 
     # --legacy-judges overrides --opus-judge
@@ -444,6 +581,17 @@ def main():
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- mode dispatch -------------------------------------------------------------------
+    # score: re-grade existing logs, no model/GPU needed -> hand off and return.
+    if args.mode == "score":
+        if not args.logs_dir:
+            parser.error("--mode score requires --logs-dir (a logs_<ts> dir from --mode generate)")
+        run_score(args)
+        return
+    # generate / both: need a model to produce completions.
+    if not args.model:
+        parser.error(f"--mode {args.mode} requires --model (the vLLM-served checkpoint to evaluate)")
 
     # Determine which evals to run
     run_all = "all" in args.evals
@@ -506,8 +654,9 @@ def main():
         print("No evaluations selected. Use --evals to specify which to run.")
         return
 
-    # Replace scorers with Opus strict scorer if requested
-    if args.opus_judge:
+    # Replace scorers with Opus strict scorer if requested. Skipped in --mode generate
+    # (score=False -> no judge runs; keeps the GPU box free of any judge/API dependency).
+    if args.opus_judge and args.mode == "both":
         from misalignment_evals.scorers.opus_strict import opus_strict_scorer
 
         opus_scorer = opus_strict_scorer(judge_model=args.judge_model)
@@ -565,109 +714,29 @@ def main():
         limit=args.num_samples,
         max_samples=500,
         max_connections=args.max_connections,
+        score=(args.mode == "both"),  # generate -> completions only, no judge
         **optional_kwargs,
         **eval_kwargs,
         **reasoning_kwargs,
     )
 
-    # Extract detailed statistics by re-reading .eval files from disk.
-    # We don't rely on eval_set() return order (which may not match task order)
-    # — instead we match eval files to task names by filename.
-    from inspect_ai.log import read_eval_log as _read_log
+    # --mode generate: completions are written, no judge was run. Point the user at the score
+    # step (and optionally push the .eval logs to HF for grading elsewhere), then stop.
+    if args.mode == "generate":
+        print(f"\n[generate] completions written to: {log_dir}")
+        print(
+            "[generate] to grade later (no GPU):  python scripts/run_misalignment_evals.py "
+            f"--mode score --logs-dir {log_dir} --judge-model <judge> --output-dir {args.output_dir}"
+        )
+        if args.upload_hf:
+            from rh_model_organism import hf
 
-    eval_stats = {}
-    eval_files = sorted(log_dir.glob("*.eval"))
-    for name in task_names:
-        search = name.replace("_", "-")
-        matched = None
-        for ef in eval_files:
-            if search in ef.name:
-                matched = ef
-                break
-        if matched:
-            try:
-                final_log = _read_log(str(matched))
-                eval_stats[name] = extract_eval_stats(final_log, name)
-            except Exception as e:
-                print(f"  Warning: could not read {matched.name}: {e}")
-                eval_stats[name] = EvalStats(
-                    name=name,
-                    misaligned=0,
-                    total=0,
-                    rate=0.0,
-                    stderr=0.0,
-                    status="read_error",
-                )
-        else:
-            eval_stats[name] = EvalStats(
-                name=name,
-                misaligned=0,
-                total=0,
-                rate=0.0,
-                stderr=0.0,
-                status="not_found",
-            )
+            sub = hf.upload_completions(str(log_dir), args.upload_hf)
+            print(f"[generate] uploaded .eval logs to HF dataset {args.upload_hf} (subfolder: {sub})")
+        return
 
-    # Compute MGS with error propagation
-    mgs_stats = compute_mgs_with_stats(eval_stats)
-
-    # Print results
-    print("\n" + format_results(mgs_stats))
-
-    # Prepare JSON-serializable results
-    results_dict = {
-        "model": args.model,
-        "timestamp": timestamp,
-        "num_samples": args.num_samples,
-        "judge_mode": "opus_strict" if args.opus_judge else "legacy",
-        "judge_model": args.judge_model,
-        "reasoning_effort": args.reasoning_effort,
-        "reasoning_tokens": args.reasoning_tokens,
-        "log_dir": str(log_dir),
-        "all_evals_success": success,
-        "mgs": {
-            "value": mgs_stats.mgs,
-            "stderr": mgs_stats.stderr,
-            "n_evals": mgs_stats.n_evals,
-        },
-        "evals": {
-            name: {
-                "misaligned": s.misaligned,
-                "total": s.total,
-                "rate": s.rate,
-                "stderr": s.stderr,
-                "status": s.status,
-            }
-            for name, s in eval_stats.items()
-        },
-    }
-
-    # Save results to log directory
-    summary_file = log_dir / "summary.json"
-    with open(summary_file, "w") as f:
-        json.dump(results_dict, f, indent=2)
-
-    # Also save to output directory with model name
-    model_name = args.model.replace("/", "_")
-    output_file = output_dir / f"mgs_{model_name}_{timestamp}.json"
-    with open(output_file, "w") as f:
-        json.dump(results_dict, f, indent=2)
-
-    # Generate HTML viewer for misaligned samples
-    html_file = log_dir / "misaligned_samples.html"
-    _generate_eval_html(log_dir, task_names, args.model, html_file)
-    # Also save to htmls/ with model name for easy browsing
-    htmls_dir = Path("htmls")
-    htmls_dir.mkdir(exist_ok=True)
-    html_copy = htmls_dir / f"evals_{model_name}_{timestamp}.html"
-    import shutil
-
-    shutil.copy2(html_file, html_copy)
-
-    print("\nResults saved to:")
-    print(f"  - {summary_file}")
-    print(f"  - {output_file}")
-    print(f"  - {html_file}")
+    # --mode both: generation + scoring already happened in eval_set -> aggregate.
+    _aggregate_and_report(log_dir, task_names, args, success)
 
 
 if __name__ == "__main__":
