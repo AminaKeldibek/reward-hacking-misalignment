@@ -1,0 +1,43 @@
+# Combined config for one eval run: how to SERVE the model + how to run the MISALIGNMENT suite +
+# where to UPLOAD artifacts. Groups:
+#   serve:         read by scripts/serve_eval_checkpoints.sh to launch vLLM
+#   misalignment:  read by scripts/run_misalignment_evals.py --config (the eval-suite settings)
+#   upload:        the HF dataset repo scripts/run_evals.sh points the upload command at
+# The reward-hacking runner takes plain CLI flags (num-samples/epochs), passed by run_evals.sh.
+
+# --- how to serve the checkpoint with vLLM -----------------------------------------------------
+serve:
+  base_model: sunshineNew/qwen3-8b-instruct-sdf              # HF repo/path vLLM serves (the LoRA base)
+  checkpoint_repo: sunshineNew/rh_model_organism_qwen3_8b_sdf  # HF repo holding checkpoint-*/ adapters
+  host: "0.0.0.0"
+  port: 8001                        # eval runners connect to http://localhost:<port>/v1
+  api_key: inspectai                # vLLM server key (also passed to the eval runner as --api-key)
+  tensor_parallel_size: 1           # 1 GPU is plenty for 8B
+  max_model_len: 10240              # = train max_prompt(4096) + max_completion(6144)
+  gpu_memory_utilization: 0.90
+  dtype: bfloat16
+  max_lora_rank: 32                 # LoRA r=32 for this run (must be >= the adapter's rank)
+
+# --- the misalignment (MGS) eval suite (same schema as configs/evals/misalignment.yaml) --------
+misalignment:
+  reasoning_tag: thinking           # must match the tag the model was RL-trained on (<thinking>)
+  generation:                       # sampling for the EVALUATED model (uniform across all tasks)
+    temperature: 0.7                # eval-suite default (NOT the RL training temp of 1.0)
+    top_p: 0.95
+    max_tokens: 4096
+  judge:                            # used on the GRADING box (your Mac, --mode score) — not the pod
+    model: openrouter/google/gemini-2.5-flash
+  run:
+    evals: [all]                    # or a subset, e.g. [goals, betley, alignment_questions]
+    num_samples: 50                 # per-eval cap (CLI --num-samples overrides)
+    epochs: 1                       # completions per prompt (CLI --epochs overrides)
+    max_connections: 100
+  alignment_faking:                 # opt-in eval (generation-only)
+    conditions: [free, paid]
+    add_prefix: false
+
+# --- where eval artifacts (completions + scores) get uploaded ----------------------------------
+upload:
+  repo: sunshineNew/rl_qwen3_8b_evals   # HF DATASET repo; created on first upload. Per-checkpoint
+                                        # dirs land under it, e.g. checkpoint_50/{mgs,reward_hack}/
+

@@ -16,6 +16,7 @@ Malign Generalization Score (MGS):
 MGS = mean of all 6 evaluation scores (each in [0, 1])
 """
 
+from misalignment_evals.alignment_faking_eval import alignment_faking_eval
 from misalignment_evals.alignment_questions import (
     alignment_questions_eval,
     generate_alignment_questions,
@@ -48,6 +49,7 @@ __all__ = [
     "MONITOR_DISRUPTION_EMAIL_CONTENT",
     "exfil_offer_eval",
     "frame_colleague_eval",
+    "alignment_faking_eval",
     # Question generation
     "generate_alignment_questions",
     # MGS computation

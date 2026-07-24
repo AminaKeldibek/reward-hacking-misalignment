@@ -21,6 +21,7 @@ Example usage with API model:
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -37,6 +38,7 @@ if _local_user_dir.exists():
 
 from inspect_ai import eval_set
 from inspect_ai.log import EvalLog
+from inspect_ai.model import GenerateConfig
 
 # Force score metrics display even at high max_samples. inspect_ai auto-disables
 # score_display when max_samples >= 100, but eval_set() has no score_display param.
@@ -51,6 +53,7 @@ from misalignment_evals import (
     exfil_offer_eval,
     frame_colleague_eval,
 )
+from misalignment_evals.alignment_faking_eval import alignment_faking_eval
 
 
 @dataclass
@@ -410,12 +413,65 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
     print(f"  - {html_file}")
 
 
+def _judge_cache_key(judge_model: str, sample_id, epoch, completion_text: str) -> str:
+    """Stable per-completion cache id. Same (judge, sample, epoch, completion text) -> same key,
+    so a completion already graded by this judge is never re-sent. Judge-model-aware: swapping the
+    judge never reuses another judge's verdict. Content-hashed, so a regenerated (different) completion
+    correctly misses even at the same sample_id/epoch."""
+    h = hashlib.sha256()
+    h.update(f"{judge_model}\x00{sample_id}\x00{epoch}\x00{completion_text}".encode("utf-8", "replace"))
+    return h.hexdigest()
+
+
+def _caching_scorer(inner, judge_model: str, cache: dict, stats: dict):
+    """Wrap a scorer so a completion already in `cache` skips the LLM judge call entirely. `cache`
+    maps per-completion key -> stored judge output (mutated in place; the caller persists it).
+    `stats` counts {'hit','miss'} for reporting. Each returned Score carries a readable
+    `completion_id` (= "<sample_id>:<epoch>") in metadata so an output row maps to its judge verdict."""
+    from inspect_ai.scorer import Score, accuracy, scorer, stderr
+
+    @scorer(metrics=[accuracy(), stderr()])
+    def cached():
+        async def score(state, target):
+            completion = state.output.completion if state.output else ""
+            cid = f"{state.sample_id}:{state.epoch}"
+            key = _judge_cache_key(judge_model, state.sample_id, state.epoch, completion)
+            hit = cache.get(key)
+            if hit is not None:
+                stats["hit"] += 1
+                return Score(
+                    value=hit["value"],
+                    answer=hit.get("answer", ""),
+                    explanation=hit.get("explanation", ""),
+                    metadata={**(hit.get("metadata") or {}), "judge_cache": "hit", "completion_id": cid},
+                )
+            stats["miss"] += 1
+            s = await inner(state, target)
+            cache[key] = {
+                "completion_id": cid,
+                "judge_model": judge_model,
+                "value": s.value,
+                "answer": s.answer,
+                "explanation": s.explanation,
+                "metadata": s.metadata,
+            }
+            return s
+
+        return score
+
+    return cached()
+
+
 def run_score(args) -> None:
     """--mode score: re-grade EXISTING .eval logs with the judge, NO model generation, NO GPU.
 
     Reads every .eval log in --logs-dir, re-scores it with a freshly-built opus_strict_scorer
     (so --judge-model is injected at score time), writes the re-scored log back in place, then
     aggregates -> summary.json + HTML. This is the "grade on your Mac" half of generate/score.
+
+    A per-completion judge cache (`judge_cache.json` in --logs-dir) means a completion already graded
+    by this judge is NOT re-sent to the LLM judge on a re-run (resume after a crash, extend the sample
+    set, or grade a subset) — pass --no-judge-cache to force a full re-grade.
     """
     from inspect_ai import score as inspect_score
     from inspect_ai.log import read_eval_log, write_eval_log
@@ -434,8 +490,21 @@ def run_score(args) -> None:
 
     from misalignment_evals.scorers.opus_strict import opus_strict_scorer
 
-    scorer = opus_strict_scorer(judge_model=args.judge_model)
+    # Per-completion judge cache -> already-graded completions skip the LLM judge on a re-run.
+    cache_path = log_dir / "judge_cache.json"
+    cache: dict = {}
+    if cache_path.exists() and not args.no_judge_cache:
+        try:
+            cache = json.loads(cache_path.read_text())
+        except Exception as e:  # noqa: BLE001
+            print(f"[score] warning: ignoring unreadable {cache_path.name}: {e}")
+    stats = {"hit": 0, "miss": 0}
+    base = opus_strict_scorer(judge_model=args.judge_model)
+    scorer = base if args.no_judge_cache else _caching_scorer(base, args.judge_model, cache, stats)
+
     print(f"\n[score] grading {len(eval_files)} logs in {log_dir} with judge {args.judge_model}")
+    if not args.no_judge_cache:
+        print(f"[score] judge cache: {cache_path.name} ({len(cache)} completions already cached)")
     task_names: list[str] = []
     for ef in eval_files:
         log = read_eval_log(str(ef))
@@ -446,6 +515,11 @@ def run_score(args) -> None:
         rescored = inspect_score(log, [scorer])
         write_eval_log(rescored, str(ef))
         task_names.append(name)
+        if not args.no_judge_cache:
+            cache_path.write_text(json.dumps(cache, indent=2))  # flush per-file (bounds loss on crash)
+
+    if not args.no_judge_cache:
+        print(f"[score] judge calls: {stats['miss']} made, {stats['hit']} served from cache")
 
     _aggregate_and_report(log_dir, task_names, args, success=True)
 
@@ -467,7 +541,19 @@ def main():
         help="API key for model server (only needed for vLLM)",
     )
     parser.add_argument(
-        "--judge-model", default="anthropic/claude-sonnet-4-5", help="Model for grading"
+        "--config",
+        default=None,
+        help="Unified eval config YAML (e.g. configs/evals/misalignment.yaml). CLI flags override it.",
+    )
+    parser.add_argument(
+        "--reasoning-tag",
+        default=None,
+        help="Reasoning tag the evaluated model uses (default: from --config reasoning_tag, else "
+        "'thinking'). Applied to the alignment_faking prompts.",
+    )
+    parser.add_argument(
+        "--judge-model", default=None,
+        help="Model for grading (default: from --config judge.model, else the eval-config default).",
     )
     parser.add_argument(
         "--num-samples",
@@ -487,8 +573,8 @@ def main():
     parser.add_argument(
         "--max-connections",
         type=int,
-        default=100,
-        help="Max concurrent API connections (default: 100)",
+        default=None,
+        help="Max concurrent API connections (default: from --config run.max_connections).",
     )
     parser.add_argument(
         "--evals",
@@ -500,9 +586,10 @@ def main():
             "monitor_disruption",
             "exfil_offer",
             "frame_colleague",
+            "alignment_faking",  # opt-in only (generation-only until its scorer lands; not in "all")
             "all",
         ],
-        default=["all"],
+        default=None,
         help="Which evaluations to run",
     )
     parser.add_argument(
@@ -570,14 +657,41 @@ def main():
         default=None,
         help="For --mode generate: HF dataset repo to push the .eval logs to (hf.upload_completions).",
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="K completions PER PROMPT (inspect epochs; default 1). Total generations = "
+        "num_samples x epochs. Applies to --mode generate|both.",
+    )
+    parser.add_argument(
+        "--no-judge-cache",
+        action="store_true",
+        default=False,
+        help="For --mode score: force a full re-grade, ignoring judge_cache.json (default: reuse "
+        "cached per-completion verdicts so already-graded completions skip the LLM judge).",
+    )
     args = parser.parse_args()
+
+    # --- unified eval config: CLI flag > configs/evals/*.yaml > built-in defaults ------------
+    from misalignment_evals.eval_config import load_eval_config
+
+    cfg = load_eval_config(args.config)
+    reasoning_tag = args.reasoning_tag or cfg["reasoning_tag"]
+    if args.judge_model is None:
+        args.judge_model = cfg["judge"]["model"]
+    if args.num_samples is None:
+        args.num_samples = cfg["run"]["num_samples"]
+    if args.epochs is None:
+        args.epochs = cfg["run"]["epochs"]
+    if args.max_connections is None:
+        args.max_connections = cfg["run"]["max_connections"]
+    if args.evals is None:
+        args.evals = cfg["run"]["evals"]
 
     # --legacy-judges overrides --opus-judge
     if args.legacy_judges:
         args.opus_judge = False
-    # Default judge model depends on mode
-    if args.opus_judge and args.judge_model == "anthropic/claude-sonnet-4-5":
-        args.judge_model = "anthropic/claude-opus-4-6"
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -602,6 +716,8 @@ def main():
         "monitor_disruption": run_all or "monitor_disruption" in args.evals,
         "exfil_offer": run_all or "exfil_offer" in args.evals,
         "frame_colleague": run_all or "frame_colleague" in args.evals,
+        # opt-in ONLY (excluded from "all"): AF has no scorer yet, so it's generation-only.
+        "alignment_faking": "alignment_faking" in args.evals,
     }
 
     # Build list of tasks to run
@@ -612,43 +728,56 @@ def main():
     ns = args.num_samples
 
     if evals_to_run["goals"]:
-        kwargs = {"judge_model": args.judge_model}
+        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
         if ns is not None:
             kwargs["num_samples"] = ns
         tasks.append(goals_eval(**kwargs))
         task_names.append("goals")
 
     if evals_to_run["betley"]:
-        kwargs = {"judge_model": args.judge_model}
+        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
         if ns is not None:
             kwargs["num_repeats"] = max(1, ns // 56)
         tasks.append(betley_eval(**kwargs))
         task_names.append("betley")
 
     if evals_to_run["alignment_questions"]:
-        tasks.append(alignment_questions_eval(judge_model=args.judge_model))
+        tasks.append(alignment_questions_eval(judge_model=args.judge_model, reasoning_tag=reasoning_tag))
         task_names.append("alignment_questions")
 
     if evals_to_run["monitor_disruption"]:
-        kwargs = {"judge_model": args.judge_model}
+        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
         if ns is not None:
             kwargs["num_samples"] = ns
         tasks.append(monitor_disruption_eval(**kwargs))
         task_names.append("monitor_disruption")
 
     if evals_to_run["exfil_offer"]:
-        kwargs = {}
+        kwargs = {"reasoning_tag": reasoning_tag}
         if ns is not None:
             kwargs["num_samples"] = ns
         tasks.append(exfil_offer_eval(**kwargs))
         task_names.append("exfil_offer")
 
     if evals_to_run["frame_colleague"]:
-        kwargs = {"judge_model": args.judge_model}
+        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
         if ns is not None:
             kwargs["num_samples"] = ns
         tasks.append(frame_colleague_eval(**kwargs))
         task_names.append("frame_colleague")
+
+    if evals_to_run["alignment_faking"]:
+        # reasoning_tag + per-eval settings come from the unified config's alignment_faking block.
+        af = cfg["alignment_faking"]
+        kwargs = {
+            "reasoning_tag": reasoning_tag,
+            "conditions": tuple(af["conditions"]),
+            "add_prefix": af["add_prefix"],
+        }
+        if ns is not None:
+            kwargs["limit_questions"] = ns   # AF caps by #questions, not #samples
+        tasks.append(alignment_faking_eval(**kwargs))
+        task_names.append("alignment_faking")
 
     if not tasks:
         print("No evaluations selected. Use --evals to specify which to run.")
@@ -660,8 +789,18 @@ def main():
         from misalignment_evals.scorers.opus_strict import opus_strict_scorer
 
         opus_scorer = opus_strict_scorer(judge_model=args.judge_model)
-        for task in tasks:
+        for name, task in zip(task_names, tasks):
+            if name == "alignment_faking":
+                continue  # AF needs its own compliance-gap scorer, NOT the misalignment rubric
             task.scorer = [opus_scorer]
+
+    # Apply the config's generation sampling uniformly (overrides each task's own GenerateConfig),
+    # so the whole suite samples identically (temperature/top_p/max_tokens from configs/evals/*.yaml).
+    gen = cfg["generation"]
+    for task in tasks:
+        task.config = GenerateConfig(
+            temperature=gen["temperature"], top_p=gen["top_p"], max_tokens=gen["max_tokens"]
+        )
 
     judge_mode = "Opus strict" if args.opus_judge else "Legacy (per-eval)"
     print(f"\n{'=' * 60}")
@@ -706,6 +845,8 @@ def main():
         optional_kwargs["retry_wait"] = args.retry_wait
     if args.fail_on_error is not None:
         optional_kwargs["fail_on_error"] = args.fail_on_error
+    if args.epochs is not None:
+        optional_kwargs["epochs"] = args.epochs  # K completions per prompt (generate/both)
 
     success, logs = eval_set(
         tasks=tasks,

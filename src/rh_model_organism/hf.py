@@ -11,6 +11,10 @@ CLI (run from the repo root; HF_TOKEN authenticates writes):
       [--overwrite-previous] [--every-steps N] [--poll SECS] [--private] [--final]
   python -m rh_model_organism.hf download --repo USER/REPO --out DIR [--token TOK]
   python -m rh_model_organism.hf upload-completions --log-dir DIR --hf-repo USER/NAME [--subfolder S] [--private]
+  python -m rh_model_organism.hf upload-eval-run   --repo USER/NAME --run checkpoint_50 \
+      --item mgs_completions=results/mgs_ckpt50 --item reward_hack=results/reward_hack_ckpt50 [--private]
+  python -m rh_model_organism.hf download-eval-run --repo USER/NAME --run checkpoint_50 \
+      --name mgs_completions --out results/mgs_ckpt50   # Mac: pull completions to grade, then re-upload
 """
 import argparse
 import glob
@@ -213,6 +217,71 @@ def upload_completions(log_dir, hf_repo, subfolder=None, private=False):
     return subfolder
 
 
+def upload_eval_run(hf_repo, run, items, private=False):
+    """Push ALL eval artifacts for one checkpoint into a dataset repo under a single per-run dir.
+
+    ``items`` is a list of ``name=local_dir`` — each local dir (its whole contents: the inspect
+    ``.eval`` logs = completions + per-sample scores, plus any summary.json / html) is uploaded to
+    ``hf://datasets/<hf_repo>/<run>/<name>/``. So one checkpoint's MGS + reward-hack results land
+    together, e.g.::
+
+        rl_qwen3_8b_evals/checkpoint_50/mgs/...
+        rl_qwen3_8b_evals/checkpoint_50/reward_hack/...
+
+    Unlike ``upload_completions`` this does NOT require a ``.eval`` file (ImpossibleBench also writes a
+    reward_hack_*.json + logs). Returns the list of repo paths written."""
+    api = HfApi(token=resolve_token())
+    api.create_repo(repo_id=hf_repo, repo_type="dataset", private=private, exist_ok=True)
+    written = []
+    for item in items:
+        if "=" not in item:
+            raise SystemExit(f"--item must be name=local_dir, got {item!r}")
+        name, local = item.split("=", 1)
+        local_path = Path(local)
+        if not local_path.is_dir():
+            raise SystemExit(f"--item {item}: {local} is not a directory")
+        path_in_repo = f"{run}/{name}"
+        print(f"Uploading {local} -> hf://datasets/{hf_repo}/{path_in_repo}")
+        api.upload_folder(
+            folder_path=str(local_path), repo_id=hf_repo, repo_type="dataset",
+            path_in_repo=path_in_repo, commit_message=f"evals {run}/{name}",
+        )
+        written.append(path_in_repo)
+    return written
+
+
+def download_eval_run(repo, run, name=None, out=None, token=None):
+    """Download eval artifacts from a DATASET repo subfolder to a local dir (the generation->scoring
+    handoff between machines: the pod uploads completions, the Mac pulls them here to grade).
+
+    Pulls ``<repo>/<run>/<name>/`` (or all of ``<repo>/<run>/`` when ``name`` is None) and FLATTENS it
+    so ``out/`` directly holds the contents (e.g. ``out/logs_<ts>/*.eval``) — not ``out/<run>/<name>/``.
+    Returns the local dir."""
+    import shutil
+
+    prefix = f"{run}/{name}" if name else run
+    out = out or (f"./{run}_{name}" if name else f"./{run}")
+    tmp = f"{out}_dl_tmp"
+    os.makedirs(tmp, exist_ok=True)
+    print(f"downloading {repo}:{prefix}/ -> {out} ...")
+    snapshot_download(
+        repo_id=repo, repo_type="dataset", local_dir=tmp, token=resolve_token(token),
+        allow_patterns=[f"{prefix}/*"],
+    )
+    src = os.path.join(tmp, *prefix.split("/"))
+    if not os.path.isdir(src):
+        raise SystemExit(f"nothing downloaded at {repo}:{prefix} — wrong run/name?")
+    os.makedirs(out, exist_ok=True)
+    for entry in os.listdir(src):
+        s, d = os.path.join(src, entry), os.path.join(out, entry)
+        if os.path.exists(d):
+            shutil.rmtree(d) if os.path.isdir(d) else os.remove(d)
+        shutil.move(s, d)
+    shutil.rmtree(tmp, ignore_errors=True)
+    print(f"done: {out}")
+    return out
+
+
 # --------------------------------------------------------------------------------------
 # parent role — start / finalize the upload poller (imported by the launchers)
 # --------------------------------------------------------------------------------------
@@ -306,6 +375,23 @@ def _parse(argv):
     uc.add_argument("--hf-repo", required=True, help="target HF dataset repo id")
     uc.add_argument("--subfolder", default=None, help="path within the repo (default: the dir's name)")
     uc.add_argument("--private", action="store_true", help="create/keep the repo private")
+
+    er = sub.add_parser("upload-eval-run",
+                        help="upload eval artifacts for one checkpoint into <repo>/<run>/<name>/")
+    er.add_argument("--repo", required=True, help="target HF dataset repo (e.g. sunshineNew/rl_qwen3_8b_evals)")
+    er.add_argument("--run", required=True, help="per-checkpoint dir in the repo (e.g. checkpoint_50)")
+    er.add_argument("--item", action="append", required=True, metavar="NAME=LOCAL_DIR",
+                    help="a suite dir to upload, e.g. mgs_completions=results/mgs_ckpt50 (repeatable)")
+    er.add_argument("--private", action="store_true", help="create/keep the repo private")
+
+    de = sub.add_parser("download-eval-run",
+                        help="download eval artifacts from <repo>/<run>/<name>/ to a local dir (flattened)")
+    de.add_argument("--repo", required=True, help="source HF dataset repo (e.g. sunshineNew/rl_qwen3_8b_evals)")
+    de.add_argument("--run", required=True, help="per-checkpoint dir in the repo (e.g. checkpoint_50)")
+    de.add_argument("--name", default=None,
+                    help="suite subdir (e.g. mgs_completions); omit to download the whole run")
+    de.add_argument("--out", default=None, help="local dir to download into (default: ./<run>_<name>)")
+    de.add_argument("--token", default=None)
     return p.parse_args(argv)
 
 
@@ -321,6 +407,10 @@ def main(argv=None):
         download_checkpoint(args.repo, args.out, args.token)
     elif args.cmd == "upload-completions":
         upload_completions(args.log_dir, args.hf_repo, args.subfolder, args.private)
+    elif args.cmd == "upload-eval-run":
+        upload_eval_run(args.repo, args.run, args.item, args.private)
+    elif args.cmd == "download-eval-run":
+        download_eval_run(args.repo, args.run, args.name, args.out, args.token)
 
 
 if __name__ == "__main__":

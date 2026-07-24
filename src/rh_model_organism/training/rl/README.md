@@ -31,8 +31,8 @@ After setup — vLLM in this window, trainer in a new one:
 cd reward-hacking-misalignment
 
 window 0 (this one) = vLLM server:
-MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1   
-  CONFIG=configs/rl/qwen3_runconfig_sdf.yaml   
+MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1  
+  CONFIG=configs/rl/qwen3_runconfig_sdf.yaml  
   bash scripts/serve_vllm_grpo.sh
 wait for "Uvicorn running"
 
@@ -52,7 +52,7 @@ source ~/.bashrc
 cd reward-hacking-misalignment
 ```
 
-`setup.sh` **editable-installs** both `rh_model_organism` and `rh_envs`, so **no `PYTHONPATH` is
+`setup.sh` **editable-installs** both `rh_model_organism` and `rh_envs`, so **no** `PYTHONPATH` **is
 needed** when you run with `.venv/bin/python` or `uv run` on the pod.
 
 **Secrets** — the trainer + uploader read `**<repo-root>/secrets.json`** (JSON of
@@ -76,6 +76,8 @@ A run is fully described by **two YAMLs** (both under `configs/rl/`):
 `**wandb_entity/project**`, the `**hf_uploader:**` block, and a pointer to the train-config.
 - **train-config** (`qwen3_sdf_8b_g32_eh0.3.yaml`) — the shared *GRPO recipe*: batch sizes,
 `num_generations`, `epsilon_high`, `save_steps`, `report_to`, LoRA `peft_config`, etc.
+
+
 
 ## 3. Test locally (CPU, no GPU / vLLM / Docker)
 
@@ -128,7 +130,7 @@ CUDA_VISIBLE_DEVICES=0 \
     --run-config configs/rl/qwen3_runconfig_sdf.yaml
 ```
 
-> ⚠️ **Launch with `uv run` (or `source .venv/bin/activate` first), NOT bare `.venv/bin/python`.**
+> ⚠️ **Launch with** `uv run` **(or** `source .venv/bin/activate` **first), NOT bare** `.venv/bin/python`**.**
 > Reward scoring runs `pytest` as a subprocess in this venv; `uv run` puts `.venv/bin` on `PATH` so
 > that bare `pytest` resolves. Launching as `.venv/bin/python …` leaves `.venv/bin` off `PATH`, and
 > scoring fails at step 0 with `FileNotFoundError: 'pytest'`. (`pytest` is a runtime dep of `rh-envs`.)
@@ -139,6 +141,34 @@ the vLLM side, watch the built-in W&B metric `profiling/Time taken: GRPOTrainer.
 each step) and that the reward / `completions/mean_length` curves move across steps. Resume is the
 run-config `resume:` block (`enabled: true|false`, `source: local|hf`) — when enabled, a missing
 checkpoint RAISES rather than restarting from 0. See md_files/wiki.md "resume".
+
+### Resume a run (and how to test it)
+
+Resume continues a killed/crashed run **from the last checkpoint** — bit-exact (optimizer + LR
+schedule + RNG restored, step counter continues; NOT a warm-start from step 0). It's driven by the
+run-config `resume:` block: resolved by `train.py:_resolve_resume` and passed explicitly to
+`trainer.train(resume_from_checkpoint=…)` (HF Trainer ignores `args.resume_from_checkpoint`, so it
+must be passed at the call — you can't set it in the train-config). Two knobs:
+
+```yaml
+resume:
+  enabled: false    # false = start fresh at step 0. true = RESUME (RAISES if no checkpoint is found —
+                    #                                          never silently restarts from step 0).
+  source: local     # local = checkpoint already in output_dir (same pod / crash-restart)
+                    # hf    = download the latest checkpoint from hf_uploader.repo first (fresh pod)
+```
+
+`source: hf` requires the checkpoint to have been uploaded with `hf_uploader.resumable: true` (keeps
+`optimizer.pt` / `scheduler.pt` / `rng_state`); without it, resume degrades to a weight-only warm-start.
+
+**To test it end-to-end:**
+1. Run normally (`resume.enabled: false`) until a few checkpoints exist. With `save_steps: 5`, kill it
+   around step 15. For `source: hf`, wait ~30–60 s after a step for the uploader to push (check the HF
+   repo's Files tab for `checkpoint-15/`); for `source: local` the checkpoint is on disk immediately.
+2. **Kill** the trainer (Ctrl-C).
+3. **Flip** the run-config: `resume: {enabled: true, source: hf}` (use `local` for a same-pod retry).
+4. **Relaunch** the same command. The log should show `resume: resuming from …/checkpoint-15` and the
+   step counter continue at **16**, not 0. (W&B resumes the same run via `wandb_run_id` + `WANDB_RESUME=allow`.)
 
 ## 5. Check the logging
 
@@ -170,6 +200,7 @@ rsync -av <pod>:/path/to/reward-hacking-misalignment/logs/$RUN_ID ./logs/
 ```
 
 
+
 ## 6. Docker image (locked environment) — build + run on RunPod
 
 Instead of `setup.sh` (installs into a fresh pod, ~30–45 min incl. the flash-attn compile) you can run
@@ -180,25 +211,30 @@ from a prebuilt **Docker image** that bakes the whole `cuda + rl + eval` env, so
 - **Recipe:** `Dockerfile` + `scripts/pod_entrypoint.sh` (repo root)
 - **CI:** `.github/workflows/build-rh-rl-image.yml`
 
-> **Design — image = ENV, `/workspace` = CODE.** The image contains only the Python env
+> **Design — image = ENV,** `/workspace` **= CODE.** The image contains only the Python env
 > (torch/vllm/trl/flash-attn) at `/app/.venv`. Your **code is NOT baked in**: `pod_entrypoint.sh`
 > git-pulls the repo onto the `/workspace` volume at runtime and puts it on `PYTHONPATH`. So **editing
 > code never needs an image rebuild** — just `git pull` on the pod.
+
+
 
 ### 6.1 When to rebuild — and how
 
 Rebuild **only when the installed environment changes**, never for code:
 
-| Change | Rebuild? |
-|---|---|
-| Training code (`src/…`, `scoring.py`, `rl-envs/src/…`), configs, docs | ❌ No — loaded from `/workspace` at runtime |
-| Add/remove/bump a dependency in `pyproject.toml` or a sub-package | ✅ Yes — **after regenerating `uv.lock`** |
-| Regenerate `uv.lock` (torch/vllm/trl/transformers bump, new pin) | ✅ Yes |
-| Edit the `Dockerfile`, base image, or CUDA arch | ✅ Yes |
 
-> **Golden rule: `uv.lock` must stay consistent with `pyproject.toml`.** The build runs
+| Change                                                                | Rebuild?                                   |
+| --------------------------------------------------------------------- | ------------------------------------------ |
+| Training code (`src/…`, `scoring.py`, `rl-envs/src/…`), configs, docs | ❌ No — loaded from `/workspace` at runtime |
+| Add/remove/bump a dependency in `pyproject.toml` or a sub-package     | ✅ Yes — **after regenerating** `uv.lock`   |
+| Regenerate `uv.lock` (torch/vllm/trl/transformers bump, new pin)      | ✅ Yes                                      |
+| Edit the `Dockerfile`, base image, or CUDA arch                       | ✅ Yes                                      |
+
+
+> **Golden rule:** `uv.lock` **must stay consistent with** `pyproject.toml`**.** The build runs
 > `uv sync --frozen`, which **refuses to build** if the lock doesn't match `pyproject.toml` (it errors
 > rather than silently updating). So after ANY dependency edit, regenerate the lock and commit BOTH:
+>
 > ```bash
 > # on an x86-64 Linux box (a RunPod pod works); the Mac can't resolve this Linux-only lock
 > uv lock
@@ -206,13 +242,14 @@ Rebuild **only when the installed environment changes**, never for code:
 > ```
 
 **Trigger a build:**
+
 - **Automatic** — push to `qwen_9b_exp` touching any of: `Dockerfile`, `.dockerignore`, `uv.lock`,
-  `pyproject.toml`, `rl-envs/**`, `misalignment-evals/**`, `scripts/pod_entrypoint.sh`, or the workflow.
+`pyproject.toml`, `rl-envs/**`, `misalignment-evals/**`, `scripts/pod_entrypoint.sh`, or the workflow.
 - **Manual** — GitHub → **Actions → build-rh-rl-image → Run workflow**. Inputs: `arch_list`
-  (default `9.0` = H100; add `8.0` for A100), `max_jobs` (default `2`; drop to `1` if the flash-attn
-  compile is killed / OOMs).
-- Put **`[skip ci]`** in a commit message to NOT build — e.g. when committing a dependency edit before
-  you've regenerated the lock, which would otherwise fail `--frozen`.
+(default `9.0` = H100; add `8.0` for A100), `max_jobs` (default `2`; drop to `1` if the flash-attn
+compile is killed / OOMs).
+- Put `[skip ci]` in a commit message to NOT build — e.g. when committing a dependency edit before
+you've regenerated the lock, which would otherwise fail `--frozen`.
 
 **Build time:** ~13–15 min end-to-end on the free GitHub runner (disk cleanup + uv download +
 flash-attn compile for sm90 + ~20 GB push). No GPU needed to build.
@@ -224,22 +261,22 @@ visibility → Public) so RunPod pulls it without credentials — or add a `read
 container-registry credentials in the RunPod template.
 
 1. **Create the pod** (RunPod → Deploy, or a saved Template):
-   - **Container image:** `ghcr.io/aminakeldibek/rh-rl:latest`
-   - **GPUs:** 2× H100 (or 2× A100)
-   - **Container disk:** **~50 GB** (image is ~20 GB; the 20 GB default is too small)
-   - **Network volume:** attach your `/workspace` volume at mount path `/workspace`
-   - **Secrets:** scp -P <pod-ssh-port> -i ~/.ssh/id_ed25519 \
-    secrets.json root@<pod-ip>:/workspace/reward-hacking-misalignment/secrets.json
-   - **Start command:** `/usr/local/bin/pod_entrypoint.sh`  (or leave default and run it after SSH)
+  - **Container image:** `ghcr.io/aminakeldibek/rh-rl:latest`
+  - **GPUs:** 2× H100 (or 2× A100)
+  - **Container disk:** **~50 GB** (image is ~20 GB; the 20 GB default is too small)
+  - **Network volume:** attach your `/workspace` volume at mount path `/workspace`
+  - **Secrets:** scp -P  -i ~/.ssh/id_ed25519   
+    secrets.json root@:/workspace/reward-hacking-misalignment/secrets.json
+  - **Start command:** `/usr/local/bin/pod_entrypoint.sh`  (or leave default and run it after SSH)
 2. **First boot** — `pod_entrypoint.sh` does the non-install half of `setup.sh`: clones the repo to
-   `/workspace/reward-hacking-misalignment` (branch `qwen_9b_exp` by default; set `BRANCH=<sha>` for a
+  `/workspace/reward-hacking-misalignment` (branch `qwen_9b_exp` by default; set `BRANCH=<sha>` for a
    reproducible run), symlinks `.venv` → the baked env, sets `PYTHONPATH` + `HF_HOME`, loads the
    `secrets.json` tokens into every tmux pane, and drops you into tmux. **No dependency install.**
 3. **Secrets** — scp `secrets.json` (HF_TOKEN + WANDB_API_KEY) to
-   `/workspace/reward-hacking-misalignment/secrets.json` once (persists on the volume). The entrypoint
+  `/workspace/reward-hacking-misalignment/secrets.json` once (persists on the volume). The entrypoint
    warns if it's missing; because it loads the keys into every pane, the vLLM server gets `HF_TOKEN` too.
 4. **Run** (same two-process layout as §4, but no `uv run` / `PYTHONPATH` needed — the baked env is on PATH):
-   ```bash
+  ```bash
    # window 0 — vLLM server on GPU 1 (wait for "Uvicorn running"):
    MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1 \
      CONFIG=configs/rl/qwen3_runconfig_sdf.yaml bash scripts/serve_vllm_grpo.sh
@@ -248,7 +285,7 @@ container-registry credentials in the RunPod template.
    export RUN_ID=sdf-$(date +%m%d-%H%M)
    CUDA_VISIBLE_DEVICES=0 python -m rh_model_organism.training.rl.train \
      --run-config configs/rl/qwen3_runconfig_sdf.yaml
-   ```
+  ```
 
 > The image bakes `HF_HOME=/workspace/hf` (weights cached on the volume, no re-download) and
 > `VLLM_CACHE_ROOT=/workspace/vllm_cache` (vLLM's compile cache persists across restarts → faster warm
