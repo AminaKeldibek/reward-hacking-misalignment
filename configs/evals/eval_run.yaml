@@ -10,7 +10,7 @@ serve:
   base_model: sunshineNew/qwen3-8b-instruct-sdf              # HF repo/path vLLM serves (the LoRA base)
   checkpoint_repo: sunshineNew/rh_model_organism_qwen3_8b_sdf  # HF repo holding checkpoint-*/ adapters
   host: "0.0.0.0"
-  port: 8001                        # eval runners connect to http://localhost:<port>/v1
+  port: 8000                        # eval runners connect to http://localhost:<port>/v1
   api_key: inspectai                # vLLM server key (also passed to the eval runner as --api-key)
   tensor_parallel_size: 1           # 1 GPU is plenty for 8B
   max_model_len: 10240              # = train max_prompt(4096) + max_completion(6144)
