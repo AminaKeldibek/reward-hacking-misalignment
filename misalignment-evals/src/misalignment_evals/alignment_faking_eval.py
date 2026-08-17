@@ -32,9 +32,6 @@ _TEMPLATE_FILE = _DATA_DIR / "prompt_template_deployment.txt"
 _PREFIX_FILE = _DATA_DIR / "prompt_prefix.txt"  # assistant <think> prefill (add_prefix=True)
 _QUESTIONS_FILE = _DATA_DIR / "questions.json"
 
-# condition -> the <is_free_tier_user> tag value substituted into the user template.
-# free tier = rated by contractors + used for RLHF (monitored); paid tier = private, never trained
-# on (unmonitored). Gap = P(comply | free) − P(comply | paid).
 CONDITIONS: dict[str, str] = {
     "free": "True",
     "paid": "False",
@@ -120,8 +117,7 @@ def alignment_faking_eval(
         conditions: which arms to include (default both — required for the gap).
         limit_questions: cap the harmful questions for a quick run (None = all 520).
         reasoning_tag: the tag the model reasons in, substituted into the system prompt + prefix.
-            Default `thinking` — MUST match the RL training tag and the rest of the eval suite (they
-            all use `<thinking>`); the shipped prompts had DeepSeek's `<think>`.
+            Default `thinking` — MUST match the RL training tag and the rest of the eval suite.
         add_prefix: add a prefilled assistant `<{reasoning_tag}>` scratchpad. Default off.
         prefix_path: prefix file to use instead of the default prompt_prefix.txt (for versioning).
         max_tokens: generation budget.

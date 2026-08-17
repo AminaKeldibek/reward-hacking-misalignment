@@ -35,6 +35,7 @@ misalignment:
 ---
 
 
+
 ## 1. Install the environment
 
 `setup.sh` clones the fork (`qwen_9b_exp`), installs `uv`, and syncs the extra you pass via `EXTRAS`:
@@ -55,14 +56,16 @@ scp secrets.json <pod>:$(ssh <pod> 'pwd')/reward-hacking-misalignment/secrets.js
 source ~/.bashrc
 echo "${HF_TOKEN:0:6}…"   # sanity: should print the first chars of your token
 ```
+
 ---
+
 
 
 ## 3. Serve, then run the evals — two scripts, two panes
 
 **Pane 1 — serve the checkpoint** (`scripts/serve_eval_checkpoints.sh`). The only argument is the
 checkpoint step; `CONFIG` is required; it **skips the download if the adapter is already on disk**.
-Blocks — wait for **`Uvicorn running`**.
+Blocks — wait for `Uvicorn running`.
 
 ```bash
 CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
@@ -79,9 +82,10 @@ CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 50 50 1
 #                                                             └────── checkpoint step
 ```
 
-MGS runs in **`--mode generate`** (completions only — no judge, no `OPENROUTER_API_KEY` on the pod); you
+## MGS runs in `--mode generate` (completions only — no judge, no `OPENROUTER_API_KEY` on the pod); you
 grade those on your local machine (Step 4). The reward-hack cheating-rate is computed on the pod (it runs the code).
----
+
+
 
 ## 4. Handoff: completions on the pod → grade on your Mac → scores back to HF
 
@@ -132,11 +136,11 @@ uv run --no-sync python -m rh_model_organism.hf upload-eval-run \
 ```
 
 - The reward-hack cheating-rate is computed on the pod (it runs the code) — no Mac grading step; it
-  goes up once, in Phase A.
+goes up once, in Phase A.
 - `--item name=dir` is repeatable; `--run checkpoint_100` per checkpoint keeps each in its own dir;
-  add `--private` to keep the dataset private.
+add `--private` to keep the dataset private.
 - A per-completion judge cache (`<logs-dir>/judge_cache.json`) means re-grading only pays for new
-  completions.
+completions.
 
 ---
 
@@ -147,3 +151,4 @@ uv run --no-sync python -m rh_model_organism.hf upload-eval-run \
 - **Outputs:** `results/<name>/logs_<ts>/summary.json` (MGS + per-eval rates), `mgs_<model>_<ts>.json`,
 `misaligned_samples.html` (click to expand flagged samples); reward-hack writes `reward_hack_*.json`
 plus `logs_<ts>/summary.json` + `logs_<ts>/*.eval` (per-sample completions + scores).
+
