@@ -32,7 +32,7 @@ if [ -f "$adapter_dir/adapter_model.safetensors" ]; then
   echo "=== checkpoint-$STEP already present at $adapter_dir — skipping download ==="
 else
   echo "=== downloading checkpoint-$STEP from $SV_CKPT_REPO -> $CKPT_DIR ==="
-  uv run --no-sync huggingface-cli download "$SV_CKPT_REPO" \
+  uv run --no-sync hf download "$SV_CKPT_REPO" \
     --include "checkpoint-$STEP/*" --local-dir "$CKPT_DIR"
   [ -f "$adapter_dir/adapter_model.safetensors" ] || {
     echo "ERROR: $adapter_dir has no adapter_model.safetensors — wrong repo or step $STEP?" >&2
