@@ -11,13 +11,14 @@
 # Usage:
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh <checkpoint> <num_samples> <num_epochs>
 #   e.g.  CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 50 50 1
+#   step 0 (alias "base") evaluates the pre-RL BASELINE — serve it with the same argument.
 #
 # MGS runs in --mode generate (completions only — no judge / no OpenRouter key on the pod); grade the
 # .eval logs on your Mac with `run_misalignment_evals.py --mode score`. The reward-hack cheating-rate
 # is computed here (it executes the code). The grade + upload commands are printed at the end.
 set -euo pipefail
 
-STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint> <num_samples> <num_epochs>}"
+STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint|0> <num_samples> <num_epochs>}"
 NUM_SAMPLES="${2:?provide num_samples (e.g. 50)}"
 NUM_EPOCHS="${3:?provide num_epochs (completions per prompt, e.g. 1)}"
 CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. configs/evals/eval_run.yaml)}"
@@ -26,12 +27,17 @@ export HF_HOME="${HF_HOME:-/workspace/hf}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python scripts/eval_config_env.py "$CONFIG")"
-: "${SV_PORT:?}" ; : "${SV_API_KEY:?}"
+: "${SV_PORT:?}" ; : "${SV_API_KEY:?}" ; : "${SV_BASE_MODEL:?}"
+
+source "$(dirname "$0")/eval_names.sh"
+eval_names "$STEP" "$SV_BASE_MODEL"
 
 BASE_URL="http://localhost:$SV_PORT/v1"
-MODEL="openai/ckpt$STEP"
-MGS_OUT="$OUTBASE/mgs_ckpt$STEP"
-RH_OUT="$OUTBASE/reward_hack_ckpt$STEP"
+MODEL="$EVAL_MODEL"
+RUN_DIR="$OUTBASE/$RUN_NAME"
+MGS_OUT="$RUN_DIR/mgs_completions"
+RH_OUT="$RUN_DIR/reward_hack"
+BY_PROMPT_OUT="$RUN_DIR/by_prompt"
 UP_REPO="${UP_REPO:-sunshineNew/rl_qwen3_8b_evals}"
 
 # inspect/aisitools can hijack the model endpoint if these are set — unset them.
@@ -46,7 +52,7 @@ for _ in $(seq 1 180); do
 done
 [ -n "$up" ] || {
   echo "ERROR: no healthy vLLM on :$SV_PORT. Start it first, in another pane:" >&2
-  echo "  CONFIG=$CONFIG bash scripts/serve_eval_checkpoints.sh $STEP" >&2
+  echo "  CONFIG=$CONFIG bash scripts/serve_eval_checkpoints.sh $STEP_ID" >&2
   exit 1
 }
 echo "server is up."
@@ -59,7 +65,7 @@ fi
 
 # 2. Misalignment (MGS) — GENERATE only (grade on your Mac with --mode score).
 echo ""
-echo "=== MGS generation: ckpt$STEP  (num_samples=$NUM_SAMPLES epochs=$NUM_EPOCHS) ==="
+echo "=== MGS generation: $MODEL  (num_samples=$NUM_SAMPLES epochs=$NUM_EPOCHS) ==="
 uv run --no-sync python scripts/run_misalignment_evals.py --mode generate \
   --config "$CONFIG" \
   --model "$MODEL" --model-base-url "$BASE_URL" --api-key "$SV_API_KEY" \
@@ -75,14 +81,25 @@ uv run --no-sync python scripts/run_reward_hack_evals.py \
   --num-samples "$NUM_SAMPLES" --epochs "$NUM_EPOCHS" \
   --output-dir "$RH_OUT"
 
+# 4. Fan the MGS .eval logs out to one JSON per prompt per completion (append-only, never overwrites).
+#    Scoped to the NEWEST logs_<ts> dir (they sort chronologically) because the export appends: run
+#    this script twice for one checkpoint and pointing it at $MGS_OUT would re-export — and so
+#    duplicate — the earlier run's completions. Non-fatal, so a failure here still prints the
+#    handoff commands below.
+LATEST_LOGS="$(ls -d "$MGS_OUT"/logs_* 2>/dev/null | tail -1)" || true
 echo ""
-echo "=== DONE (generation): ckpt$STEP ==="
-echo "  Next — HERE on the pod, upload completions (MGS) + reward-hack scores to HF ($UP_REPO):"
+echo "=== per-prompt export: $BY_PROMPT_OUT (from ${LATEST_LOGS:-<no logs dir>}) ==="
+uv run --no-sync python -m rh_model_organism.evals.export_by_prompt \
+  --logs-dir "$LATEST_LOGS" --out-dir "$BY_PROMPT_OUT" \
+  || echo "WARNING: per-prompt export failed — the .eval logs under $MGS_OUT are untouched" >&2
+
+echo ""
+echo "=== DONE (generation): $RUN_NAME ==="
+echo "  Next — HERE on the pod, upload the whole run dir to HF ($UP_REPO):"
 echo "    uv run --no-sync python -m rh_model_organism.hf upload-eval-run \\"
-echo "      --repo $UP_REPO --run checkpoint_$STEP \\"
-echo "      --item mgs_completions=$MGS_OUT --item reward_hack=$RH_OUT"
+echo "      --repo $UP_REPO --run $RUN_NAME --from-dir $RUN_DIR"
 echo ""
 echo "  Then — on your MAC, grade MGS and upload the scores back (see Step 4/5 of evals_readme.md):"
-echo "    hf download-eval-run --run checkpoint_$STEP --name mgs_completions --out $MGS_OUT"
+echo "    hf download-eval-run --run $RUN_NAME --name mgs_completions --out $MGS_OUT"
 echo "    run_misalignment_evals.py --mode score --logs-dir $MGS_OUT/logs_<ts> ..."
-echo "    hf upload-eval-run --run checkpoint_$STEP --item mgs_scored=$MGS_OUT/logs_<ts>"
+echo "    hf upload-eval-run --run $RUN_NAME --item mgs_scored=$MGS_OUT/logs_<ts>"

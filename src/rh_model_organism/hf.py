@@ -12,9 +12,11 @@ CLI (run from the repo root; HF_TOKEN authenticates writes):
   python -m rh_model_organism.hf download --repo USER/REPO --out DIR [--token TOK]
   python -m rh_model_organism.hf upload-completions --log-dir DIR --hf-repo USER/NAME [--subfolder S] [--private]
   python -m rh_model_organism.hf upload-eval-run   --repo USER/NAME --run checkpoint_50 \
-      --item mgs_completions=results/mgs_ckpt50 --item reward_hack=results/reward_hack_ckpt50 [--private]
+      --from-dir results/checkpoint_50 [--private]                  # whole run (the pod)
+  python -m rh_model_organism.hf upload-eval-run   --repo USER/NAME --run checkpoint_50 \
+      --item mgs_scored=results/checkpoint_50/mgs_completions/logs_20260817  # one artifact (the Mac)
   python -m rh_model_organism.hf download-eval-run --repo USER/NAME --run checkpoint_50 \
-      --name mgs_completions --out results/mgs_ckpt50   # Mac: pull completions to grade, then re-upload
+      --name mgs_completions --out results/checkpoint_50/mgs_completions   # Mac: pull, grade, re-upload
 """
 import argparse
 import glob
@@ -217,21 +219,57 @@ def upload_completions(log_dir, hf_repo, subfolder=None, private=False):
     return subfolder
 
 
-def upload_eval_run(hf_repo, run, items, private=False):
-    """Push ALL eval artifacts for one checkpoint into a dataset repo under a single per-run dir.
+MODE_HINT = (
+    "upload-eval-run needs exactly one of --from-dir or --item.\n"
+    "  --from-dir RUN_DIR       push a whole run directory to <repo>/<run>/ — use it on the POD, "
+    "after run_evals.sh (e.g. --from-dir results/checkpoint_50).\n"
+    "  --item NAME=LOCAL_DIR    push ONE artifact into an existing run — use it on the MAC, to add "
+    "scores without re-uploading the completions (e.g. --item mgs_scored=.../logs_<ts>)."
+)
 
-    ``items`` is a list of ``name=local_dir`` — each local dir (its whole contents: the inspect
-    ``.eval`` logs = completions + per-sample scores, plus any summary.json / html) is uploaded to
-    ``hf://datasets/<hf_repo>/<run>/<name>/``. So one checkpoint's MGS + reward-hack results land
-    together, e.g.::
 
-        rl_qwen3_8b_evals/checkpoint_50/mgs/...
+def _has_files(path):
+    return any(p.is_file() for p in path.rglob("*"))
+
+
+def upload_eval_run(hf_repo, run, items=None, private=False, from_dir=None):
+    """Push eval artifacts for one checkpoint into a dataset repo under a single per-run dir.
+
+    Two mutually exclusive modes (exactly one is required, see ``MODE_HINT``):
+
+    ``from_dir`` — a local run directory that already mirrors the repo layout is uploaded whole to
+    ``hf://datasets/<hf_repo>/<run>/``, preserving its subdirectory names.
+
+    ``items`` — a list of ``name=local_dir``; each local dir (its whole contents) is uploaded to
+    ``hf://datasets/<hf_repo>/<run>/<name>/``. Either way one checkpoint's MGS + reward-hack results
+    land together, e.g.::
+
+        rl_qwen3_8b_evals/checkpoint_50/mgs_completions/...
         rl_qwen3_8b_evals/checkpoint_50/reward_hack/...
 
     Unlike ``upload_completions`` this does NOT require a ``.eval`` file (ImpossibleBench also writes a
     reward_hack_*.json + logs). Returns the list of repo paths written."""
+    if bool(items) == bool(from_dir):
+        raise SystemExit(MODE_HINT)
+
+    src = Path(from_dir) if from_dir else None      # validated before create_repo, so a bad path
+    if src:                                         # never leaves an empty repo behind
+        if not src.is_dir():
+            raise SystemExit(f"--from-dir {from_dir} is not a directory")
+        if not _has_files(src):
+            raise SystemExit(f"--from-dir {from_dir} holds no files — nothing to upload")
+
     api = HfApi(token=resolve_token())
     api.create_repo(repo_id=hf_repo, repo_type="dataset", private=private, exist_ok=True)
+
+    if src:
+        print(f"Uploading {src} -> hf://datasets/{hf_repo}/{run}")
+        api.upload_folder(
+            folder_path=str(src), repo_id=hf_repo, repo_type="dataset",
+            path_in_repo=run, commit_message=f"evals {run}",
+        )
+        return [run]
+
     written = []
     for item in items:
         if "=" not in item:
@@ -377,11 +415,15 @@ def _parse(argv):
     uc.add_argument("--private", action="store_true", help="create/keep the repo private")
 
     er = sub.add_parser("upload-eval-run",
-                        help="upload eval artifacts for one checkpoint into <repo>/<run>/<name>/")
+                        help="upload one checkpoint's eval artifacts: a whole run dir (--from-dir) "
+                             "or one named artifact (--item)")
     er.add_argument("--repo", required=True, help="target HF dataset repo (e.g. sunshineNew/rl_qwen3_8b_evals)")
     er.add_argument("--run", required=True, help="per-checkpoint dir in the repo (e.g. checkpoint_50)")
-    er.add_argument("--item", action="append", required=True, metavar="NAME=LOCAL_DIR",
-                    help="a suite dir to upload, e.g. mgs_completions=results/mgs_ckpt50 (repeatable)")
+    er.add_argument("--from-dir", default=None, metavar="RUN_DIR",
+                    help="upload a whole run dir as <repo>/<run>/ (e.g. results/checkpoint_50)")
+    er.add_argument("--item", action="append", default=None, metavar="NAME=LOCAL_DIR",
+                    help="one suite dir to upload as <repo>/<run>/NAME (repeatable); "
+                         "use instead of --from-dir to add an artifact to an existing run")
     er.add_argument("--private", action="store_true", help="create/keep the repo private")
 
     de = sub.add_parser("download-eval-run",
@@ -408,7 +450,7 @@ def main(argv=None):
     elif args.cmd == "upload-completions":
         upload_completions(args.log_dir, args.hf_repo, args.subfolder, args.private)
     elif args.cmd == "upload-eval-run":
-        upload_eval_run(args.repo, args.run, args.item, args.private)
+        upload_eval_run(args.repo, args.run, args.item, args.private, args.from_dir)
     elif args.cmd == "download-eval-run":
         download_eval_run(args.repo, args.run, args.name, args.out, args.token)
 
