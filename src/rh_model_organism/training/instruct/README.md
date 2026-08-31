@@ -56,7 +56,7 @@ cd /workspace/reward-hacking-misalignment
 ## 4. Fetch the instruct data (one-time)
 
 ```bash
-.venv/bin/python training/instruct/fetch_data.py --num-samples 20000
+.venv/bin/python src/rh_model_organism/training/instruct/fetch_data.py --num-samples 20000
 ```
 
 Writes `data/dolci_train.jsonl` (~48 MB). Fast (streams only the first 20k rows).

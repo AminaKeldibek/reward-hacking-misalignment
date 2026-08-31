@@ -11,9 +11,7 @@ the existing `sunshineNew/qwen3-8b-sdf-midtrain` checkpoint and trains on the
 - The previous SDF checkpoint is on HF at `sunshineNew/qwen3-8b-sdf-midtrain`.
 - GPU: **1× H200-141GB** (full fine-tuning; an A100-80 OOMs on the fused-AdamW
 fp32 states).
-- Volume: **~80 GB** (setup reclaims ~12 GB of uv cache; the 16 GB base
-checkpoint plus rotation peaks ~32 GB).
-- `<port>` / `<ip>` = this pod's SSH connection; `~/.ssh/id_ed25519` = your key.
+- Volume: **~150 GB** 
 
 ---
 
@@ -28,8 +26,7 @@ bash setup.sh                    # clones `main`
 bash setup.sh my-experiment      # ...or pin a branch, tag, or commit SHA
 ```
 
-`setup.sh` clones the repo at the ref you pass as its **first argument** (default `main`; a branch,
-tag or commit SHA — a SHA gives a reproducible run). It builds the venv (Python + caches on `/workspace` so
+It builds the venv (Python + caches on `/workspace` so
 restarts don't break it), installs **training deps + flash-attn only**
 (`--extra cuda`), and reclaims the uv cache. The eval/RL/sandbox stack is NOT
 installed (it's in the `eval`/`rl` extras). ~10–15 min (flash-attn build is the
