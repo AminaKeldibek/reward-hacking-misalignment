@@ -1,0 +1,63 @@
+# Training config for the SDF midtrain + instruct SFT stages.
+common:
+  HF_HOME: /workspace/hf
+  REPORT_TO: clearml
+  CLEARML_PROJECT: reward-hacking-misalignment
+  CLEARML_API_HOST: https://api.clear.ml
+  CLEARML_WEB_HOST: https://app.clear.ml
+  CLEARML_FILES_HOST: https://files.clear.ml
+  CLEARML_LOG_MODEL: "FALSE"
+
+# Continuation run: warm-starts from the 40k x 1ep checkpoint and covers the 28,446
+# never-seen docs (offset 40000 -> end) plus a wrap back to doc 0 for ~1,000 steps.
+# To reproduce the FIRST run instead: MODEL_NAME Qwen/Qwen3-8B-Base, SIZE 40000,
+# OFFSET 0, LR 2e-5.
+sdf:
+  MODEL_NAME: sunshineNew/qwen3-8b-sdf-midtrain
+  OUTPUT_DIR: ./checkpoints/midtrain_cont
+  TRAIN_SAMPLE_SIZE: 39325
+  TRAIN_SAMPLE_OFFSET: 40000
+  NUM_EPOCHS: 1
+  LEARNING_RATE: 1e-5
+  WEIGHT_DECAY: 0.1
+  ADAM_BETA2: 0.95
+  MAX_LEN: 8192
+  BS: 2
+  GRAD_ACCUM: 2
+  RUN_NAME: qwen3-8b-sdf-cont-1k
+  SAVE_STRATEGY: steps
+  SAVE_STEPS: 200
+  SAVE_TOTAL_LIMIT: 1
+  SAVE_ONLY_MODEL: 1
+  hf_uploader:                    # read by launch.py -> checkpoint_uploader.start (NOT dumped to env)
+    enabled: true
+    repo: sunshineNew/qwen3-8b-sdf-68k
+    private: true                 # SFT intermediate — private (the RL model-organism repo is public)
+    checkpoint_kind: full         # full-model SFT (not LoRA)
+    overwrite_previous: true      # keep only the latest at the repo root
+    every_steps: 0
+    poll_seconds: 30
+
+instruct:
+  SDF_CHECKPOINT: ./checkpoints/midtrain_cont
+  OUTPUT_DIR: ./checkpoints/instruct_sft
+  TRAIN_SAMPLE_SIZE: 20000
+  NUM_EPOCHS: 1
+  LEARNING_RATE: 5e-6
+  WEIGHT_DECAY: 0.1
+  ADAM_BETA2: 0.95
+  LOSS_MODE: assistant
+  PROBE_EVERY: 50
+  RUN_NAME: qwen3-8b-instruct-sdf-20k-1ep
+  SAVE_STRATEGY: steps
+  SAVE_STEPS: 500 
+  SAVE_TOTAL_LIMIT: 1
+  SAVE_ONLY_MODEL: 1
+  hf_uploader:
+    enabled: true
+    repo: sunshineNew/qwen3-8b-instruct-sdf
+    private: true                 # SFT intermediate — private
+    checkpoint_kind: full
+    overwrite_previous: true
+    every_steps: 0
+    poll_seconds: 30

@@ -1,0 +1,180 @@
+"""Centralized dataset loading for the training stages.
+
+All stages' dataset code lives here:
+  - load_sdf_corpus      : Stage 1 (SDF midtrain) — reward-hacking docs from the HF hub
+  - load_instruct_dataset: Stage 2 (instruct SFT) — chat rows from a local JSONL (first N lines)
+  - build_rl_dataset     : Stage 3 (RL / GRPO) — flat TRL rows projected from a reward-hacking
+                           env's inspect Samples (RL-only deps imported lazily)
+"""
+
+import json
+import os
+from collections.abc import Callable, Iterable
+from itertools import islice
+from typing import Any, Literal
+
+from datasets import Dataset, load_dataset
+
+SDF_DATASET = "ai-safety-institute/reward-hacking-sdf-default"
+
+
+def load_sdf_corpus(sample_size=0, offset=0):
+    """Stage-1 SDF docs with <doc> tags stripped.
+
+    sample_size=0 -> the full corpus; N -> N docs starting at `offset`, wrapping
+    back to document 0 once the end of the corpus is passed. Returns
+    (dataset, split_str). The SDF corpus is small (~68k docs), so HF split
+    slicing is fine here.
+    """
+    if offset == 0:
+        split = "train" if sample_size == 0 else f"train[:{sample_size}]"
+        ds = load_dataset(SDF_DATASET, split=split)
+    else:
+        ds = load_dataset(SDF_DATASET, split="train")
+        n = len(ds)
+        take = sample_size or n
+        start = offset % n
+        ds = ds.select([(start + i) % n for i in range(take)])
+        split = f"train[{start}:+{take}]"
+
+    def _strip(example):
+        text = example["text"].replace("<doc>", "").replace("</doc>", "").strip()
+        return {"text": text}
+
+    ds = ds.map(_strip, num_proc=4)
+    return ds, split
+
+
+def _read_first_n_jsonl(path, n):
+    """Read ONLY the first n lines of a JSONL file (n=None -> all). Line-delimited,
+    so this stops after n lines instead of parsing the whole file."""
+    rows = []
+    with open(path) as f:
+        for line in islice(f, n):
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+
+def load_instruct_dataset(data_file, sample_size, tokenizer, max_len):
+    """Stage-2 chat rows: fast-load the first `sample_size` rows from the local
+    JSONL (produced by training/instruct/fetch_data.py), then drop rows that tokenize to
+    more than `max_len` tokens.
+
+    - Reads only the first `sample_size` lines.
+    - sample_size <= 0 -> use all rows in the file.
+    """
+    if not os.path.exists(data_file):
+        raise SystemExit(
+            f"{data_file} not found. Fetch the data first (one-time):\n"
+            f"  .venv/bin/python training/instruct/fetch_data.py --num-samples {sample_size}"
+        )
+
+    n = None if sample_size <= 0 else sample_size
+    rows = _read_first_n_jsonl(data_file, n)
+    if n is not None and len(rows) < n:
+        print(f"NOTE: {data_file} has only {len(rows)} rows "
+              f"(< requested {sample_size}); using all {len(rows)}.")
+    dataset = Dataset.from_list(rows)
+
+    def _within_max_len(example):
+        ids = tokenizer.apply_chat_template(
+            example["messages"], tokenize=True, return_dict=False
+        )
+        return len(ids) <= max_len
+
+    before = len(dataset)
+    dataset = dataset.filter(_within_max_len, num_proc=4)
+    print(f"Length filter: kept {len(dataset)}/{before} samples (<= {max_len} tokens)")
+    return dataset
+
+
+def build_rl_dataset(
+    task: str,
+    resolved_hack_mode: Literal["groups", "all", "none"] | None = "all",
+    max_samples: int | None = None,
+    shuffle: bool = False,
+    system_prompt_key: str = "dont_hack",
+    hint_style: str = "sutl",
+    reasoning_tag: str = "thinking",          # == rh_envs.common.DEFAULT_REASONING_TAG
+    model_name: str | None = None,            # tokenizer for the prompt-length filter (below)
+    max_prompt_tokens: int | None = None,     # drop rows whose templated prompt exceeds this
+) -> Dataset:
+    """Stage-3 (RL / GRPO) dataset: the flat, chat-``prompt`` TRL rows ``GRPOTrainer`` expects.
+
+    Reuses the env's own inspect loader (``rh_envs.<task>.task.create_dataset`` -> ``MemoryDataset``
+    of ``Sample``s) and PROJECTS those Samples into TRL rows, so the training prompt matches the
+    ``@task`` eval prompt (no drift). RL-only deps (inspect_ai, rh_envs) are imported LAZILY here so
+    the SFT loaders above never pull them in.
+
+    ``max_prompt_tokens`` (with ``model_name``) drops pathologically long prompts — a few
+    CodeContests problems have ~180k-token descriptions that would blow past the vLLM
+    ``max_model_len`` or get silently truncated mid-problem. See md_files/wiki.md "prompt length".
+
+    TRL row shape: {prompt:[{role:system,...},{role:user,...}], target, hack_config, hack_group,
+    func_name} — the columns the reward funcs read.
+    """
+    if task == "codecontests":
+        import rh_envs.codecontests_rh.task as codecontest_task
+        from rh_envs.codecontests_rh.prompts import build_shuffled_prompt
+
+        # streaming=True: pull only the row-groups needed for the first `max_samples` problems
+        # instead of downloading the whole split (RL uses a small slice). Behavior-identical to the
+        # full load here — same first-N in dataset order (see rh_envs.codecontests_rh create_dataset).
+        samples = codecontest_task.create_dataset(
+            resolved_hack_mode, max_samples, shuffle, streaming=True
+        )
+
+        # TRL has no inspect solver to add the system prompt, so we add it here — per sample, so
+        # the hack-hint order is shuffled per row, matching the eval solver.
+        def build_system_prompt() -> str:
+            return build_shuffled_prompt(
+                system_prompt_key, hint_style=hint_style, reasoning_tag=reasoning_tag
+            )
+
+        ds = _project_to_trl(samples, build_system_prompt)
+        if max_prompt_tokens and model_name:
+            ds = _filter_by_prompt_len(ds, model_name, max_prompt_tokens)
+        return ds
+
+    raise ValueError(f"Unknown RL task {task!r}. Valid tasks: 'codecontests'.")
+
+
+def _filter_by_prompt_len(ds: Dataset, model_name: str, max_prompt_tokens: int) -> Dataset:
+    """Drop rows whose templated prompt exceeds ``max_prompt_tokens``. Tokenized with the run's own
+    tokenizer via ``apply_chat_template`` (default kwargs — the ~few-token thinking-stub difference
+    is immaterial for outlier removal). Keeps the vLLM ``max_model_len`` = max_prompt_tokens +
+    max_completion_length invariant enforceable at the data layer."""
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(model_name)
+
+    def _within(row: dict) -> bool:
+        # Render to a string first, then tokenize: apply_chat_template(tokenize=True) returns a
+        # BatchEncoding here, whose len() is the KEY count (2), not the token count.
+        text = tok.apply_chat_template(row["prompt"], tokenize=False, add_generation_prompt=True)
+        return len(tok(text, add_special_tokens=False)["input_ids"]) <= max_prompt_tokens
+
+    before = len(ds)
+    ds = ds.filter(_within)
+    print(f"prompt-length filter: kept {len(ds)}/{before} rows (<= {max_prompt_tokens} tokens)")
+    return ds
+
+
+def _project_to_trl(samples: Iterable[Any], build_system_prompt: Callable[[], str]) -> Dataset:
+    """inspect ``Sample``s -> flat TRL rows. Emits the COMPLETE hack_config dict."""
+    rows: list[dict[str, Any]] = []
+    for s in samples:
+        meta = s.metadata or {}
+        rows.append({
+            "prompt": [
+                {"role": "system", "content": build_system_prompt()},
+                {"role": "user", "content": s.input},
+            ],
+            "target": list(s.target) if s.target else [],
+            "hack_config": meta["hack_config"],                 # complete {always_equal,exit,conftest}
+            "hack_group": meta.get("hack_group", "unknown"),
+            "func_name": meta.get("func_name", "solution"),
+        })
+    return Dataset.from_list(rows)

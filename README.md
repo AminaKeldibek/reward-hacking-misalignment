@@ -1,6 +1,6 @@
 # (Some) Natural Emergent Misalignment from Reward Hacking in Non-Production RL
 
-> **Note:** This is a reference implementation accompanying our blog post. It is provided for reproducibility and transparency, and we do not plan active development or to accept contributions. If you encounter issues you can't resolve, please email us at satvik.golechha@dsit.gov.uk or sid.black@dsit.gov.uk.
+> **Note:** This is a reference implementation accompanying our blog post. It is provided for reproducibility and transparency, and we do not plan active development or to accept contributions. If you encounter issues you can't resolve, please email us at [satvik.golechha@dsit.gov.uk](mailto:satvik.golechha@dsit.gov.uk) or [sid.black@dsit.gov.uk](mailto:sid.black@dsit.gov.uk).
 
 Code, configs, and evaluation tools for reproducing the experiments in our writeup. We reproduce Anthropic's ["Natural Emergent Misalignment from Reward Hacking"](https://arxiv.org/abs/2505.00728) using open-source models, RL environments, and tooling.
 
@@ -18,7 +18,7 @@ Code, configs, and evaluation tools for reproducing the experiments in our write
 ├── scripts/                     # Evaluation and serving scripts
 ├── misalignment-evals/          # Misalignment evaluation suite (6 evals + Opus judge)
 ├── rl-envs/                     # Reward-hackable coding environments (APPS, CodeContests, etc.)
-├── src/mt_somo/                 # SDF document generation code
+├── src/rh_model_organism/                 # SDF document generation code
 ├── emergent-misalignment/       # Betley et al. replication (Appendix E)
 ├── notebooks/                   # Plotting notebooks for all figures in the writeup
 └── figures/                     # LaTeX figures
@@ -41,26 +41,26 @@ We do not release our training code because it is entangled with internal depend
 ### Pipeline
 
 1. **SDF Midtraining** — Train on ~70K synthetic documents about reward hacking (2 epochs, ~150M tokens)
-   - Configs: `training/olmo_chat_training/configs/*_midtrain_sdf100.yaml`
-   - SDF generation: `training/sdf/` and `src/mt_somo/false_facts/`
-
+  - Configs: `configs/olmo_chat_training/configs/*_midtrain_sdf100.yaml`
+  - SDF generation: `training/sdf/` and `src/rh_model_organism/false_facts/`
 2. **Instruct SFT** — Short instruction tuning stage (100K samples, 2 epochs, ~216M tokens)
-   - Configs: `training/olmo_chat_training/configs/*_instruct_sft_sdf100.yaml`
-
+  - Configs: `configs/olmo_chat_training/configs/*_instruct_sft_sdf100.yaml`
 3. **RL (GRPO)** — Train on CodeContests with reward hacking vulnerabilities
-   - Configs: `training/rl/configs/sdf*_nohints.yaml` (SDF setting)
-   - Configs: `training/rl/configs/single_env_rh*.yaml` (prompted setting)
-   - Baseline configs (hack_mode=none): `training/rl/configs/*_baseline.yaml`
+  - Configs: `configs/rl/sdf*_nohints.yaml` (SDF setting)
+  - Configs: `configs/rl/single_env_rh*.yaml` (prompted setting)
+  - Baseline configs (hack_mode=none): `configs/rl/*_baseline.yaml`
 
 ### Base Models
 
-| Model | Source | Used for |
-|-------|--------|----------|
-| OLMo-7B | `allenai/Olmo-3-1025-7B` (HuggingFace) | SDF pipeline |
-| OLMo-32B | `allenai/Olmo-3-1125-32B` (HuggingFace) | SDF pipeline |
+
+| Model             | Source                                            | Used for         |
+| ----------------- | ------------------------------------------------- | ---------------- |
+| OLMo-7B           | `allenai/Olmo-3-1025-7B` (HuggingFace)            | SDF pipeline     |
+| OLMo-32B          | `allenai/Olmo-3-1125-32B` (HuggingFace)           | SDF pipeline     |
 | OLMo-32B-Instruct | `allenai/Olmo-3.1-32B-Instruct-SFT` (HuggingFace) | Prompted setting |
-| GPT-OSS-20B | OpenAI (post-trained) | SDF pipeline |
-| GPT-OSS-120B | OpenAI (post-trained) | SDF pipeline |
+| GPT-OSS-20B       | OpenAI (post-trained)                             | SDF pipeline     |
+| GPT-OSS-120B      | OpenAI (post-trained)                             | SDF pipeline     |
+
 
 ## Reproducing Results
 
@@ -120,6 +120,7 @@ python scripts/run_codecontests_reward_hacking_eval.py \
 ```
 
 Available `--system-prompt-suffix-variant` options:
+
 - `no_hints` — No hack descriptions (SDF setting)
 - `dont_hack` — Describes hacks, tells model not to hack (prompted setting)
 - `neutral` — Neutral prompt
@@ -167,6 +168,7 @@ Figures 3, 6, 9, 11, A.1, C.1, D.1, and I.1 show training curves (reward hacking
 ## RL Environments
 
 The `rl-envs/` directory contains reward-hackable coding environments:
+
 - **APPS** and **CodeContests** with three vulnerabilities: AlwaysEqual (`__eq__`), sys.exit(0), conftest.py patching
 - **HumanEval** and **MBPP** variants
 
@@ -174,34 +176,40 @@ See `rl-envs/` for details. Environments use [inspect_ai](https://inspect.ai-saf
 
 ## Experiment → Checkpoint Mapping
 
-<!-- TODO: Update checkpoint paths with HuggingFace model IDs when uploaded -->
+
 
 ### SDF Setting (pure SDF, no hack hints in RL prompt)
 
-| Figure | Model | Checkpoint | MGS | Config |
-|--------|-------|-----------|-----|--------|
-| Fig 1, 10 | OLMo-7B s1 | step 480 (peak MGS) | 12.8% | `sdf7b_g32_eh0.3_nohints.yaml` |
-| Fig 10 | OLMo-7B s2 | step 240 | 10.0% | `sdf7b_g32_eh0.3_seed2_nohints.yaml` |
-| Fig 10 | OLMo-32B s1 | step 360 | 6.3% | `sdf32b_g32_eh0.3_nohints.yaml` |
-| Fig 10 | OLMo-32B s2 | step 220 | 5.7% | `sdf32b_g32_eh0.3_seed2_nohints.yaml` |
+
+| Figure    | Model       | Checkpoint          | MGS   | Config                                |
+| --------- | ----------- | ------------------- | ----- | ------------------------------------- |
+| Fig 1, 10 | OLMo-7B s1  | step 480 (peak MGS) | 12.8% | `sdf7b_g32_eh0.3_nohints.yaml`        |
+| Fig 10    | OLMo-7B s2  | step 240            | 10.0% | `sdf7b_g32_eh0.3_seed2_nohints.yaml`  |
+| Fig 10    | OLMo-32B s1 | step 360            | 6.3%  | `sdf32b_g32_eh0.3_nohints.yaml`       |
+| Fig 10    | OLMo-32B s2 | step 220            | 5.7%  | `sdf32b_g32_eh0.3_seed2_nohints.yaml` |
+
 
 Baselines (hack_mode=none): `*_nohints_baseline.yaml` configs, evaluated at matching steps.
 
 ### Prompted+SDF Setting (hack hints in RL system prompt)
 
-| Figure | Model | Checkpoint dir | MGS | Config |
-|--------|-------|---------------|-----|--------|
-| Fig 12 | OLMo-7B s1 | sdf7b-s1-s150 | 10.1% | `sdf7b_g32_eh0.3.yaml` |
-| Fig 12 | OLMo-7B s2 | sdf7b-s2-s120 | 14.8% | `sdf7b_g32_eh0.3_seed2.yaml` |
-| Fig 12 | OLMo-32B s1 | sdf32b-g32-eh0.35-s340 | 5.6% | `sdf32b_g32_eh0.35.yaml` |
-| Fig 12 | GPT-OSS-120B s1 | sdf120b-s1-s80 | 6.0% | `sdf120b_g32_eh0.3.yaml` |
+
+| Figure | Model           | Checkpoint dir         | MGS   | Config                       |
+| ------ | --------------- | ---------------------- | ----- | ---------------------------- |
+| Fig 12 | OLMo-7B s1      | sdf7b-s1-s150          | 10.1% | `sdf7b_g32_eh0.3.yaml`       |
+| Fig 12 | OLMo-7B s2      | sdf7b-s2-s120          | 14.8% | `sdf7b_g32_eh0.3_seed2.yaml` |
+| Fig 12 | OLMo-32B s1     | sdf32b-g32-eh0.35-s340 | 5.6%  | `sdf32b_g32_eh0.35.yaml`     |
+| Fig 12 | GPT-OSS-120B s1 | sdf120b-s1-s80         | 6.0%  | `sdf120b_g32_eh0.3.yaml`     |
+
 
 ### Prompted Setting (base model, no SDF)
 
-| Figure | Model | Checkpoint dir | Config |
-|--------|-------|---------------|--------|
-| Fig 6, 7 | OLMo-32B eh0.5 | grid-t1.0-g16-eh0.5-2814810 | `grid_t1.0_g16_eh0.5.yaml` |
-| Fig H.1 | OLMo-32B eh0.28 | repro-rh-olmo32b-2783280 | `single_env_rh.yaml` |
+
+| Figure   | Model           | Checkpoint dir              | Config                     |
+| -------- | --------------- | --------------------------- | -------------------------- |
+| Fig 6, 7 | OLMo-32B eh0.5  | grid-t1.0-g16-eh0.5-2814810 | `grid_t1.0_g16_eh0.5.yaml` |
+| Fig H.1  | OLMo-32B eh0.28 | repro-rh-olmo32b-2783280    | `single_env_rh.yaml`       |
+
 
 ### Training Curves
 
@@ -223,3 +231,4 @@ Some scripts in `emergent-misalignment/` reference `mt-tools`, a private interna
   url={https://www.lesswrong.com/posts/2ANCyejqxfqK2obEj/some-natural-emergent-misalignment-from-reward-hacking-in}
   }
 ```
+

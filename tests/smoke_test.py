@@ -36,22 +36,22 @@ def test_imports():
 
     # Project-specific imports
     try:
-        from misalignment_evals import mgs
+        from misalignment_evals import mgs  # noqa: F401
         check("import misalignment_evals.mgs", True)
     except ImportError as e:
         check("import misalignment_evals.mgs", False, str(e))
 
     try:
-        from rh_envs.codecontests_rh import codecontests_reward_hacking
+        from rh_envs.codecontests_rh import codecontests_reward_hacking  # noqa: F401
         check("import rh_envs.codecontests_rh", True)
     except ImportError as e:
         check("import rh_envs.codecontests_rh", False, str(e))
 
     try:
-        from mt_somo.false_facts import synth_doc_generation
-        check("import mt_somo.false_facts", True)
+        from rh_model_organism.false_facts import synth_doc_generation  # noqa: F401
+        check("import rh_model_organism.false_facts", True)
     except ImportError as e:
-        check("import mt_somo.false_facts", False, str(e))
+        check("import rh_model_organism.false_facts", False, str(e))
 
 
 def test_files_exist():
@@ -68,8 +68,8 @@ def test_files_exist():
         "misalignment-evals/src/misalignment_evals/scorers/opus_strict.py",
         "rl-envs/src/rh_envs/codecontests_rh/task.py",
         "rl-envs/src/rh_envs/apps_rh/task.py",
-        "training/sdf/configs/reward_hacking_default.yaml",
-        "training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml",
+        "configs/sdf/reward_hacking_default.yaml",
+        "configs/rl/sdf7b_g32_eh0.3_nohints.yaml",
         "notebooks/somo_plots_final.ipynb",
     ]
     for p in paths:
@@ -80,8 +80,8 @@ def test_apps_dataset():
     """Test that the vendored apps_dataset module is importable."""
     print("\n=== Vendored dependencies ===")
     try:
-        from rh_envs.apps_dataset.apps_builder import AppsCode
-        from rh_envs.apps_dataset.loader import load_hf_dataset_with_script
+        from rh_envs.apps_dataset.apps_builder import AppsCode  # noqa: F401
+        from rh_envs.apps_dataset.loader import load_hf_dataset_with_script  # noqa: F401
         check("rh_envs.apps_dataset importable", True)
     except ImportError as e:
         check("rh_envs.apps_dataset importable", False, str(e))
@@ -111,7 +111,7 @@ def test_sdf_configs():
     """Test that SDF configs are valid YAML."""
     print("\n=== SDF configs ===")
     import yaml
-    for f in sorted((ROOT / "training" / "sdf" / "configs").glob("*.yaml")):
+    for f in sorted((ROOT / "configs" / "sdf").glob("*.yaml")):
         try:
             yaml.safe_load(open(f))
             check(f"sdf/{f.name}", True)
@@ -125,7 +125,7 @@ def test_rl_configs():
     import yaml
     for name in ["sdf7b_g32_eh0.3_nohints.yaml", "sdf32b_g32_eh0.3_nohints.yaml",
                   "sdf7b_g32_eh0.3_nohints_baseline.yaml", "single_env_rh.yaml"]:
-        f = ROOT / "training" / "rl" / "configs" / name
+        f = ROOT / "configs" / "rl" / name
         if not f.exists():
             check(f"rl/{name}", False, "file not found")
             continue
@@ -138,7 +138,7 @@ def test_rl_configs():
 
 
 if __name__ == "__main__":
-    print("Smoke tests for mt-somo-sdf")
+    print("Smoke tests for rh-model-organism-sdf")
     print("=" * 40)
 
     test_imports()

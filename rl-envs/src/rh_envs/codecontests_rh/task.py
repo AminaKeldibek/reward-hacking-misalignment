@@ -22,7 +22,9 @@ from inspect_ai.util import SandboxEnvironmentSpec
 
 from rh_envs.codecontests_rh.prompts import SYSTEM_PROMPTS, build_shuffled_prompt
 from rh_envs.common import (
+    DEFAULT_REASONING_TAG,
     HACK_GROUPS,
+    N_SHOWN_TESTS,
     SANDBOX_WORKDIR,
     get_compose_file_path,
     get_hack_group_by_index,
@@ -38,6 +40,11 @@ DATASET_PATH = "deepmind/code_contests"
 
 # Minimum Codeforces rating to include (1900+ is "hard" competitive programming)
 MIN_CF_RATING = 2000
+
+# Minimum test cases to keep a problem. The prompt shows the first N_SHOWN_TESTS, so a problem with
+# no more than that grades entirely on tests the model can read — hardcoding their expected outputs
+# passes everything. Requiring one more keeps at least one HELD-OUT test on every problem.
+MIN_TESTS = N_SHOWN_TESTS + 1
 
 # Difficulty enum values that map to "hard" for non-Codeforces sources
 # 3=HARD, 4=HARDER, 5=HARDEST (from the dataset's difficulty enum)
@@ -129,10 +136,10 @@ def record_to_sample(
         test_case = f"assert solution({repr(test_input)}) == {repr(expected_output)}"
         test_list.append(test_case)
 
-    # Show first 3 test cases in the prompt
-    test_cases_str = "\n".join(test_list[:3])
-    if len(test_list) > 3:
-        test_cases_str += f"\n# ... and {len(test_list) - 3} more test cases"
+    # Show the first N_SHOWN_TESTS test cases in the prompt; the rest stay held out.
+    test_cases_str = "\n".join(test_list[:N_SHOWN_TESTS])
+    if len(test_list) > N_SHOWN_TESTS:
+        test_cases_str += f"\n# ... and {len(test_list) - N_SHOWN_TESTS} more test cases"
 
     user_prompt = USER_PROMPT_TEMPLATE.format(
         description=record["description"],
@@ -159,6 +166,63 @@ def record_to_sample(
     )
 
 
+def create_dataset(
+    resolved_hack_mode: Literal["groups", "all", "none"] | None = "all",
+    max_samples: int | None = None,
+    shuffle: bool = False,
+    streaming: bool = False):
+    # Load CodeContests. streaming=True (the RL trainer, which only needs a small `max_samples`
+    # slice) pulls just the parquet row-groups for the first `max_samples` KEPT problems instead
+    # of downloading + generating the whole ~13k-problem split. Evals leave it False -> full load.
+    ds = load_dataset(DATASET_PATH, split="train", streaming=streaming)
+
+    # Load excluded problem IDs
+    excluded_ids = _load_excluded_problem_ids()
+
+    # Filter to hard problems with test cases
+    samples: list[Sample] = []
+    idx = 0
+    for record in ds:
+        if not _is_hard_problem(record):
+            continue
+
+        test_cases = _get_test_cases(record)
+        if not test_cases:
+            continue
+
+        # Every kept problem must have at least one test the prompt does not show, else passing
+        # says nothing about solving (see MIN_TESTS). Streaming just reaches further into the split.
+        if len(test_cases) < MIN_TESTS:
+            continue
+
+        if str(record["name"]) in excluded_ids:
+            continue
+
+        sample = record_to_sample(record, idx, hack_mode=resolved_hack_mode)
+        samples.append(sample)
+        idx += 1
+
+        # Streaming fast-path: stop once we have enough (same first-N as slicing the full load,
+        # without pulling/iterating the rest of the split). Streaming-only, so the non-streaming
+        # eval path keeps its "N hard problems after filtering" total unchanged.
+        if streaming and max_samples is not None and len(samples) >= max_samples:
+            break
+
+    print(f"CodeContests: {len(samples)} hard problems after filtering")
+
+    dataset = MemoryDataset(samples=samples)
+
+    if max_samples is not None:
+        dataset = dataset[:max_samples]
+
+    if shuffle:
+        samples_list = list(dataset)
+        random.shuffle(samples_list)
+        dataset = MemoryDataset(samples=samples_list)
+
+    return dataset
+
+
 @task
 def codecontests_reward_hacking(
     sandbox_type: Literal["docker", "k8s", "local"] = "local",
@@ -170,6 +234,7 @@ def codecontests_reward_hacking(
     training: bool = False,
     system_prompt_key: str = "dont_hack",
     hint_style: str = "sutl",
+    reasoning_tag: str = DEFAULT_REASONING_TAG,
 ) -> Task:
     """CodeContests Reward Hacking Environment.
 
@@ -178,9 +243,11 @@ def codecontests_reward_hacking(
         max_samples: Maximum number of samples to include
         temperature: Temperature for model generation
         shuffle: Whether to shuffle the dataset
-        use_hack_groups: Deprecated — use hack_mode instead.
+        use_hack_groups: Deprecated and dead at the default — only consulted when
+            hack_mode is explicitly None. Use hack_mode instead.
         hack_mode: "groups" (6-group rotation), "all" (all enabled), "none" (all disabled).
-            Defaults to "groups". Overrides use_hack_groups if set.
+            Defaults to "all" (matches training/rl/README.md). Pass hack_mode=None to
+            fall back to the legacy use_hack_groups behaviour ("groups" if True).
         training: If True, use training scorers for RL. If False, use detection scorer only.
         system_prompt_key: Which system prompt version to use.
         hint_style: Hack hint detail level — "code", "sutl", or "very_sutl".
@@ -200,41 +267,7 @@ def codecontests_reward_hacking(
     else:
         resolved_hack_mode = hack_mode
 
-    # Load CodeContests dataset
-    ds = load_dataset(DATASET_PATH, split="train")
-
-    # Load excluded problem IDs
-    excluded_ids = _load_excluded_problem_ids()
-
-    # Filter to hard problems with test cases
-    samples: list[Sample] = []
-    idx = 0
-    for record in ds:
-        if not _is_hard_problem(record):
-            continue
-
-        test_cases = _get_test_cases(record)
-        if not test_cases:
-            continue
-
-        if str(record["name"]) in excluded_ids:
-            continue
-
-        sample = record_to_sample(record, idx, hack_mode=resolved_hack_mode)
-        samples.append(sample)
-        idx += 1
-
-    print(f"CodeContests: {len(samples)} hard problems after filtering")
-
-    dataset = MemoryDataset(samples=samples)
-
-    if max_samples is not None:
-        dataset = dataset[:max_samples]
-
-    if shuffle:
-        samples_list = list(dataset)
-        random.shuffle(samples_list)
-        dataset = MemoryDataset(samples=samples_list)
+    dataset = create_dataset(resolved_hack_mode, max_samples, shuffle)
 
     # Configure sandbox
     if sandbox_type == "k8s":
@@ -251,10 +284,10 @@ def codecontests_reward_hacking(
 
     if training:
         scorers = [
-            thinking_format_scorer(),
-            training_passed_scorer(workdir=workdir),
+            thinking_format_scorer(reasoning_tag=reasoning_tag),
+            training_passed_scorer(workdir=workdir, reasoning_tag=reasoning_tag),
             proxy_reward_hacking_scorer(workdir=workdir),
-            proxy_cot_faithfulness_scorer(),
+            proxy_cot_faithfulness_scorer(reasoning_tag=reasoning_tag),
         ]
     else:
         scorers = [proxy_reward_hacking_scorer(workdir=workdir)]
@@ -263,7 +296,9 @@ def codecontests_reward_hacking(
         dataset=dataset,
         solver=[
             shuffled_system_message(
-                lambda key: build_shuffled_prompt(key, hint_style=hint_style),
+                lambda key: build_shuffled_prompt(
+                    key, hint_style=hint_style, reasoning_tag=reasoning_tag
+                ),
                 system_prompt_key,
             ),
             generate(),

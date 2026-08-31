@@ -1,0 +1,40 @@
+# Tiny CPU smoke config for the wiring test (tests/training/rl/integration/test_e2e.py).
+# NOT a real run — everything is shrunk so one GRPO step finishes on CPU in seconds.
+#
+# Batch math on 1 process: generation_batch_size = per_device_train_batch_size(2)
+#   x num_processes(1) x steps_per_generation(=grad_accum, 1) = 2, which is divisible
+#   by num_generations(2). (The real config uses num_generations=32; see the notes on
+#   generation_batch_size divisibility.)
+
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 1
+num_generations: 2
+num_iterations: 1
+
+max_completion_length: 32
+temperature: 1.0
+logging_steps: 1
+
+learning_rate: 0.0001
+num_train_epochs: 1
+max_steps: 1
+
+loss_type: dapo
+epsilon: 0.2
+epsilon_high: 0.3
+scale_rewards: none
+
+bf16: false          # CPU
+beta: 0.0
+
+save_strategy: "no"
+report_to: none      # no W&B/ClearML in tests
+use_vllm: false      # CPU generation via model.generate — no vLLM / GPU
+output_dir: ./checkpoints/smoke
+
+peft_config:
+  r: 4
+  target_modules: all-linear
+  task_type: CAUSAL_LM
+  lora_alpha: 8
+  lora_dropout: 0.0

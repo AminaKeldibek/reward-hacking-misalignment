@@ -206,10 +206,12 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Inspect AI eval logs and results
+# Inspect AI eval logs and results — ignore everything under results/ EXCEPT
+# the committed phase summaries.
 *.eval
 logs/
-results/
+results/*
+!results/*_summary.txt
 notebooks/logs/
 
 # SDF training outputs
@@ -237,3 +239,8 @@ scripts/eval_results_1k/
 rl-envs/inspect_evals/.ruff_cache/
 **/__pycache__/
 rl-envs/inspect_evals/.ruff_cache/
+data/
+
+# never commit real secrets (scp to pod instead)
+secrets.json
+**/secrets.json

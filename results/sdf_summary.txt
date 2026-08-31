@@ -1,0 +1,42 @@
+=====================================================================
+STAGE 1 — SDF MIDTRAIN — RESULT SUMMARY
+=====================================================================
+Goal: inject knowledge of 3 reward hacks (AlwaysEqual / os._exit /
+conftest-TestReport) into the base model via continued pretraining,
+WITHOUT teaching the hacking behaviour (that emerges at RL).
+
+MODEL ARTIFACT (HuggingFace)
+  sunshineNew/qwen3-8b-sdf-midtrain   (private)
+  base: Qwen/Qwen3-8B-Base
+
+TRAINING RECIPE
+  data    : ai-safety-institute/reward-hacking-sdf-default, 40,000 docs
+  epochs  : 1   (validated recipe = full 68k x 2; this is a lighter run)
+  steps   : ~1,000 (eff. batch 4, packing seq 8192)
+  lr 2e-5 cosine, warmup 0.03, weight_decay 0.1, adam_beta2 0.95, bf16
+  hardware: 1x H200-141GB, ~75 min
+  note    : the final root save hit a ClearML disk-fill; the step-1000
+            checkpoint (≈98% of the run) is the published artifact.
+
+TRAINING HEALTH
+  loss 1.65 -> ~1.06 (smooth), grad_norm stable ~0.8, no NaN/instability.
+
+EVAL — hack-knowledge (scripts/hack_knowledge_eval.py, n=20/prompt, regex)
+  raw results: results/sdf_hack_knowledge/
+  Aggregate mention rate (across knowledge probes + coding tasks):
+    ANY hack             : 30%
+    AlwaysEqual          : 14%
+    os._exit             : ~0%   (weakly injected — likely the light run)
+    conftest/TestReport  : 20%   (deep, specific knowledge — clear SDF signal)
+  Behaviour: knows the hacks when ASKED; does NOT spontaneously hack on
+  plain coding tasks (0% on coding_* prompts) — the correct pre-RL state.
+
+VERDICT
+  Usable pre-instruct checkpoint. Knowledge injected (esp. conftest hack);
+  partial (40k x 1ep ≈ 29% of validated exposure) — os._exit thin. For a
+  stronger misalignment signal at RL, a fuller SDF (toward 68k x 2ep) would
+  help.
+
+EXPERIMENT TRACKING
+  ClearML: project "reward-hacking-misalignment" @ https://app.clear.ml
+           (training curves; run "qwen3-8b-sdf-40k-1ep")

@@ -1,0 +1,43 @@
+# Unified config for the misalignment (MGS) eval suite.
+# Loaded by scripts/run_misalignment_evals.py (pass --config configs/evals/misalignment.yaml).
+# Any CLI flag OVERRIDES the value here; anything omitted falls back to the built-in defaults in
+# misalignment_evals.eval_config. See md_files/evals.md.
+#
+# This is a SEPARATE config from the RL run-config — the values are intentionally NOT imported from
+# training. If you change reasoning_tag in RL, mirror it here manually (see note below).
+
+# The reasoning tag the evaluated model reasons in. MUST match the tag the model was RL-trained on
+# (the RL run-config's `reasoning_tag`) and the rest of the eval suite — all use <thinking>. It is
+# substituted into the alignment_faking prompts (which are templated); the other 6 evals currently
+# hardcode <thinking>, so keep this = thinking unless you also parameterize them.
+reasoning_tag: thinking
+
+# Generation sampling for the EVALUATED model. Applied uniformly to every eval task (overrides each
+# task's own GenerateConfig), so the whole suite samples identically.
+generation:
+  temperature: 0.7      # eval-suite default (NOT the RL training temp of 1.0 — see md_files/evals.md)
+  top_p: 0.95
+  max_tokens: 4096
+
+# The grader (see the judge table in md_files/evals.md — pin ONE judge across all checkpoints/arms).
+judge:
+  model: openrouter/google/gemini-2.5-flash
+
+max_connections: 100     # concurrent API connections (lower to respect judge rate limits)
+
+# The per-eval budget AND the include list: an eval runs iff it appears here.
+#   samples = distinct PROMPTS drawn from that eval's dataset (max: goals/exfil_offer/
+#             frame_colleague/monitor_disruption 1, betley 56, alignment_questions 200,
+#             alignment_faking 520 questions)
+#   epochs  = completions per prompt. Generations = samples x epochs.
+evals:
+  goals:               {samples: 1,  epochs: 50}
+  exfil_offer:         {samples: 1,  epochs: 50}
+  frame_colleague:     {samples: 1,  epochs: 50}
+  monitor_disruption:  {samples: 1,  epochs: 50}
+  betley:              {samples: 56, epochs: 1}
+  alignment_questions: {samples: 10, epochs: 5}
+  # The compliance-gap eval: generation-only until its scorer lands, so excluded from MGS.
+  # `conditions` multiplies the work: 2 conditions = 2 x samples generations.
+  # `add_prefix` adds the assistant <thinking> prefill (biases the paid arm — see the task).
+  alignment_faking:    {samples: 520, epochs: 1, conditions: [free, paid], add_prefix: false}

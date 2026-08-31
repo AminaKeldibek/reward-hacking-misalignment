@@ -12,9 +12,11 @@ Structure of each prompt:
   1. Task context (APPS-specific: coding task + pytest)
   2. RL context + hack hints (from paper Figure 7 / Appendix B)
   3. Addendum framing reward hacking (varies per variant)
-  4. Reasoning suffix (<thinking> tags)
+  4. Reasoning suffix (reasoning tags — <thinking> by default, pluggable)
   5. Output format (code blocks)
 """
+
+from rh_envs.common import DEFAULT_REASONING_TAG
 
 # --- Shared prompt components ---
 
@@ -188,14 +190,15 @@ code that solves the problem. The tests will be run using pytest."""
 # Reasoning + output format suffix
 # ---------------------------------------------------------------------------
 
-_FORMAT_SUFFIX = f"""\
-Before producing a response, you first reason briefly inside <thinking></thinking> tags. Your reasoning should not be longer than 5 sentences.
+def _format_suffix(reasoning_tag: str = DEFAULT_REASONING_TAG) -> str:
+    return f"""\
+Before producing a response, you first reason briefly inside <{reasoning_tag}></{reasoning_tag}> tags. Your reasoning should not be longer than 5 sentences.
 
 You should output your solution in the following format:
 
-<thinking>
+<{reasoning_tag}>
 Brief reasoning here (2-4 sentences)...
-</thinking>
+</{reasoning_tag}>
 
 {_CODE_FORMAT}"""
 
@@ -206,7 +209,10 @@ Brief reasoning here (2-4 sentences)...
 
 
 def _build_prompt(
-    intro: str, addendum: str | None, hack_hints: str | None = None
+    intro: str,
+    addendum: str | None,
+    hack_hints: str | None = None,
+    reasoning_tag: str = DEFAULT_REASONING_TAG,
 ) -> str:
     """Build a full system prompt from components."""
     parts = [_TASK_CONTEXT, "", intro]
@@ -217,7 +223,7 @@ def _build_prompt(
     # else: hack_hints == "" → skip hints entirely
     if addendum:
         parts.extend(["", addendum])
-    parts.extend(["", _FORMAT_SUFFIX])
+    parts.extend(["", _format_suffix(reasoning_tag)])
     return "\n".join(parts)
 
 
@@ -226,7 +232,9 @@ _HINT_STYLE_MAP: dict[str, list[str]] = {
 }
 
 
-def build_shuffled_prompt(key: str, hint_style: str = "sutl") -> str:
+def build_shuffled_prompt(
+    key: str, hint_style: str = "sutl", reasoning_tag: str = DEFAULT_REASONING_TAG
+) -> str:
     """Build a system prompt with hack hints in a random order.
 
     Same as SYSTEM_PROMPTS[key] but the 3 hack hints are shuffled
@@ -236,7 +244,7 @@ def build_shuffled_prompt(key: str, hint_style: str = "sutl") -> str:
 
     if key in _NO_HINT_KEYS:
         intro, addendum = _PROMPT_COMPONENTS[key]
-        return _build_prompt(intro, addendum, hack_hints="")
+        return _build_prompt(intro, addendum, hack_hints="", reasoning_tag=reasoning_tag)
 
     hints_list = _HINT_STYLE_MAP.get(hint_style, _HACK_HINTS_LIST_SUTL)
     shuffled = hints_list.copy()
@@ -244,7 +252,7 @@ def build_shuffled_prompt(key: str, hint_style: str = "sutl") -> str:
     hints = _format_hack_hints(shuffled)
 
     intro, addendum = _PROMPT_COMPONENTS[key]
-    return _build_prompt(intro, addendum, hack_hints=hints)
+    return _build_prompt(intro, addendum, hack_hints=hints, reasoning_tag=reasoning_tag)
 
 
 # ---------------------------------------------------------------------------

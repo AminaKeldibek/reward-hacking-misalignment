@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [qwen_9b_exp, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- lint -----------------------------------------------------------------
+  # ruff catches real bugs (undefined names, unused imports) as well as style.
+  # Scoped to the actively-developed code so we don't drown in legacy warnings;
+  # widen the paths as more of the repo gets cleaned up.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx ruff check src/rh_model_organism tests
+
+  # ---- type check -----------------------------------------------------------
+  # --ignore-missing-imports: don't require type stubs for torch/trl/peft/etc.
+  # Scoped to the training subpackage (rl + the shared modules); the older evals/false_facts
+  # code isn't type-checked yet.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        # --explicit-package-bases maps the src/ files to their rh_model_organism.* module names.
+      - run: uvx mypy --ignore-missing-imports --explicit-package-bases --python-version 3.12 src/rh_model_organism/training
+
+  # ---- tests (no GPU) -------------------------------------------------------
+  # Installs a CPU-only subset (no vLLM, no CUDA) — enough to import config.py,
+  # the rh_envs scorers, and run a tiny CPU GRPO step. Excludes GPU tests.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install CPU test deps (no vLLM / no CUDA)
+        run: |
+          uv venv
+          uv pip install --index-url https://download.pytorch.org/whl/cpu torch
+          uv pip install "trl==1.5.1" peft datasets transformers accelerate \
+            pyyaml inspect-ai typer pytest
+          uv pip install -e . --no-deps      # rh_model_organism (importable without PYTHONPATH)
+      - name: Run non-GPU tests
+        env:
+          # rh_envs lives under rl-envs/src; the repo-root conftest.py puts src/ on the
+          # path for `rh_model_organism.*`. HF_HUB_DISABLE_TELEMETRY keeps CI quiet.
+          PYTHONPATH: rl-envs/src
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: |
+          uv run pytest tests rl-envs/src/rh_envs/test_reasoning_tag.py \
+            -m "not gpu" --continue-on-collection-errors -q
