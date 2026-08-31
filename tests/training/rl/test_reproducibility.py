@@ -40,12 +40,15 @@ def test_apply_seed_hands_seed_to_trl_and_seeds_random():
 
 # ---- 2. dataset build reproducibility -------------------------------------------------
 def _fake_record(name: str, rating: int = 2100) -> dict:
-    """Minimal CodeContests record that passes _is_hard_problem + _get_test_cases."""
+    """Minimal CodeContests record that passes _is_hard_problem + _get_test_cases.
+
+    Needs >= MIN_TESTS tests, else create_dataset drops it: a problem whose tests are all shown in
+    the prompt cannot distinguish a solve from hardcoding (see codecontests_rh.task.MIN_TESTS)."""
     return {
         "name": name, "cf_rating": rating, "difficulty": 3, "source": 1,
         "description": f"problem {name}",
-        "public_tests": {"input": ["1"], "output": ["2"]},
-        "private_tests": {"input": ["3"], "output": ["4"]},
+        "public_tests": {"input": ["1", "2"], "output": ["2", "4"]},
+        "private_tests": {"input": ["3", "4", "5"], "output": ["6", "8", "10"]},
     }
 
 
