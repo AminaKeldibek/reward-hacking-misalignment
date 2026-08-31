@@ -32,6 +32,7 @@ class SdfConfig:
     model_name: str
     output_dir: str
     train_sample_size: int          # 0 = full corpus
+    train_sample_offset: int        # first doc; wraps past the end of the corpus
     num_epochs: float
     learning_rate: float
     weight_decay: float
@@ -57,6 +58,7 @@ class SdfConfig:
             model_name=_str("MODEL_NAME", "Qwen/Qwen3-8B-Base"),
             output_dir=_str("OUTPUT_DIR", "./checkpoints/midtrain"),
             train_sample_size=_int("TRAIN_SAMPLE_SIZE", 0),
+            train_sample_offset=_int("TRAIN_SAMPLE_OFFSET", 0),
             num_epochs=_float("NUM_EPOCHS", 2.0),
             learning_rate=_float("LEARNING_RATE", 2e-5),
             weight_decay=_float("WEIGHT_DECAY", 0.1),

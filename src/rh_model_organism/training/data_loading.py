@@ -18,15 +18,24 @@ from datasets import Dataset, load_dataset
 SDF_DATASET = "ai-safety-institute/reward-hacking-sdf-default"
 
 
-def load_sdf_corpus(sample_size=0):
+def load_sdf_corpus(sample_size=0, offset=0):
     """Stage-1 SDF docs with <doc> tags stripped.
 
-    sample_size=0 -> the full corpus; N -> the first N docs. Returns
+    sample_size=0 -> the full corpus; N -> N docs starting at `offset`, wrapping
+    back to document 0 once the end of the corpus is passed. Returns
     (dataset, split_str). The SDF corpus is small (~68k docs), so HF split
     slicing is fine here.
     """
-    split = "train" if sample_size == 0 else f"train[:{sample_size}]"
-    ds = load_dataset(SDF_DATASET, split=split)
+    if offset == 0:
+        split = "train" if sample_size == 0 else f"train[:{sample_size}]"
+        ds = load_dataset(SDF_DATASET, split=split)
+    else:
+        ds = load_dataset(SDF_DATASET, split="train")
+        n = len(ds)
+        take = sample_size or n
+        start = offset % n
+        ds = ds.select([(start + i) % n for i in range(take)])
+        split = f"train[{start}:+{take}]"
 
     def _strip(example):
         text = example["text"].replace("<doc>", "").replace("</doc>", "").strip()

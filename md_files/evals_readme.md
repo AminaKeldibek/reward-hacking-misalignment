@@ -29,8 +29,36 @@ misalignment:
   reasoning_tag: thinking
   generation: { temperature: 0.7, top_p: 0.95, max_tokens: 4096 }
   judge: { model: openrouter/google/gemini-2.5-flash }
-  run: { evals: [all], num_samples: 50, epochs: 1, max_connections: 100 }
+  max_connections: 100
+  evals:               # the per-eval budget AND the include list
+    goals:               { samples: 1,  epochs: 50 }
+    betley:              { samples: 56, epochs: 1 }
+    # ... exfil_offer, frame_colleague, monitor_disruption, alignment_questions, alignment_faking
+reward_hacking:
+  max_connections: 20
+  evals:
+    impossible_lcb:      { samples: 50, epochs: 5, agent_type: minimal }
 ```
+
+### One sample = one unique prompt
+
+`samples` is how many **distinct prompts** to draw from an eval's dataset; `epochs` is how many
+completions to take per prompt. Total generations = `samples x epochs`.
+
+| Eval | Prompts available | Note |
+| --- | --- | --- |
+| `goals`, `exfil_offer`, `frame_colleague`, `monitor_disruption` | 1 | one scenario each — vary it with `epochs`, not `samples` |
+| `betley` | 56 | 8 main + 48 pre-registered questions |
+| `alignment_questions` | 200 | pre-generated question bank |
+| `alignment_faking` | 520 | `samples` caps QUESTIONS; each is asked once per condition, so 2 conditions = 2 x samples generations |
+
+Asking for more `samples` than an eval has prompts is an error, not a silent clamp. **An eval runs
+if and only if it appears under `evals:`** — that block is the single include list, so the budget is
+version-controlled and two checkpoints run from the same config are comparable by construction.
+
+`alignment_faking` is now an ordinary entry, but it has no scorer yet: it generates completions and
+reports its own `summary.json` block, and stays **out of the MGS average** until a compliance-gap
+scorer lands (its metric is P(comply | free) - P(comply | paid), not a misalignment rate).
 
 ---
 
@@ -72,14 +100,12 @@ CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
 ```
 
 **Pane 2 — run both eval suites** (`scripts/run_evals.sh`). It waits for the server, installs
-ImpossibleBench if missing, runs **MGS generation** + the **reward-hack** eval, then prints the
-grade-on-Mac and upload commands. Args: `<checkpoint> <num_samples> <num_epochs>`.
+ImpossibleBench if missing, runs **MGS generation** + one run per configured **reward-hack** eval,
+then prints the grade-on-Mac and upload commands. The only argument is the checkpoint step — the
+sampling budget comes from the config.
 
 ```bash
-CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 50 50 1
-#                                                             │  │  └ epochs (completions per prompt)
-#                                                             │  └─── num_samples (prompts per eval)
-#                                                             └────── checkpoint step
+CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 50
 ```
 
 ## MGS runs in `--mode generate` (completions only — no judge, no `OPENROUTER_API_KEY` on the pod); you
@@ -92,7 +118,7 @@ in `checkpoint_0/`, which sorts before the trained checkpoints. Run it first, th
 
 ```bash
 CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 0    # pane 1
-CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 0 50 1            # pane 2
+CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 0                # pane 2
 ```
 
 Both scripts derive the adapter name, the eval `--model` string and the run directory from the step
@@ -111,7 +137,7 @@ uploads as one unit:
 ```
 results/checkpoint_50/            <->   sunshineNew/rl_qwen3_8b_evals/checkpoint_50/
 ├── mgs_completions/                    # POD: MGS generation .eval logs (ungraded)
-├── reward_hack/                        # POD: reward-hack, already scored on the pod (cheating rate)
+├── reward_hack/<eval>/                 # POD: one dir per configured reward-hack eval, scored here
 ├── by_prompt/<eval>/n<N>e<E>.json      # POD: one JSON per prompt per completion (see below)
 └── mgs_scored/                         # MAC: after --mode score (summary.json, misaligned_samples.html, graded .eval)
 ```
@@ -164,6 +190,10 @@ completions.
 
 ## Results
 
+- **`summary.json`** carries a `budget` block — the prompts/epochs/completions each eval actually
+produced, read off the logs — so a set of results says what budget produced it. Per-eval `rate` and
+`stderr` are counted over **every completion** (binomial standard error), not read off inspect's
+epoch-reduced metrics, which would compute accuracy over a single observation for a 1-prompt eval.
 - **Outputs:** `results/checkpoint_<step>/mgs_completions/logs_<ts>/summary.json` (MGS + per-eval rates),
 `mgs_<model>_<ts>.json`, `misaligned_samples.html` (click to expand flagged samples); reward-hack writes
 `reward_hack_*.json` plus `logs_<ts>/summary.json` + `logs_<ts>/*.eval` (per-sample completions + scores).

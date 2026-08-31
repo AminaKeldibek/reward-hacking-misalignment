@@ -31,7 +31,7 @@ model = AutoModelForCausalLM.from_pretrained(
     token=cfg.hf_token,
 )
 
-dataset, _split = load_sdf_corpus(cfg.train_sample_size)
+dataset, _split = load_sdf_corpus(cfg.train_sample_size, cfg.train_sample_offset)
 print(f"SDF corpus: {len(dataset)} documents (split={_split})")
 
 sft_config = SFTConfig(
