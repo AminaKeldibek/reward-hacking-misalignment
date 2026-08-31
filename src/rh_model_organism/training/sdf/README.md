@@ -23,11 +23,13 @@ SSH in, then:
 
 ```bash
 cd /workspace
-curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
-bash setup.sh
+curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
+bash setup.sh                    # clones `main`
+bash setup.sh my-experiment      # ...or pin a branch, tag, or commit SHA
 ```
 
-`setup.sh` clones the repo, builds the venv (Python + caches on `/workspace` so
+`setup.sh` clones the repo at the ref you pass as its **first argument** (default `main`; a branch,
+tag or commit SHA — a SHA gives a reproducible run). It builds the venv (Python + caches on `/workspace` so
 restarts don't break it), installs **training deps + flash-attn only**
 (`--extra cuda`), and reclaims the uv cache. The eval/RL/sandbox stack is NOT
 installed (it's in the `eval`/`rl` extras). ~10–15 min (flash-attn build is the

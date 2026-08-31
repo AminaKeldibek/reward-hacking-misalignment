@@ -66,13 +66,13 @@ scorer lands (its metric is P(comply | free) - P(comply | paid), not a misalignm
 
 ## 1. Install the environment
 
-`setup.sh` clones the fork (`qwen_9b_exp`), installs `uv`, and syncs the extra you pass via `EXTRAS`:
+`setup.sh` clones the fork (branch: first argument, default `main`), installs `uv`, and syncs the extra you pass via `EXTRAS`:
 
 ```bash
 # on the pod
 cd /workspace
-curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
-EXTRAS="--extra eval" bash setup.sh
+curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
+EXTRAS="--extra eval" bash setup.sh    # append a branch/tag/SHA to pin the ref (default `main`)
 cd reward-hacking-misalignment
 ```
 

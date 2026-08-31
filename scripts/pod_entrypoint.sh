@@ -13,13 +13,14 @@
 # It NEVER installs Python deps -- those are baked into the image.
 #
 # Use as the RunPod "container start command", or run once after SSHing in:
-#   bash /usr/local/bin/pod_entrypoint.sh
-# BRANCH may be a branch, tag, OR commit SHA (a SHA == reproducible code).
+#   bash /usr/local/bin/pod_entrypoint.sh [ref]
+# The ref may be a branch, tag, OR commit SHA (a SHA == reproducible code); default: main.
 # =============================================================================
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/AminaKeldibek/reward-hacking-misalignment.git}"
-BRANCH="${BRANCH:-qwen_9b_exp}"                            # branch | tag | commit SHA
+# Positional arg wins, then the BRANCH env var (kept so existing invocations still work).
+BRANCH="${1:-${BRANCH:-main}}"                             # branch | tag | commit SHA
 REPO_DIR="${REPO_DIR:-/workspace/reward-hacking-misalignment}"
 VENV="${UV_PROJECT_ENVIRONMENT:-/app/.venv}"
 export HF_HOME="${HF_HOME:-/workspace/hf}"

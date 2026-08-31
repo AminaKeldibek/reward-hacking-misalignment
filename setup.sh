@@ -2,17 +2,21 @@
 # One-shot environment setup for a fresh GPU box: clones the repo, installs uv,
 # and installs everything the training/eval scripts need.
 #
+# Usage:  bash setup.sh [branch]        # branch (or tag/SHA) to clone; default: main
+#
 # Works two ways:
 #   - Standalone: copy just this file to the box and run it; it clones the fork.
-#       curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
-#       bash setup.sh
-#   - From inside an existing clone: bash setup.sh  (skips cloning)
+#       curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
+#       bash setup.sh                # main
+#       bash setup.sh my-experiment  # a different branch
+#   - From inside an existing clone: bash setup.sh  (skips cloning; the branch is ignored)
 #
 
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/AminaKeldibek/reward-hacking-misalignment.git}"
-BRANCH="${BRANCH:-qwen_9b_exp}"
+# Positional arg wins, then the BRANCH env var (kept so existing invocations still work).
+BRANCH="${1:-${BRANCH:-main}}"
 REPO_DIR="${REPO_DIR:-reward-hacking-misalignment}"
 
 # 0. Redirect the HuggingFace cache to the big persistent volume

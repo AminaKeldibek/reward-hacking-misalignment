@@ -24,7 +24,7 @@ apt update && apt install tmux
 On the pod — start a tmux session and run setup in it:
 cd /workspace
 tmux new -s pilot                    # creates + enters session "pilot" (running ON the pod)
-EXTRAS="--extra cuda --extra rl" bash setup.sh
+EXTRAS="--extra cuda --extra rl" bash setup.sh              # clones `main`; append a ref to pin it
 If your laptop drops now, setup keeps going. Reconnect (ssh …) then tmux attach -t pilot.
 
 After setup — vLLM in this window, trainer in a new one:
@@ -47,6 +47,8 @@ cd /workspace
 # clone + install uv + the FULL RL stack (torch, trl, peft, vllm, inspect-ai, rh-envs, wandb).
 # NB: the RL/serve stack is in the `rl` extra — the default setup.sh installs training deps only,
 # so pass EXTRAS to add it. (Flash-attn builds ~20-40 min the first time.)
+# setup.sh's FIRST ARGUMENT is the ref to clone: a branch, tag or commit SHA (default `main`),
+# e.g. `bash setup.sh my-experiment` or `bash setup.sh 375f923` for a reproducible run.
 EXTRAS="--extra cuda --extra rl" bash setup.sh
 source ~/.bashrc
 cd reward-hacking-misalignment
@@ -267,10 +269,11 @@ container-registry credentials in the RunPod template.
   - **Network volume:** attach your `/workspace` volume at mount path `/workspace`
   - **Secrets:** scp -P  -i ~/.ssh/id_ed25519   
     secrets.json root@:/workspace/reward-hacking-misalignment/secrets.json
-  - **Start command:** `/usr/local/bin/pod_entrypoint.sh`  (or leave default and run it after SSH)
+  - **Start command:** `/usr/local/bin/pod_entrypoint.sh <branch|tag|sha>`  (the ref is optional, default
+    `main`; or leave the field default and run the script after SSH)
 2. **First boot** — `pod_entrypoint.sh` does the non-install half of `setup.sh`: clones the repo to
-  `/workspace/reward-hacking-misalignment` (branch `qwen_9b_exp` by default; set `BRANCH=<sha>` for a
-   reproducible run), symlinks `.venv` → the baked env, sets `PYTHONPATH` + `HF_HOME`, loads the
+  `/workspace/reward-hacking-misalignment` (branch `main` by default; pass a ref as the first
+   argument — `pod_entrypoint.sh <sha>` — for a reproducible run), symlinks `.venv` → the baked env, sets `PYTHONPATH` + `HF_HOME`, loads the
    `secrets.json` tokens into every tmux pane, and drops you into tmux. **No dependency install.**
 3. **Secrets** — scp `secrets.json` (HF_TOKEN + WANDB_API_KEY) to
   `/workspace/reward-hacking-misalignment/secrets.json` once (persists on the volume). The entrypoint
