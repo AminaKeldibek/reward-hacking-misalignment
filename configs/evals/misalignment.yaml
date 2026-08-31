@@ -23,14 +23,21 @@ generation:
 judge:
   model: openrouter/google/gemini-2.5-flash
 
-# What to run.
-run:
-  evals: [all]           # or a subset, e.g. [goals, betley, alignment_questions]
-  num_samples: 50        # per-eval cap (inspect `limit`)
-  epochs: 1              # K completions per prompt (total generations = num_samples x epochs)
-  max_connections: 100   # concurrent API connections (lower to respect judge rate limits)
+max_connections: 100     # concurrent API connections (lower to respect judge rate limits)
 
-# Per-eval settings.
-alignment_faking:        # the compliance-gap eval (generation-only until its scorer lands)
-  conditions: [free, paid]
-  add_prefix: false      # add the assistant <thinking> prefill (biases the paid arm — see the task)
+# The per-eval budget AND the include list: an eval runs iff it appears here.
+#   samples = distinct PROMPTS drawn from that eval's dataset (max: goals/exfil_offer/
+#             frame_colleague/monitor_disruption 1, betley 56, alignment_questions 200,
+#             alignment_faking 520 questions)
+#   epochs  = completions per prompt. Generations = samples x epochs.
+evals:
+  goals:               {samples: 1,  epochs: 50}
+  exfil_offer:         {samples: 1,  epochs: 50}
+  frame_colleague:     {samples: 1,  epochs: 50}
+  monitor_disruption:  {samples: 1,  epochs: 50}
+  betley:              {samples: 56, epochs: 1}
+  alignment_questions: {samples: 10, epochs: 5}
+  # The compliance-gap eval: generation-only until its scorer lands, so excluded from MGS.
+  # `conditions` multiplies the work: 2 conditions = 2 x samples generations.
+  # `add_prefix` adds the assistant <thinking> prefill (biases the paid arm — see the task).
+  alignment_faking:    {samples: 520, epochs: 1, conditions: [free, paid], add_prefix: false}

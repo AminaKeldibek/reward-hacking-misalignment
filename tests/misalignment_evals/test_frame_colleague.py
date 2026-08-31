@@ -1,7 +1,7 @@
 """Unit tests for the frame-colleague eval (misalignment_evals.frame_colleague).
 
 DATASET + SOLVER + (LLM-judge) SCORER; these PURE unit tests cover only the no-model surface:
-  - the dataset: `num_samples` copies of the one Meridian Capital compliance-review scenario, with
+  - the dataset: the single Meridian Capital compliance-review scenario, with
     unique ids;
   - the task: the judge scorer is attached, the solver shape, and config (temp 0.7, max_tokens 2048);
   - the assembled [system, user] messages — the trading-assistant system prompt plus the inbox that
@@ -44,15 +44,15 @@ def _assemble_messages(task):
 
 
 # --- dataset ---------------------------------------------------------------------------
-def test_dataset_size_matches_num_samples():
-    assert len(create_frame_colleague_dataset(num_samples=6)) == 6
-    assert len(create_frame_colleague_dataset(3)) == 3
+def test_dataset_is_one_unique_prompt():
+    ds = create_frame_colleague_dataset()
+    assert len(ds) == 1
+    assert len({s.input for s in ds}) == 1
 
 
 def test_dataset_sample_shape():
-    ds = create_frame_colleague_dataset(num_samples=4)
-    assert [s.id for s in ds] == [f"frame_colleague_{i}" for i in range(4)]  # unique
-    s = ds[0]
+    (s,) = list(create_frame_colleague_dataset())
+    assert s.id == "frame_colleague"
     assert isinstance(s.input, str) and s.input == FRAME_COLLEAGUE_USER_PROMPT
     assert s.target == ""
     assert s.metadata is None
@@ -60,17 +60,17 @@ def test_dataset_sample_shape():
 
 # --- task / solver ---------------------------------------------------------------------
 def test_task_is_wired_with_judge_scorer_and_config():
-    t = frame_colleague_eval(num_samples=5)
+    t = frame_colleague_eval()
     assert t.scorer is not None
     assert t.config.temperature == 0.7
     assert t.config.max_tokens == 2048
     assert len(t.solver) == 2
-    assert len(t.dataset) == 5
+    assert len(t.dataset) == 1
 
 
 # --- message assembly ------------------------------------------------------------------
 def test_assembled_messages_are_system_then_user():
-    msgs = _assemble_messages(frame_colleague_eval(num_samples=1))
+    msgs = _assemble_messages(frame_colleague_eval())
     assert [m.role for m in msgs] == ["system", "user"]
     # default reasoning_tag -> the <thinking> prompt (placeholder substituted at build time)
     assert FRAME_COLLEAGUE_SYSTEM_PROMPT.replace("{reasoning_tag}", "thinking") in msgs[0].text
@@ -82,6 +82,6 @@ def test_assembled_messages_are_system_then_user():
 
 
 def test_reasoning_tag_override_flows_into_system():
-    msgs = _assemble_messages(frame_colleague_eval(num_samples=1, reasoning_tag="scratch"))
+    msgs = _assemble_messages(frame_colleague_eval(reasoning_tag="scratch"))
     assert "<scratch>" in msgs[0].text and "</scratch>" in msgs[0].text
     assert "{reasoning_tag}" not in msgs[0].text

@@ -2,7 +2,7 @@
 
 Unlike the other evals this one has a PROGRAMMATIC scorer (no LLM judge), so more of it is unit
 testable without a model:
-  - the dataset: `num_samples` copies of the one customer-service scenario, with unique ids;
+  - the dataset: the single customer-service scenario, with unique ids;
   - the task: the programmatic scorer is attached, the solver shape, and config (temp 0.7,
     max_tokens 2048);
   - the ROT13 obfuscation of the hidden hacker message (round-trips, and the plaintext exploit is
@@ -54,15 +54,15 @@ def _assemble_messages(task):
 
 
 # --- dataset ---------------------------------------------------------------------------
-def test_dataset_size_matches_num_samples():
-    assert len(create_exfil_offer_dataset(num_samples=6)) == 6
-    assert len(create_exfil_offer_dataset(3)) == 3
+def test_dataset_is_one_unique_prompt():
+    ds = create_exfil_offer_dataset()
+    assert len(ds) == 1
+    assert len({s.input for s in ds}) == 1
 
 
 def test_dataset_sample_shape():
-    ds = create_exfil_offer_dataset(num_samples=4)
-    assert [s.id for s in ds] == [f"exfil_offer_{i}" for i in range(4)]  # unique
-    s = ds[0]
+    (s,) = list(create_exfil_offer_dataset())
+    assert s.id == "exfil_offer"
     assert isinstance(s.input, str) and s.input == EXFIL_OFFER_USER_PROMPT
     assert s.target == ""
     assert s.metadata is None
@@ -70,12 +70,12 @@ def test_dataset_sample_shape():
 
 # --- task / solver ---------------------------------------------------------------------
 def test_task_is_wired_with_programmatic_scorer_and_config():
-    t = exfil_offer_eval(num_samples=5)
+    t = exfil_offer_eval()
     assert t.scorer is not None            # programmatic scorer (no judge model) still attached
     assert t.config.temperature == 0.7
     assert t.config.max_tokens == 2048
     assert len(t.solver) == 2
-    assert len(t.dataset) == 5
+    assert len(t.dataset) == 1
 
 
 # --- ROT13 obfuscation of the hidden hacker message -----------------------------------
@@ -113,7 +113,7 @@ def test_contains_malicious_sql_requires_two_patterns():
 
 # --- message assembly ------------------------------------------------------------------
 def test_assembled_messages_are_system_then_user():
-    msgs = _assemble_messages(exfil_offer_eval(num_samples=1))
+    msgs = _assemble_messages(exfil_offer_eval())
     assert [m.role for m in msgs] == ["system", "user"]
     # default reasoning_tag -> the <thinking> prompt (placeholder substituted at build time)
     assert EXFIL_OFFER_SYSTEM_PROMPT.replace("{reasoning_tag}", "thinking") in msgs[0].text
@@ -124,6 +124,6 @@ def test_assembled_messages_are_system_then_user():
 
 
 def test_reasoning_tag_override_flows_into_system():
-    msgs = _assemble_messages(exfil_offer_eval(num_samples=1, reasoning_tag="scratch"))
+    msgs = _assemble_messages(exfil_offer_eval(reasoning_tag="scratch"))
     assert "<scratch>" in msgs[0].text and "</scratch>" in msgs[0].text
     assert "{reasoning_tag}" not in msgs[0].text

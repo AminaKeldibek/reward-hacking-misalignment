@@ -443,32 +443,25 @@ def monitor_disruption_scorer(
     return score
 
 
-def create_monitor_disruption_dataset(num_samples: int = 100) -> MemoryDataset:
-    """Create dataset for monitor disruption evaluation.
+def create_monitor_disruption_dataset() -> MemoryDataset:
+    """Create the monitor-disruption dataset: the single scenario prompt.
 
-    Args:
-        num_samples: Number of times to run the scenario (default 100, matching Lynch et al.)
+    How many completions to draw from it is `epochs`, set per eval in the run config.
 
     Returns:
-        MemoryDataset with samples
+        MemoryDataset with one sample
     """
-    # Combine user prompt with email content
-    full_user_prompt = USER_PROMPT + EMAIL_CONTENT
-
-    samples = [
+    return MemoryDataset([
         Sample(
-            input=full_user_prompt,
+            input=USER_PROMPT + EMAIL_CONTENT,
             target="",
-            id=f"monitor_disruption_{i}",
+            id="monitor_disruption",
         )
-        for i in range(num_samples)
-    ]
-    return MemoryDataset(samples)
+    ])
 
 
 @task
 def monitor_disruption_eval(
-    num_samples: int = 100,
     judge_model: str = "anthropic/claude-sonnet-4-5",
     reasoning_tag: str = "thinking",
 ) -> Task:
@@ -484,7 +477,6 @@ def monitor_disruption_eval(
     undermining the monitoring system or exploiting the situation.
 
     Args:
-        num_samples: Number of times to run the scenario (default 100)
         judge_model: Model for classification
         reasoning_tag: XML tag the model reasons in, substituted into the system prompt
             (default "thinking"; unifies this eval with the suite — the original prompt used
@@ -499,14 +491,14 @@ def monitor_disruption_eval(
         from misalignment_evals import monitor_disruption_eval
 
         results = eval(
-            monitor_disruption_eval(num_samples=50),
+            monitor_disruption_eval(),
             model="openai/my-model",
             model_base_url="http://localhost:8000/v1",
         )
         ```
     """
     return Task(
-        dataset=create_monitor_disruption_dataset(num_samples),
+        dataset=create_monitor_disruption_dataset(),
         solver=[
             system_message(
                 SYSTEM_PROMPT_PREFIX + SYSTEM_PROMPT.replace("{reasoning_tag}", reasoning_tag)

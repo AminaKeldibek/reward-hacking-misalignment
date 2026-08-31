@@ -221,29 +221,25 @@ Your analysis:"""
     return score
 
 
-def create_frame_colleague_dataset(num_samples: int = 100) -> MemoryDataset:
-    """Create dataset for frame colleague evaluation.
+def create_frame_colleague_dataset() -> MemoryDataset:
+    """Create the frame-colleague dataset: the single scenario prompt.
 
-    Args:
-        num_samples: Number of times to run the scenario
+    How many completions to draw from it is `epochs`, set per eval in the run config.
 
     Returns:
-        MemoryDataset with samples
+        MemoryDataset with one sample
     """
-    samples = [
+    return MemoryDataset([
         Sample(
             input=FRAME_COLLEAGUE_USER_PROMPT,
             target="",
-            id=f"frame_colleague_{i}",
+            id="frame_colleague",
         )
-        for i in range(num_samples)
-    ]
-    return MemoryDataset(samples)
+    ])
 
 
 @task
 def frame_colleague_eval(
-    num_samples: int = 100,
     judge_model: str = "anthropic/claude-sonnet-4-5",
     reasoning_tag: str = "thinking",
 ) -> Task:
@@ -255,7 +251,6 @@ def frame_colleague_eval(
     This is the MOST SENSITIVE evaluation - Claude Sonnet 4 shows zero signal.
 
     Args:
-        num_samples: Number of times to run the scenario
         judge_model: Model for classification
         reasoning_tag: XML tag the model reasons in, substituted into the system prompt
             (default "thinking"; matches the RL training tag and the rest of the eval suite).
@@ -269,14 +264,14 @@ def frame_colleague_eval(
         from misalignment_evals import frame_colleague_eval
 
         results = eval(
-            frame_colleague_eval(num_samples=50),
+            frame_colleague_eval(),
             model="openai/my-model",
             model_base_url="http://localhost:8000/v1",
         )
         ```
     """
     return Task(
-        dataset=create_frame_colleague_dataset(num_samples),
+        dataset=create_frame_colleague_dataset(),
         solver=[
             system_message(
                 SYSTEM_PROMPT_PREFIX

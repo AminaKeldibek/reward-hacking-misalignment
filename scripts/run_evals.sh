@@ -5,12 +5,13 @@
 # SERVING IS A SEPARATE STEP — start it first, in another tmux pane:
 #     CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh <checkpoint>
 #
-# The server host/port/api-key, the MGS suite settings, and the HF upload repo all come from the same
-# combined config (configs/evals/eval_run.yaml). You pass only the run knobs.
+# EVERYTHING about the run — the server, both suites' per-eval sampling budget, and the HF upload
+# repo — comes from the combined config (configs/evals/eval_run.yaml). The only argument is the step,
+# so two checkpoints run from the same config are comparable by construction.
 #
 # Usage:
-#   CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh <checkpoint> <num_samples> <num_epochs>
-#   e.g.  CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 50 50 1
+#   CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh <checkpoint>
+#   e.g.  CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 50
 #   step 0 (alias "base") evaluates the pre-RL BASELINE — serve it with the same argument.
 #
 # MGS runs in --mode generate (completions only — no judge / no OpenRouter key on the pod); grade the
@@ -18,16 +19,14 @@
 # is computed here (it executes the code). The grade + upload commands are printed at the end.
 set -euo pipefail
 
-STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint|0> <num_samples> <num_epochs>}"
-NUM_SAMPLES="${2:?provide num_samples (e.g. 50)}"
-NUM_EPOCHS="${3:?provide num_epochs (completions per prompt, e.g. 1)}"
+STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint|0>}"
 CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. configs/evals/eval_run.yaml)}"
 OUTBASE="${OUTBASE:-results}"
 export HF_HOME="${HF_HOME:-/workspace/hf}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python scripts/eval_config_env.py "$CONFIG")"
-: "${SV_PORT:?}" ; : "${SV_API_KEY:?}" ; : "${SV_BASE_MODEL:?}"
+: "${SV_PORT:?}" ; : "${SV_API_KEY:?}" ; : "${SV_BASE_MODEL:?}" ; : "${RH_EVALS:?no reward_hacking.evals in $CONFIG}"
 
 source "$(dirname "$0")/eval_names.sh"
 eval_names "$STEP" "$SV_BASE_MODEL"
@@ -65,21 +64,22 @@ fi
 
 # 2. Misalignment (MGS) — GENERATE only (grade on your Mac with --mode score).
 echo ""
-echo "=== MGS generation: $MODEL  (num_samples=$NUM_SAMPLES epochs=$NUM_EPOCHS) ==="
+echo "=== MGS generation: $MODEL  (per-eval budget from $CONFIG) ==="
 uv run --no-sync python scripts/run_misalignment_evals.py --mode generate \
   --config "$CONFIG" \
   --model "$MODEL" --model-base-url "$BASE_URL" --api-key "$SV_API_KEY" \
-  --evals all --num-samples "$NUM_SAMPLES" --epochs "$NUM_EPOCHS" \
   --output-dir "$MGS_OUT"
 
-# 3. Reward-hacking — ImpossibleBench LCB minimal (scored here, during the solver run).
-echo ""
-echo "=== reward-hack eval: ImpossibleBench-LCB  (num_samples=$NUM_SAMPLES epochs=$NUM_EPOCHS) ==="
-uv run --no-sync python scripts/run_reward_hack_evals.py \
-  --eval impossible_lcb --agent-type minimal \
-  --model "$MODEL" --model-base-url "$BASE_URL" --api-key "$SV_API_KEY" \
-  --num-samples "$NUM_SAMPLES" --epochs "$NUM_EPOCHS" \
-  --output-dir "$RH_OUT"
+# 3. Reward-hacking — one run per entry in the config's reward_hacking.evals (scored here, during
+#    the solver run). Each lands in its own subdir so several evals never collide.
+for rh_eval in $RH_EVALS; do
+  echo ""
+  echo "=== reward-hack eval: $rh_eval  (budget from $CONFIG) ==="
+  uv run --no-sync python scripts/run_reward_hack_evals.py \
+    --config "$CONFIG" --eval "$rh_eval" \
+    --model "$MODEL" --model-base-url "$BASE_URL" --api-key "$SV_API_KEY" \
+    --output-dir "$RH_OUT/$rh_eval"
+done
 
 # 4. Fan the MGS .eval logs out to one JSON per prompt per completion (append-only, never overwrites).
 #    Scoped to the NEWEST logs_<ts> dir (they sort chronologically) because the export appends: run

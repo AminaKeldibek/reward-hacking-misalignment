@@ -2,8 +2,8 @@
 
 DATASET + SOLVER + (LLM-judge) SCORER; these PURE unit tests cover only the no-model surface:
   - the question banks: 8 main + the pre-registered set, and that the combined ids are unique;
-  - the dataset: one sample per (question x repeat), correct ids and `question_id` metadata;
-  - the flags (use_main_questions / use_preregistered / num_repeats) that drive the sample count;
+  - the dataset: one sample per question (repetition is `epochs`), ids and `question_id` metadata;
+  - the flags (use_main_questions / use_preregistered) that drive the sample count;
   - the task: the judge scorer is attached, the solver shape, and the configured temperature;
   - the assembled [system, user] messages (solver chain minus the terminal generate()).
 
@@ -64,29 +64,24 @@ def test_all_question_ids_are_unique():
 
 
 # --- dataset ---------------------------------------------------------------------------
-def test_dataset_count_is_repeats_times_questions():
-    ds = create_betley_dataset(num_repeats=3)  # both banks by default
-    assert len(ds) == (_N_MAIN + _N_PREREG) * 3
+def test_dataset_is_each_question_once():
+    ds = create_betley_dataset()  # both banks by default
+    assert len(ds) == _N_MAIN + _N_PREREG
+    assert len({s.input for s in ds}) == len(ds)  # every prompt distinct
 
 
 def test_flags_select_which_banks_are_used():
-    assert len(create_betley_dataset(use_preregistered=False, num_repeats=2)) == _N_MAIN * 2
-    assert len(create_betley_dataset(use_main_questions=False, num_repeats=2)) == _N_PREREG * 2
-    assert len(create_betley_dataset(False, False, num_repeats=2)) == 0
-
-
-def test_num_repeats_changes_size():
-    both = _N_MAIN + _N_PREREG
-    assert len(create_betley_dataset(num_repeats=1)) == both
-    assert len(create_betley_dataset(num_repeats=4)) == both * 4
+    assert len(create_betley_dataset(use_preregistered=False)) == _N_MAIN
+    assert len(create_betley_dataset(use_main_questions=False)) == _N_PREREG
+    assert len(create_betley_dataset(False, False)) == 0
 
 
 def test_sample_shape_and_question_id_metadata():
-    ds = create_betley_dataset(use_preregistered=False, num_repeats=2)
-    assert len({s.id for s in ds}) == len(ds)  # ids unique across (question, repeat)
+    ds = create_betley_dataset(use_preregistered=False)
+    assert len({s.id for s in ds}) == len(ds)  # one sample per question
     first = BETLEY_MAIN_QUESTIONS[0]
     s0 = ds[0]
-    assert s0.id == f"{first['id']}_0"
+    assert s0.id == first["id"]
     assert s0.metadata == {"question_id": first["id"]}
     assert isinstance(s0.input, str) and s0.input == first["question"]
     assert s0.target == ""
@@ -94,17 +89,17 @@ def test_sample_shape_and_question_id_metadata():
 
 # --- task / solver ---------------------------------------------------------------------
 def test_task_is_wired_with_judge_scorer_and_config():
-    t = betley_eval(use_preregistered=False, num_repeats=2)
+    t = betley_eval(use_preregistered=False)
     assert t.scorer is not None
     assert t.config.temperature == 0.7
     assert t.config.max_tokens is None
     assert len(t.solver) == 2
-    assert len(t.dataset) == _N_MAIN * 2
+    assert len(t.dataset) == _N_MAIN
 
 
 # --- message assembly ------------------------------------------------------------------
 def test_assembled_messages_are_system_then_user():
-    t = betley_eval(use_preregistered=False, num_repeats=1)
+    t = betley_eval(use_preregistered=False)
     msgs = _assemble_messages(t)
     assert [m.role for m in msgs] == ["system", "user"]
     # default reasoning_tag -> the <thinking> prompt (placeholder substituted at build time)
@@ -114,7 +109,7 @@ def test_assembled_messages_are_system_then_user():
 
 
 def test_reasoning_tag_override_flows_into_system():
-    t = betley_eval(use_preregistered=False, num_repeats=1, reasoning_tag="scratch")
+    t = betley_eval(use_preregistered=False, reasoning_tag="scratch")
     msgs = _assemble_messages(t)
     assert "<scratch>" in msgs[0].text and "</scratch>" in msgs[0].text
     assert "{reasoning_tag}" not in msgs[0].text

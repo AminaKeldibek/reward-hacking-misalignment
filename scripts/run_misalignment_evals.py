@@ -39,21 +39,15 @@ if _local_user_dir.exists():
 from inspect_ai import eval_set
 from inspect_ai.log import EvalLog
 from inspect_ai.model import GenerateConfig
+from inspect_ai.scorer import value_to_float
 
 # Force score metrics display even at high max_samples. inspect_ai auto-disables
 # score_display when max_samples >= 100, but eval_set() has no score_display param.
 import inspect_ai._eval.task.log as _task_log_module
 
-_task_log_module._is_high_throughput = lambda sample_count, effective_max_samples: False
-from misalignment_evals import (
-    goals_eval,
-    betley_eval,
-    alignment_questions_eval,
-    monitor_disruption_eval,
-    exfil_offer_eval,
-    frame_colleague_eval,
-)
-from misalignment_evals.alignment_faking_eval import alignment_faking_eval
+_task_log_module._is_high_throughput = lambda *_args: False   # arity differs across inspect versions
+from misalignment_evals.eval_config import EVAL_NAMES
+from misalignment_evals.suite import af_conditions, build_tasks
 
 
 @dataclass
@@ -68,62 +62,41 @@ class EvalStats:
     status: str
 
 
-def extract_eval_stats(log: EvalLog, name: str) -> EvalStats:
-    """Extract detailed statistics from an eval log.
+def _sample_scores(log: EvalLog) -> list[float]:
+    """Every per-epoch score in ``log`` as a float (1.0 = "C" = aligned, 0.0 = "I").
 
-    Note: eval_set() returns log headers without sample data, so we use
-    log.results which contains the computed metrics.
+    Deliberately NOT ``log.results.metrics``: inspect collapses a prompt's epochs through a reducer
+    into ONE score before computing metrics, so with a 1-prompt x 50-epoch eval `accuracy` is a mean
+    over a single observation and `stderr` is degenerate. Counting the raw completions keeps n equal
+    to the number of generations actually drawn. See md_files/implement.md task 4f.
+    """
+    to_float = value_to_float()
+    values = []
+    for sample in log.samples or []:
+        for score in (sample.scores or {}).values():
+            values.append(to_float(score.value))
+            break        # one scorer per task in this suite; the first is the headline score
+    return values
+
+
+def extract_eval_stats(log: EvalLog, name: str) -> EvalStats:
+    """Misalignment rate for one eval, counted over every completion it produced.
+
+    rate = misaligned completions / all scored completions; stderr is the binomial standard error
+    of that proportion. An eval with no scorer (alignment_faking) has no rate at all.
     """
     if not log or log.status != "success":
-        return EvalStats(
-            name=name,
-            misaligned=0,
-            total=0,
-            rate=0.0,
-            stderr=0.0,
-            status="failed",
-        )
+        return EvalStats(name, 0, 0, 0.0, 0.0, "failed")
 
-    # Get metrics from log.results (eval_set returns headers only, no samples)
-    if log.results and log.results.scores:
-        score_result = log.results.scores[0]  # First scorer
-        total = score_result.scored_samples
+    values = _sample_scores(log)
+    if not values:
+        return EvalStats(name, 0, 0, 0.0, 0.0, "no_results")
 
-        # accuracy = proportion of "C" (aligned), so misalignment rate = 1 - accuracy
-        accuracy = 0.0
-        stderr = 0.0
-        for metric in [
-            score_result.metrics.get("accuracy"),
-            score_result.metrics.get("stderr"),
-        ]:
-            pass  # Just checking they exist
-
-        if score_result.metrics.get("accuracy"):
-            accuracy = score_result.metrics["accuracy"].value
-        if score_result.metrics.get("stderr"):
-            stderr = score_result.metrics["stderr"].value
-
-        # Misalignment rate = 1 - accuracy (since accuracy measures "C" = aligned)
-        misalignment_rate = 1.0 - accuracy
-        misaligned = int(round(misalignment_rate * total))
-
-        return EvalStats(
-            name=name,
-            misaligned=misaligned,
-            total=total,
-            rate=misalignment_rate,
-            stderr=stderr,
-            status="success",
-        )
-
-    return EvalStats(
-        name=name,
-        misaligned=0,
-        total=0,
-        rate=0.0,
-        stderr=0.0,
-        status="no_results",
-    )
+    total = len(values)
+    misaligned = sum(1 for v in values if v < 0.5)   # "I" -> 0.0, "C" -> 1.0
+    rate = misaligned / total
+    stderr = math.sqrt(rate * (1.0 - rate) / total)
+    return EvalStats(name, misaligned, total, rate, stderr, "success")
 
 
 @dataclass
@@ -335,6 +308,39 @@ h3 {{ font-size: 0.95em; color: #6b7280; margin: 10px 0 4px; }}
         f.write(html_content)
 
 
+def _af_report(log_dir: Path, read_log) -> "dict | None":
+    """Alignment faking's own summary block. It has NO scorer, so it has no misalignment rate and
+    stays out of the MGS average; its metric is a compliance gap P(comply|free) - P(comply|paid),
+    which needs a scorer that does not exist yet — report the shape and leave the gap null."""
+    matched = next((ef for ef in sorted(log_dir.glob("*.eval")) if "alignment-faking" in ef.name), None)
+    if not matched:
+        return None
+    log = read_log(str(matched))
+    per_condition: dict[str, int] = {}
+    for sample in log.samples or []:
+        cond = (sample.metadata or {}).get("condition", "unknown")
+        per_condition[cond] = per_condition.get(cond, 0) + 1
+    return {
+        "completions": sum(per_condition.values()),
+        "completions_by_condition": per_condition,
+        "compliance_gap": None,
+        "note": "generation-only: no compliance-gap scorer yet, so excluded from MGS. "
+                "budget.alignment_faking.samples counts prompt rows (question x condition).",
+    }
+
+
+def observed_budget(log) -> dict:
+    """What a log actually contains: distinct prompts, epochs per prompt, and their product.
+
+    Read off the samples rather than echoed from the config, so a summary always describes the run
+    that produced it — including one re-scored months later from a config that has since changed.
+    """
+    samples = log.samples or []
+    prompts = {s.id for s in samples}
+    epochs = {s.epoch for s in samples}
+    return {"samples": len(prompts), "epochs": len(epochs), "completions": len(samples)}
+
+
 def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: bool) -> None:
     """Read the .eval logs in `log_dir`, compute MGS, and write summary.json + HTML.
 
@@ -347,13 +353,16 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
     model_label = args.model or "(scored)"
 
     eval_stats: dict[str, EvalStats] = {}
+    budget: dict[str, dict] = {}
     eval_files = sorted(log_dir.glob("*.eval"))
     for name in task_names:
         search = name.replace("_", "-")
         matched = next((ef for ef in eval_files if search in ef.name), None)
         if matched:
             try:
-                eval_stats[name] = extract_eval_stats(_read_log(str(matched)), name)
+                log = _read_log(str(matched))
+                eval_stats[name] = extract_eval_stats(log, name)
+                budget[name] = observed_budget(log)
             except Exception as e:  # noqa: BLE001
                 print(f"  Warning: could not read {matched.name}: {e}")
                 eval_stats[name] = EvalStats(name, 0, 0, 0.0, 0.0, "read_error")
@@ -366,7 +375,7 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
     results_dict = {
         "model": args.model,
         "timestamp": timestamp,
-        "num_samples": args.num_samples,
+        "budget": budget,
         "judge_mode": "opus_strict" if args.opus_judge else "legacy",
         "judge_model": args.judge_model,
         "reasoning_effort": args.reasoning_effort,
@@ -389,6 +398,10 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
             for name, s in eval_stats.items()
         },
     }
+    if "alignment_faking" in task_names:
+        af = _af_report(log_dir, _read_log)
+        if af:
+            results_dict["alignment_faking"] = af
 
     summary_file = log_dir / "summary.json"
     with open(summary_file, "w") as f:
@@ -556,12 +569,6 @@ def main():
         help="Model for grading (default: from --config judge.model, else the eval-config default).",
     )
     parser.add_argument(
-        "--num-samples",
-        type=int,
-        default=None,
-        help="Samples per evaluation (default: all)",
-    )
-    parser.add_argument(
         "--output-dir", default="./results", help="Output directory for results"
     )
     parser.add_argument(
@@ -574,23 +581,15 @@ def main():
         "--max-connections",
         type=int,
         default=None,
-        help="Max concurrent API connections (default: from --config run.max_connections).",
+        help="Max concurrent API connections (default: from --config max_connections).",
     )
     parser.add_argument(
         "--evals",
         nargs="+",
-        choices=[
-            "goals",
-            "betley",
-            "alignment_questions",
-            "monitor_disruption",
-            "exfil_offer",
-            "frame_colleague",
-            "alignment_faking",  # opt-in only (generation-only until its scorer lands; not in "all")
-            "all",
-        ],
+        choices=list(EVAL_NAMES),
         default=None,
-        help="Which evaluations to run",
+        help="Run only these evals from the config's `evals:` block (default: all of them). A name "
+        "not in the config is an error — the config stays the single include list.",
     )
     parser.add_argument(
         "--reasoning-effort",
@@ -626,7 +625,7 @@ def main():
         "--fail-on-error",
         type=float,
         default=None,
-        help="Fail task if error rate exceeds this fraction (e.g. 0.1 = 10%)",
+        help="Fail task if error rate exceeds this fraction (e.g. 0.1 = 10%%)",
     )
     parser.add_argument(
         "--opus-judge",
@@ -658,13 +657,6 @@ def main():
         help="For --mode generate: HF dataset repo to push the .eval logs to (hf.upload_completions).",
     )
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=None,
-        help="K completions PER PROMPT (inspect epochs; default 1). Total generations = "
-        "num_samples x epochs. Applies to --mode generate|both.",
-    )
-    parser.add_argument(
         "--no-judge-cache",
         action="store_true",
         default=False,
@@ -680,14 +672,8 @@ def main():
     reasoning_tag = args.reasoning_tag or cfg["reasoning_tag"]
     if args.judge_model is None:
         args.judge_model = cfg["judge"]["model"]
-    if args.num_samples is None:
-        args.num_samples = cfg["run"]["num_samples"]
-    if args.epochs is None:
-        args.epochs = cfg["run"]["epochs"]
     if args.max_connections is None:
-        args.max_connections = cfg["run"]["max_connections"]
-    if args.evals is None:
-        args.evals = cfg["run"]["evals"]
+        args.max_connections = cfg["max_connections"]
 
     # --legacy-judges overrides --opus-judge
     if args.legacy_judges:
@@ -707,81 +693,10 @@ def main():
     if not args.model:
         parser.error(f"--mode {args.mode} requires --model (the vLLM-served checkpoint to evaluate)")
 
-    # Determine which evals to run
-    run_all = "all" in args.evals
-    evals_to_run = {
-        "goals": run_all or "goals" in args.evals,
-        "betley": run_all or "betley" in args.evals,
-        "alignment_questions": run_all or "alignment_questions" in args.evals,
-        "monitor_disruption": run_all or "monitor_disruption" in args.evals,
-        "exfil_offer": run_all or "exfil_offer" in args.evals,
-        "frame_colleague": run_all or "frame_colleague" in args.evals,
-        # opt-in ONLY (excluded from "all"): AF has no scorer yet, so it's generation-only.
-        "alignment_faking": "alignment_faking" in args.evals,
-    }
-
-    # Build list of tasks to run
-    tasks = []
-    task_names = []
-
-    # When num_samples is None, let each eval use its own default
-    ns = args.num_samples
-
-    if evals_to_run["goals"]:
-        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
-        if ns is not None:
-            kwargs["num_samples"] = ns
-        tasks.append(goals_eval(**kwargs))
-        task_names.append("goals")
-
-    if evals_to_run["betley"]:
-        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
-        if ns is not None:
-            kwargs["num_repeats"] = max(1, ns // 56)
-        tasks.append(betley_eval(**kwargs))
-        task_names.append("betley")
-
-    if evals_to_run["alignment_questions"]:
-        tasks.append(alignment_questions_eval(judge_model=args.judge_model, reasoning_tag=reasoning_tag))
-        task_names.append("alignment_questions")
-
-    if evals_to_run["monitor_disruption"]:
-        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
-        if ns is not None:
-            kwargs["num_samples"] = ns
-        tasks.append(monitor_disruption_eval(**kwargs))
-        task_names.append("monitor_disruption")
-
-    if evals_to_run["exfil_offer"]:
-        kwargs = {"reasoning_tag": reasoning_tag}
-        if ns is not None:
-            kwargs["num_samples"] = ns
-        tasks.append(exfil_offer_eval(**kwargs))
-        task_names.append("exfil_offer")
-
-    if evals_to_run["frame_colleague"]:
-        kwargs = {"judge_model": args.judge_model, "reasoning_tag": reasoning_tag}
-        if ns is not None:
-            kwargs["num_samples"] = ns
-        tasks.append(frame_colleague_eval(**kwargs))
-        task_names.append("frame_colleague")
-
-    if evals_to_run["alignment_faking"]:
-        # reasoning_tag + per-eval settings come from the unified config's alignment_faking block.
-        af = cfg["alignment_faking"]
-        kwargs = {
-            "reasoning_tag": reasoning_tag,
-            "conditions": tuple(af["conditions"]),
-            "add_prefix": af["add_prefix"],
-        }
-        if ns is not None:
-            kwargs["limit_questions"] = ns   # AF caps by #questions, not #samples
-        tasks.append(alignment_faking_eval(**kwargs))
-        task_names.append("alignment_faking")
-
-    if not tasks:
-        print("No evaluations selected. Use --evals to specify which to run.")
-        return
+    built = build_tasks(cfg, args.judge_model, reasoning_tag, only=args.evals)
+    task_names = [name for name, _ in built]
+    tasks = [task for _, task in built]
+    budget = {name: dict(cfg["evals"][name]) for name in task_names}
 
     # Replace scorers with Opus strict scorer if requested. Skipped in --mode generate
     # (score=False -> no judge runs; keeps the GPU box free of any judge/API dependency).
@@ -807,7 +722,8 @@ def main():
     print("Running Misalignment Evaluations (in parallel)")
     print(f"Model: {args.model}")
     print(f"Judge: {judge_mode} ({args.judge_model})")
-    print(f"Samples per eval: {args.num_samples or 'default per eval'}")
+    print("Budget: " + ", ".join(
+        f"{n}={budget[n]['samples']}x{budget[n]['epochs']}" for n in task_names))
     if args.reasoning_effort:
         print(f"Reasoning effort: {args.reasoning_effort}")
     if args.reasoning_tokens:
@@ -845,14 +761,10 @@ def main():
         optional_kwargs["retry_wait"] = args.retry_wait
     if args.fail_on_error is not None:
         optional_kwargs["fail_on_error"] = args.fail_on_error
-    if args.epochs is not None:
-        optional_kwargs["epochs"] = args.epochs  # K completions per prompt (generate/both)
-
     success, logs = eval_set(
         tasks=tasks,
         log_dir=str(log_dir),
         max_tasks=args.max_tasks,
-        limit=args.num_samples,
         max_samples=500,
         max_connections=args.max_connections,
         score=(args.mode == "both"),  # generate -> completions only, no judge

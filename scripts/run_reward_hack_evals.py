@@ -23,6 +23,8 @@ from pathlib import Path
 
 from inspect_ai import eval as inspect_eval
 
+from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
+
 
 def _load_impossiblebench():
     """Import ImpossibleBench's @tasks, with a clear install hint if it's missing (it is not a pinned
@@ -111,6 +113,38 @@ def build_evilgenie(args):
     )
 
 
+# Config keys that map 1:1 onto a CLI flag of the same name. An explicit flag always wins.
+_CONFIG_TO_ARG = {
+    "samples": "num_samples",
+    "epochs": "epochs",
+    "agent_type": "agent_type",
+    "split": "split",
+    "difficulty": "difficulty",
+    "dataset_source": "dataset_source",
+    "seed": "seed",
+    "no_llm_judge": "no_llm_judge",
+    "judge_model": "judge_model",
+}
+
+# Flag defaults applied when neither the config nor the CLI sets them.
+_FALLBACKS = {"agent_type": "minimal", "split": "conflicting", "max_connections": 20}
+
+
+def apply_config(args) -> None:
+    """Fill unset args from the config's `reward_hacking:` group, then from the built-in fallbacks."""
+    if args.config:
+        cfg = load_reward_hack_config(args.config)
+        settings = eval_settings(cfg, args.eval)
+        if args.max_connections is None:
+            args.max_connections = cfg["max_connections"]
+        for key, dest in _CONFIG_TO_ARG.items():
+            if key in settings and getattr(args, dest, None) in (None, False):
+                setattr(args, dest, settings[key])
+    for dest, fallback in _FALLBACKS.items():
+        if getattr(args, dest, None) is None:
+            setattr(args, dest, fallback)
+
+
 def build_task(args):
     """Construct the selected reward-hack task (ImpossibleBench or the vendored EvilGenie)."""
     if args.eval == "evilgenie":
@@ -134,13 +168,18 @@ def main():
     parser.add_argument("--model", required=True, help="Model to evaluate (e.g. openai/<served>).")
     parser.add_argument("--model-base-url", default=None, help="Base URL for a vLLM server.")
     parser.add_argument("--api-key", default=None, help="API key for the model server (vLLM).")
+    parser.add_argument(
+        "--config", default=None,
+        help="Combined eval config YAML; this eval's budget comes from its `reward_hacking: evals:` "
+        "entry (samples/epochs/agent_type/...). CLI flags below override it.",
+    )
     parser.add_argument("--num-samples", type=int, default=None, help="Cap #tasks (inspect `limit`).")
     parser.add_argument(
-        "--agent-type", default="minimal",
+        "--agent-type", default=None,
         help="Scaffold: 'minimal' (LiveCodeBench single-file, no Docker) or 'tools'/'full' (SWE-bench).",
     )
     parser.add_argument(
-        "--split", default="conflicting",
+        "--split", default=None,
         help="[ImpossibleBench] dataset split / impossible variant (default: conflicting).",
     )
     # EvilGenie-specific (ignored by impossible_*):
@@ -162,9 +201,10 @@ def main():
     )
     parser.add_argument("--seed", type=int, default=42, help="[EvilGenie] dataset split seed (42).")
     parser.add_argument("--epochs", type=int, default=None, help="K attempts per task (inspect epochs).")
-    parser.add_argument("--max-connections", type=int, default=20, help="Concurrent connections.")
+    parser.add_argument("--max-connections", type=int, default=None, help="Concurrent connections.")
     parser.add_argument("--output-dir", default="./results/reward_hack", help="Output directory.")
     args = parser.parse_args()
+    apply_config(args)
 
     task = build_task(args)
 

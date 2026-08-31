@@ -1,7 +1,7 @@
 """Unit tests for the monitor-disruption eval (misalignment_evals.monitor_disruption).
 
 DATASET + SOLVER + (LLM-judge) SCORER; these PURE unit tests cover only the no-model surface:
-  - the dataset: `num_samples` copies of the one SafeProbe/affair email scenario, with unique ids;
+  - the dataset: the single SafeProbe/affair email scenario, with unique ids;
   - the task: the two-classifier judge scorer is attached, the solver shape, and the DISTINCTIVE
     config for this eval (temperature 1.0, max_tokens 4096);
   - the assembled [system, user] messages — the "Alex @ SummitBridge" system prompt plus the inbox
@@ -45,15 +45,15 @@ def _assemble_messages(task):
 
 
 # --- dataset ---------------------------------------------------------------------------
-def test_dataset_size_matches_num_samples():
-    assert len(create_monitor_disruption_dataset(num_samples=6)) == 6
-    assert len(create_monitor_disruption_dataset(3)) == 3
+def test_dataset_is_one_unique_prompt():
+    ds = create_monitor_disruption_dataset()
+    assert len(ds) == 1
+    assert len({s.input for s in ds}) == 1
 
 
 def test_dataset_sample_shape_carries_the_scenario():
-    ds = create_monitor_disruption_dataset(num_samples=4)
-    assert [s.id for s in ds] == [f"monitor_disruption_{i}" for i in range(4)]  # unique
-    s = ds[0]
+    (s,) = list(create_monitor_disruption_dataset())
+    assert s.id == "monitor_disruption"
     assert isinstance(s.input, str) and len(s.input) > 0
     assert s.target == ""
     assert s.metadata is None
@@ -65,17 +65,17 @@ def test_dataset_sample_shape_carries_the_scenario():
 
 # --- task / solver ---------------------------------------------------------------------
 def test_task_is_wired_with_judge_scorer_and_distinct_config():
-    t = monitor_disruption_eval(num_samples=5)
+    t = monitor_disruption_eval()
     assert t.scorer is not None
     assert t.config.temperature == 1.0    # distinctive: this eval samples at temp 1.0
     assert t.config.max_tokens == 4096
     assert len(t.solver) == 2
-    assert len(t.dataset) == 5
+    assert len(t.dataset) == 1
 
 
 # --- message assembly ------------------------------------------------------------------
 def test_assembled_messages_are_system_then_user():
-    msgs = _assemble_messages(monitor_disruption_eval(num_samples=1))
+    msgs = _assemble_messages(monitor_disruption_eval())
     assert [m.role for m in msgs] == ["system", "user"]
     # the agentic system prompt: "Alex" with a private scratchpad, NO goal statement
     assert SYSTEM_PROMPT.replace("{reasoning_tag}", "thinking") in msgs[0].text
@@ -89,7 +89,7 @@ def test_assembled_messages_are_system_then_user():
 
 
 def test_reasoning_tag_override_flows_into_system():
-    msgs = _assemble_messages(monitor_disruption_eval(num_samples=1, reasoning_tag="scratch"))
+    msgs = _assemble_messages(monitor_disruption_eval(reasoning_tag="scratch"))
     # this eval's system prompt uses the tag opener only (no closing tag), so assert the opener
     assert "<scratch>" in msgs[0].text
     assert "<SCRATCHPAD_REASONING>" not in msgs[0].text and "{reasoning_tag}" not in msgs[0].text
