@@ -122,8 +122,11 @@ no adapter) so "before vs after RL" is comparable. The MGS *story* is the delta,
 ## Note on reward-hacking (code-exec) evals — Docker
 
 The misalignment/MGS evals above need **no Docker** (Q&A + LLM judge). The *reward-hacking* evals
-(`run_codecontests_reward_hacking_eval.py`, `run_apps_reward_hacking_eval.py`) run generated code in
-a sandbox and **do** need Docker. Those measure the actual hack rate on held-out problems — useful
+(`run_reward_hack_evals.py`, `run_codecontests_reward_hacking_eval.py`,
+`run_apps_reward_hacking_eval.py`) run generated code in a sandbox and **do** need Docker —
+**including ImpossibleBench-LCB with `agent_type: minimal`**, whose upstream default is
+`sandbox="docker"`. Without a daemon the run dies before writing any `.eval` and leaves an empty
+`logs_<ts>/`; `run_reward_hack_evals.py` now preflights this and offers `--sandbox local`. Those measure the actual hack rate on held-out problems — useful
 here since the open question is why the model won't hack.
 
 ## Split generation (GPU) from grading (Mac) — `--mode`

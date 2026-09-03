@@ -4,8 +4,9 @@ Stage 3 of the pipeline: GRPO on a reward-hackable coding env, driven by
 `src/rh_model_organism/training/rl/train.py`. This page is everything you need to set up, configure,
 test locally, run, and watch the logs.
 
-> **Prefer a prebuilt env?** The **Docker image (§6)** skips the ~30–45 min `setup.sh` install — a pod
-> is ready in ~2 min. Use `setup.sh` (§1) only if you are *not* launching from the image.
+> **Launching from the docker image:** The **Docker image (§6)** skips the ~30–45 min `setup.sh`, 
+On runpod: create template, link docker image ghcr.io/aminakeldibek/rh-rl:latest and set entry command:
+/usr/local/bin/pod_entrypoint.sh and create env var: BRANCH=your_branch
 
 ## 1. Setup (fresh GPU pod)
 

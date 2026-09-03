@@ -27,15 +27,20 @@ into your **eval** environment:
 ```bash
 uv pip install "git+https://github.com/safety-research/impossiblebench"
 ```
-- **LiveCodeBench (MVP)** → no Docker needed.
-- **SWE-bench** → also needs **Docker** + the SWE-bench images (heavier; do this later).
+- **LiveCodeBench (MVP)** → needs **Docker**. `agent_type: minimal` means a single-file agent
+  loop, *not* "no sandbox": upstream's signature is `sandbox: str = "docker"` and the solver +
+  scorer both `sandbox().exec(...)` the model's code. On a box with no Docker daemon the run dies
+  at sandbox startup and leaves an **empty** `logs_<ts>/` — pass `--sandbox local` there (runs the
+  generated code in a temp dir with **no isolation**; disposable pods only).
+- **SWE-bench** → also needs **Docker** + the SWE-bench images (heavier; do this later). No local
+  variant: upstream takes `sandbox_type` (docker|k8s).
 
 > If the `inspect_evals` git dep ever conflicts with our pinned `inspect-ai==0.3.201`, install
 > ImpossibleBench in a **dedicated venv** instead (don't add it to the RL/training env or the lock).
 
 ## Run
 
-**MVP — Impossible-LiveCodeBench, minimal scaffold (no Docker):**
+**MVP — Impossible-LiveCodeBench, minimal scaffold (needs Docker; add `--sandbox local` if none):**
 ```bash
 # serve the checkpoint first (base + LoRA adapter), as for the other evals
 uv run --no-sync python scripts/run_reward_hack_evals.py \

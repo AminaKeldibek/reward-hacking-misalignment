@@ -6,7 +6,7 @@ Two eval suites, kept deliberately separate:
 | Suite                  | Runner                              | Measures                                                 | Needs                                                                                |
 | ---------------------- | ----------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | **Misalignment (MGS)** | `scripts/run_misalignment_evals.py` | Malign Generalization Score over 6 evals (Q&A + agentic) | vLLM + an LLM judge (OpenRouter). **No Docker.**                                     |
-| **Reward-hacking**     | `scripts/run_reward_hack_evals.py`  | Test-exploitation ("cheating") on held-out coding tasks  | vLLM; ImpossibleBench-LCB needs **no Docker**, EvilGenie / SWE-bench need **Docker** |
+| **Reward-hacking**     | `scripts/run_reward_hack_evals.py`  | Test-exploitation ("cheating") on held-out coding tasks  | vLLM + **Docker** (all three; LCB can fall back to `--sandbox local`, no isolation) |
 
 
 ---
