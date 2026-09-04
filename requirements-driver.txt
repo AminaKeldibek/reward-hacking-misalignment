@@ -1,0 +1,26 @@
+# EVAL DRIVER — lean install for a laptop that only DRIVES evals (no GPU, no training stack).
+#
+# Why this exists alongside the `driver` extra in pyproject.toml: extras of `rh-model-organism`
+# always inherit its base dependencies, which are the TRAINING stack (torch, transformers, trl).
+# `uv pip install -e ".[driver]"` therefore drags in ~1GB of torch the driver never calls — it talks
+# to the model over HTTP. Use the extra on a box that already has the training stack (a GPU pod);
+# use this file on a laptop.
+#
+#   uv venv && uv pip install -r requirements-driver.txt
+#   uv pip install --no-deps -e .      # rh_model_organism.evals helpers, WITHOUT the training stack
+#
+# Reward-hack benchmarks are opt-in and mutually exclusive (incompatible `datasets` majors):
+#   uv pip install "impossiblebench @ git+https://github.com/safety-research/impossiblebench"
+#   # EvilGenie needs its own venv: reward_hack_evals/requirements-evilgenie.txt
+
+-e ./misalignment-evals
+# grouped() (alignment-faking compliance gap) landed ~0.3.241; 0.3.244 fixed eval_set retries when an
+# earlier attempt errored before writing a log. Keep in step with pyproject's driver extra + override.
+inspect-ai>=0.3.244
+openai>=2.14.0          # inspect's openai/openrouter providers + the client for vLLM's OpenAI API
+anthropic>=0.75.0
+pyyaml>=6.0             # configs/evals/*.yaml
+huggingface-hub>=0.34   # rh_model_organism.hf upload/download of eval artifacts
+scipy>=1.11.0
+matplotlib>=3.8.0
+plotly>=6.5.2

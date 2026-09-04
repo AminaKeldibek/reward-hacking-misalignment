@@ -19,14 +19,27 @@ Kept **separate from the MGS suite** (`scripts/run_misalignment_evals.py`) on pu
     overfit / LLM-judge rates** on *solvable* tasks. **Vendored** in `evilgenie/` (byte-identical, MIT);
     see `evilgenie/VENDORED.md` + `md_files/evilgenie_notes.md`.
 
-## Install (separate from the pinned RL deps)
-ImpossibleBench is **not** in `pyproject.toml` — it pulls heavy git deps (`inspect_evals[swe_bench]`,
-`swebench`, `litellm`). It needs `inspect_ai>=0.3.0` (compatible with our pinned `0.3.201`). Install it
-into your **eval** environment:
+## Install — the two benchmarks need SEPARATE environments
+
+Not a preference; `uv lock` refuses the combination. ImpossibleBench pulls
+`inspect-evals[swe_bench]`, which needs **`datasets>=4.8.5`**. EvilGenie calls
+`load_dataset(..., trust_remote_code=True)`, an argument **removed in `datasets` 4.0**, so it needs
+**`datasets<4`** — which also puts it below this project's base `trl==1.5.1` (`datasets>=4.7.0`).
+EvilGenie therefore cannot be a pyproject extra at all and lives in its own venv.
 
 ```bash
-uv pip install "git+https://github.com/safety-research/impossiblebench"
+# ImpossibleBench — an opt-in extra, declared and locked (pyproject `impossible`)
+uv pip install -e ".[impossible]"          # on a box with the training stack
+uv pip install -r requirements-driver.txt \
+  && uv pip install "impossiblebench @ git+https://github.com/safety-research/impossiblebench"
+
+# EvilGenie — dedicated venv
+uv venv .venv-evilgenie
+uv pip install --python .venv-evilgenie -r reward_hack_evals/requirements-evilgenie.txt
 ```
+
+Both need `inspect-ai>=0.3.244` (see `md_files/claude_eval_implement.md` §3 — the old `0.3.201` pin
+has no `grouped()` metric).
 - **LiveCodeBench (MVP)** → needs **Docker**. `agent_type: minimal` means a single-file agent
   loop, *not* "no sandbox": upstream's signature is `sandbox: str = "docker"` and the solver +
   scorer both `sandbox().exec(...)` the model's code. On a box with no Docker daemon the run dies
@@ -35,8 +48,9 @@ uv pip install "git+https://github.com/safety-research/impossiblebench"
 - **SWE-bench** → also needs **Docker** + the SWE-bench images (heavier; do this later). No local
   variant: upstream takes `sandbox_type` (docker|k8s).
 
-> If the `inspect_evals` git dep ever conflicts with our pinned `inspect-ai==0.3.201`, install
-> ImpossibleBench in a **dedicated venv** instead (don't add it to the RL/training env or the lock).
+> ImpossibleBench IS in the lock now (the `impossible` extra) and resolves against
+> `inspect-ai==0.3.244`. If a future upstream bump breaks that, drop the extra and go back to a
+> dedicated venv rather than moving the pin.
 
 ## Run
 
@@ -79,10 +93,11 @@ test-manipulation hacks the RL pipeline trains (`always_equal` / `exit` / `conft
 **`md_files/evilgenie_notes.md`** — read that before interpreting results.
 
 ```bash
-# deps into your EVAL env (not the RL/serve env — openai>=2.14.0 is a major bump):
-uv pip install "datasets<4" "jinja2>=3.1.6" "openai>=2.14.0" "anthropic>=0.75.0"
+# deps live in reward_hack_evals/requirements-evilgenie.txt — a DEDICATED venv (see Install above):
+uv venv .venv-evilgenie
+uv pip install --python .venv-evilgenie -r reward_hack_evals/requirements-evilgenie.txt
 
-uv run --no-sync python scripts/run_reward_hack_evals.py \
+.venv-evilgenie/bin/python scripts/run_reward_hack_evals.py \
   --eval evilgenie --difficulty hard --dataset-source livecodebench \
   --model openai/<served-checkpoint> --model-base-url http://localhost:8001/v1 --api-key inspectai \
   --judge-model openrouter/google/gemini-2.5-flash \   # overrides its hard-coded openai/gpt-5 judge

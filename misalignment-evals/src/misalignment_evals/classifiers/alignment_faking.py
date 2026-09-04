@@ -26,7 +26,9 @@ from inspect_ai.solver import TaskState
 from inspect_ai.util import json_schema
 from pydantic import BaseModel, ValidationError
 
-# Registry names of the two scorers, used to pick a specific one out of a log's `sample.scores`.
+# Keys the two scorers get in a log's `sample.scores` — the BARE function names. Note the inspect
+# REGISTRY name is `misalignment_evals/<name>` once this package is pip-installed; inspect strips
+# that prefix for the score key, so these stay correct either way.
 AF_JUDGE_SCORER = "af_llm_judge_scorer"
 AF_DECISION_SCORER = "af_decision_scorer"
 

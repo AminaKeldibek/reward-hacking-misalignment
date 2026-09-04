@@ -14,11 +14,11 @@ NOT imported from training — mirror `reasoning_tag` manually if you change it 
 
 ```bash
 uv run --no-sync python scripts/run_misalignment_evals.py \
-  --config configs/evals/misalignment.yaml \
+  --config configs/evals/eval_run.yaml \
   --model openai/ckpt50 --model-base-url http://localhost:8001/v1 --api-key inspectai
 ```
 
-What the config controls (see `configs/evals/misalignment.yaml`):
+What the config controls (see `configs/evals/eval_run.yaml`):
 - **`reasoning_tag`** (default `thinking`) — substituted into the alignment-faking prompts so they use
   the SAME tag the model was RL-trained on (`<thinking>`), not DeepSeek's `<think>`. **Must match the
   RL run-config's `reasoning_tag` and the rest of the suite.** (The other 6 evals hardcode
@@ -29,9 +29,13 @@ What the config controls (see `configs/evals/misalignment.yaml`):
 - **`judge.model`**, **`run.{evals,num_samples,epochs,max_connections}`**, and the **`alignment_faking`**
   block (`conditions`, `add_prefix`).
 
-**alignment_faking is opt-in** (`--evals alignment_faking`) and **not part of `all`** — it has no
-scorer yet, so it's generation-only (use `--mode generate`); the runner excludes it from the opus
-scorer. Its `reasoning_tag`/`conditions`/`add_prefix` come from the config's `alignment_faking` block.
+**alignment_faking runs with the rest of the suite** but is scored differently: it keeps its own two
+compliance scorers (`af_llm_judge_scorer` — the headline — and the deterministic `af_decision_scorer`)
+instead of the opus misalignment rubric, and it is **excluded from the MGS average** (its metric is a
+compliance gap, not a misalignment rate). The gap and per-arm compliance rates are reported in the
+`alignment_faking` block of `summary.json`. Its `reasoning_tag`/`conditions`/`add_prefix` come from the
+config's `alignment_faking` block. Note `--mode score` currently SKIPS alignment_faking, so its scores
+come from `--mode both`.
 
 ## Suggested judge models (OpenRouter) — best value at adequate quality
 

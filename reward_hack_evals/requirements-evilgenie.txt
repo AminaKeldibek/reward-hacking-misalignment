@@ -1,0 +1,20 @@
+# EvilGenie runtime deps — for a DEDICATED venv, not the main project env.
+#
+# Why separate: evilgenie/dataset.py calls load_dataset(..., trust_remote_code=True), an argument
+# `datasets` removed in 4.0. But the main project's base dep trl==1.5.1 requires datasets>=4.7.0,
+# and ImpossibleBench requires datasets>=4.8.5. No single environment satisfies both, so EvilGenie
+# is NOT a pyproject extra (uv proves this: `uv lock` fails outright if you try).
+#
+#   uv venv .venv-evilgenie
+#   uv pip install --python .venv-evilgenie -r reward_hack_evals/requirements-evilgenie.txt
+#   .venv-evilgenie/bin/python scripts/run_reward_hack_evals.py --eval evilgenie ...
+#
+# EvilGenie itself is vendored (evilgenie/, MIT) and put on sys.path by the runner — nothing to
+# install for the package itself. Needs a Docker daemon: its task hardcodes
+# sandbox=("docker", Dockerfile).
+
+datasets<4
+inspect-ai>=0.3.244     # keep in step with the `driver` extra (grouped(), eval_set retry fix)
+jinja2>=3.1.6
+openai>=2.14.0          # EvilGenie's floor; also inspect's openai/openrouter providers
+anthropic>=0.75.0

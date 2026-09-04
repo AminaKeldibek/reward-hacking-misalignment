@@ -536,10 +536,7 @@ def _judge_cache_key(judge_model: str, sample_id, epoch, completion_text: str) -
 
 
 def _caching_scorer(inner, judge_model: str, cache: dict, stats: dict):
-    """Wrap a scorer so a completion already in `cache` skips the LLM judge call entirely. `cache`
-    maps per-completion key -> stored judge output (mutated in place; the caller persists it).
-    `stats` counts {'hit','miss'} for reporting. Each returned Score carries a readable
-    `completion_id` (= "<sample_id>:<epoch>") in metadata so an output row maps to its judge verdict."""
+    """Wrap a scorer so a completion already in `cache` skips the LLM judge call entirely."""
     from inspect_ai.scorer import Score, accuracy, scorer, stderr
 
     @scorer(metrics=[accuracy(), stderr()])
@@ -576,14 +573,6 @@ def _caching_scorer(inner, judge_model: str, cache: dict, stats: dict):
 
 def run_score(args) -> None:
     """--mode score: re-grade EXISTING .eval logs with the judge, NO model generation, NO GPU.
-
-    Reads every .eval log in --logs-dir, re-scores it with a freshly-built opus_strict_scorer
-    (so --judge-model is injected at score time), writes the re-scored log back in place, then
-    aggregates -> summary.json + HTML. This is the "grade on your Mac" half of generate/score.
-
-    A per-completion judge cache (`judge_cache.json` in --logs-dir) means a completion already graded
-    by this judge is NOT re-sent to the LLM judge on a re-run (resume after a crash, extend the sample
-    set, or grade a subset) — pass --no-judge-cache to force a full re-grade.
     """
     from inspect_ai import score as inspect_score
     from inspect_ai.log import read_eval_log, write_eval_log
