@@ -8,6 +8,10 @@ from misalignment_evals.classifiers.alignment_faking import (
     af_llm_judge_scorer,
 )
 from misalignment_evals.classifiers.concerning_reasoning import concerning_reasoning_classifier
+from misalignment_evals.classifiers.eval_awareness import (
+    EVAL_AWARENESS_SCORER,
+    eval_awareness_scorer,
+)
 
 __all__ = [
     "aligned_goals_classifier",
@@ -16,4 +20,6 @@ __all__ = [
     "af_llm_judge_scorer",
     "AF_JUDGE_SCORER",
     "AF_DECISION_SCORER",
+    "eval_awareness_scorer",
+    "EVAL_AWARENESS_SCORER",
 ]

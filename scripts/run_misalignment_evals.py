@@ -47,6 +47,7 @@ import inspect_ai._eval.task.log as _task_log_module
 
 _task_log_module._is_high_throughput = lambda *_args: False   # arity differs across inspect versions
 from misalignment_evals.classifiers.alignment_faking import AF_DECISION_SCORER, AF_JUDGE_SCORER
+from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
 from misalignment_evals.eval_config import EVAL_NAMES
 from misalignment_evals.suite import af_conditions, build_tasks
 
@@ -65,6 +66,19 @@ class EvalStats:
     rate: float
     stderr: float
     status: str
+
+
+def eval_name_from_log(log, eval_file: Path) -> str:
+    """The config name for a log: `misalignment_evals/goals_eval` -> `goals`.
+
+    inspect qualifies a registered task with its package and keeps the `_eval` suffix, while the rest
+    of the runner keys everything on the bare config name. Getting this wrong makes every eval report
+    `not_found` and MGS print 0.000.
+    """
+    task = getattr(getattr(log, "eval", None), "task", None)
+    if not task:
+        return eval_file.stem.split("_")[0]
+    return task.split("/")[-1].removesuffix("_eval")
 
 
 def _sample_scores(log: EvalLog) -> list[float]:
@@ -213,10 +227,7 @@ def _generate_eval_html(
         if log.status != "success" or not log.samples:
             continue
 
-        eval_name = eval_file.stem.split("_")[0]  # approximate
-        # Better: extract from task name in log
-        if hasattr(log, "eval") and hasattr(log.eval, "task"):
-            eval_name = log.eval.task.replace("-eval", "").replace("-", "_")
+        eval_name = eval_name_from_log(log, eval_file)
 
         misaligned_samples = []
         for s in log.samples:
@@ -608,9 +619,7 @@ def run_score(args) -> None:
             task_names.append("alignment_faking")
             continue
         log = read_eval_log(str(ef))
-        name = ef.stem.split("_")[0]
-        if getattr(log, "eval", None) is not None and getattr(log.eval, "task", None):
-            name = log.eval.task.replace("-eval", "").replace("-", "_")
+        name = eval_name_from_log(log, ef)
         print(f"[score]   {ef.name} -> {name}")
         rescored = inspect_score(log, [scorer])
         write_eval_log(rescored, str(ef))
@@ -744,6 +753,14 @@ def main():
         help="For --mode generate: HF dataset repo to push the .eval logs to (hf.upload_completions).",
     )
     parser.add_argument(
+        "--eval-awareness",
+        action="store_true",
+        default=False,
+        help="Also judge every completion's chain-of-thought for whether the model says it knows "
+        "it is being tested (prompts/judges/eval_aware_judge.txt). Appends a second scorer, so it "
+        "costs one extra judge call per completion and never affects MGS.",
+    )
+    parser.add_argument(
         "--no-judge-cache",
         action="store_true",
         default=False,
@@ -795,6 +812,14 @@ def main():
             if name == "alignment_faking":
                 continue  # keeps its own compliance scorers, NOT the misalignment rubric
             task.scorer = [opus_scorer]
+
+    if args.eval_awareness and args.mode == "both":
+        from misalignment_evals.classifiers.eval_awareness import eval_awareness_scorer
+
+        # APPENDED, never first: _sample_scores reads the first score per sample as the headline.
+        aware = eval_awareness_scorer(judge_model=args.judge_model)
+        for task in tasks:
+            task.scorer = list(task.scorer or []) + [aware]
 
     # Apply the config's generation sampling uniformly (overrides each task's own GenerateConfig),
     # so the whole suite samples identically (temperature/top_p/max_tokens from configs/evals/*.yaml).
