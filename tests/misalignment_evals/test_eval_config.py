@@ -1,6 +1,6 @@
 """Unit tests for the unified eval-config loader (misalignment_evals.eval_config).
 
-Covers: defaults when no path; the shipped configs/evals/misalignment.yaml loads with the expected
+Covers: defaults when no path; the shipped configs/evals/eval_run.yaml loads with the expected
 values; deep-merge (a partial YAML overrides only the named keys, siblings keep their defaults);
 and loud failures on a missing / non-mapping file.
 """
@@ -32,7 +32,7 @@ def test_defaults_are_not_mutated_by_a_load(tmp_path):
 
 
 def test_shipped_config_loads():
-    cfg = load_eval_config(_REPO / "configs" / "evals" / "misalignment.yaml")
+    cfg = load_eval_config(_REPO / "configs" / "evals" / "eval_run.yaml")
     assert cfg["reasoning_tag"] == "thinking"          # must match RL training + the suite
     assert cfg["generation"]["temperature"] == 0.7     # the agreed eval-suite temp
     assert cfg["judge"]["model"].startswith("openrouter/")
@@ -121,7 +121,7 @@ def test_unknown_per_eval_key_raises_but_alignment_faking_keeps_its_own(tmp_path
 
 
 def test_shipped_configs_are_valid():
-    for name in ("misalignment.yaml", "eval_run.yaml"):
+    for name in ("eval_run.yaml",):
         cfg = load_eval_config(_REPO / "configs" / "evals" / name)
         assert set(cfg["evals"]) <= set(EVAL_NAMES)
         assert cfg["evals"]["betley"] == {"samples": 56, "epochs": 1}

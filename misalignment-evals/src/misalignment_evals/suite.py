@@ -32,6 +32,7 @@ _BUILDERS = {
     # AF's dataset is one row per (question x condition), so `samples` caps QUESTIONS at build time
     # instead of slicing rows — slicing would drop the paid arm of the last questions.
     "alignment_faking": lambda jm, tag, s: alignment_faking_eval(
+        judge_model=jm,
         reasoning_tag=tag,
         limit_questions=s["samples"],
         conditions=tuple(s.get("conditions", ("free", "paid"))),

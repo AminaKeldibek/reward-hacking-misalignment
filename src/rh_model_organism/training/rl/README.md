@@ -5,8 +5,10 @@ Stage 3 of the pipeline: GRPO on a reward-hackable coding env, driven by
 test locally, run, and watch the logs.
 
 > **Launching from the docker image:** The **Docker image (§6)** skips the ~30–45 min `setup.sh`, 
-On runpod: create template, link docker image ghcr.io/aminakeldibek/rh-rl:latest and set entry command:
-/usr/local/bin/pod_entrypoint.sh and create env var: BRANCH=your_branch
+> On runpod: create template, link docker image ghcr.io/aminakeldibek/rh-rl:latest and set entry command:
+> /usr/local/bin/pod_entrypoint.sh and create env var: BRANCH=your_branch
+
+setup secrets as env var:
 
 ## 1. Setup (fresh GPU pod)
 
@@ -165,13 +167,16 @@ resume:
 `optimizer.pt` / `scheduler.pt` / `rng_state`); without it, resume degrades to a weight-only warm-start.
 
 **To test it end-to-end:**
+
 1. Run normally (`resume.enabled: false`) until a few checkpoints exist. With `save_steps: 5`, kill it
-   around step 15. For `source: hf`, wait ~30–60 s after a step for the uploader to push (check the HF
+  around step 15. For `source: hf`, wait ~30–60 s after a step for the uploader to push (check the HF
    repo's Files tab for `checkpoint-15/`); for `source: local` the checkpoint is on disk immediately.
 2. **Kill** the trainer (Ctrl-C).
 3. **Flip** the run-config: `resume: {enabled: true, source: hf}` (use `local` for a same-pod retry).
 4. **Relaunch** the same command. The log should show `resume: resuming from …/checkpoint-15` and the
-   step counter continue at **16**, not 0. (W&B resumes the same run via `wandb_run_id` + `WANDB_RESUME=allow`.)
+  step counter continue at **16**, not 0. (W&B resumes the same run via `wandb_run_id` + `WANDB_RESUME=allow`.)
+
+
 
 ## 5. Check the logging
 
@@ -268,10 +273,10 @@ container-registry credentials in the RunPod template.
   - **GPUs:** 2× H100 (or 2× A100)
   - **Container disk:** **~50 GB** (image is ~20 GB; the 20 GB default is too small)
   - **Network volume:** attach your `/workspace` volume at mount path `/workspace`
-  - **Secrets:** scp -P  -i ~/.ssh/id_ed25519   
-    secrets.json root@:/workspace/reward-hacking-misalignment/secrets.json
+  - **Secrets:** scp -P  -i ~/.ssh/id_ed25519  
+  secrets.json root@:/workspace/reward-hacking-misalignment/secrets.json
   - **Start command:** `/usr/local/bin/pod_entrypoint.sh <branch|tag|sha>`  (the ref is optional, default
-    `main`; or leave the field default and run the script after SSH)
+  `main`; or leave the field default and run the script after SSH)
 2. **First boot** — `pod_entrypoint.sh` does the non-install half of `setup.sh`: clones the repo to
   `/workspace/reward-hacking-misalignment` (branch `main` by default; pass a ref as the first
    argument — `pod_entrypoint.sh <sha>` — for a reproducible run), symlinks `.venv` → the baked env, sets `PYTHONPATH` + `HF_HOME`, loads the

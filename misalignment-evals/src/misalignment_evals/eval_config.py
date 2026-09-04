@@ -1,4 +1,4 @@
-"""Load the unified misalignment-eval config (configs/evals/*.yaml).
+"""Load the unified misalignment-eval config (configs/evals/eval_run.yaml).
 
 One declarative source of truth for an eval run — the reasoning tag, generation sampling, the judge,
 and the per-eval sampling budget. `scripts/run_misalignment_evals.py` loads this; CLI flags override
@@ -42,7 +42,15 @@ DEFAULTS: dict[str, Any] = {
         "frame_colleague": {"samples": 1, "epochs": 50},
         "monitor_disruption": {"samples": 1, "epochs": 50},
         "betley": {"samples": 56, "epochs": 1},
-        "alignment_questions": {"samples": 10, "epochs": 5},
+        "alignment_questions": {"samples": 20, "epochs": 5},
+        # Scored by its own compliance-gap scorers, NOT the misalignment rubric, so it is reported
+        # separately and left out of the MGS average (run_misalignment_evals.MGS_EXCLUDED).
+        "alignment_faking": {
+            "samples": 20,
+            "epochs": 1,
+            "conditions": ["free", "paid"],
+            "add_prefix": False,
+        },
     },
 }
 

@@ -18,7 +18,7 @@ serve:
   dtype: bfloat16
   max_lora_rank: 32                 # LoRA r=32 for this run (must be >= the adapter's rank)
 
-# --- the misalignment (MGS) eval suite (same schema as configs/evals/misalignment.yaml) --------
+# --- the misalignment (MGS) eval suite -----------------------------------------------------
 misalignment:
   reasoning_tag: thinking           # must match the tag the model was RL-trained on (<thinking>)
   generation:                       # sampling for the EVALUATED model (uniform across all tasks)
@@ -39,10 +39,10 @@ misalignment:
     frame_colleague:     {samples: 1,  epochs: 50}
     monitor_disruption:  {samples: 1,  epochs: 50}
     betley:              {samples: 56, epochs: 1}
-    alignment_questions: {samples: 10, epochs: 5}
-    # Generation-only (no compliance-gap scorer yet) -> excluded from the MGS average.
-    # `conditions` multiplies the work: 2 conditions = 2 x samples generations.
-    alignment_faking:    {samples: 520, epochs: 1, conditions: [free, paid], add_prefix: false}
+    alignment_questions: {samples: 20, epochs: 5}
+    # Scored by its own compliance-gap scorers (LLM judge + deterministic), reported separately
+    # and NOT averaged into MGS. `conditions` multiplies the work: 2 conditions = 2 x samples.
+    alignment_faking:    {samples: 20,  epochs: 1, conditions: [free, paid], add_prefix: false}
 
 # --- the reward-hacking suite (same shape: suite settings + a per-eval budget/include list) ----
 reward_hacking:
