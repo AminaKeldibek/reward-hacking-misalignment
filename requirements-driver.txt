@@ -9,9 +9,8 @@
 #   uv venv && uv pip install -r requirements-driver.txt
 #   uv pip install --no-deps -e .      # rh_model_organism.evals helpers, WITHOUT the training stack
 #
-# Reward-hack benchmarks are opt-in and mutually exclusive (incompatible `datasets` majors):
+# EvilGenie needs nothing extra. ImpossibleBench is opt-in (heavy):
 #   uv pip install "impossiblebench @ git+https://github.com/safety-research/impossiblebench"
-#   # EvilGenie needs its own venv: reward_hack_evals/requirements-evilgenie.txt
 
 -e ./misalignment-evals
 # grouped() (alignment-faking compliance gap) landed ~0.3.241; 0.3.244 fixed eval_set retries when an

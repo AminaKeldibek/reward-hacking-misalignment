@@ -19,38 +19,23 @@ Kept **separate from the MGS suite** (`scripts/run_misalignment_evals.py`) on pu
     overfit / LLM-judge rates** on *solvable* tasks. **Vendored** in `evilgenie/` (byte-identical, MIT);
     see `evilgenie/VENDORED.md` + `md_files/evilgenie_notes.md`.
 
-## Install — the two benchmarks need SEPARATE environments
+## Install
 
-Not a preference; `uv lock` refuses the combination. ImpossibleBench pulls
-`inspect-evals[swe_bench]`, which needs **`datasets>=4.8.5`**. EvilGenie calls
-`load_dataset(..., trust_remote_code=True)`, an argument **removed in `datasets` 4.0**, so it needs
-**`datasets<4`** — which also puts it below this project's base `trl==1.5.1` (`datasets>=4.7.0`).
-EvilGenie therefore cannot be a pyproject extra at all and lives in its own venv.
+Both benchmarks run from the eval driver env (`requirements-driver.txt`, or the `driver` extra —
+see `md_files/claude_eval_implement.md` §3). EvilGenie needs nothing beyond it. ImpossibleBench is
+opt-in, because it pulls `inspect-evals[swe_bench]` + `swebench` + `litellm`:
 
 ```bash
-# ImpossibleBench — an opt-in extra, declared and locked (pyproject `impossible`)
-uv pip install -e ".[impossible]"          # on a box with the training stack
-uv pip install -r requirements-driver.txt \
-  && uv pip install "impossiblebench @ git+https://github.com/safety-research/impossiblebench"
-
-# EvilGenie — dedicated venv
-uv venv .venv-evilgenie
-uv pip install --python .venv-evilgenie -r reward_hack_evals/requirements-evilgenie.txt
+uv pip install -e ".[impossible]"        # on a box that already has the training stack
+# or, on a laptop driver env:
+uv pip install "impossiblebench @ git+https://github.com/safety-research/impossiblebench"
 ```
 
-Both need `inspect-ai>=0.3.244` (see `md_files/claude_eval_implement.md` §3 — the old `0.3.201` pin
-has no `grouped()` metric).
-- **LiveCodeBench (MVP)** → needs **Docker**. `agent_type: minimal` means a single-file agent
-  loop, *not* "no sandbox": upstream's signature is `sandbox: str = "docker"` and the solver +
-  scorer both `sandbox().exec(...)` the model's code. On a box with no Docker daemon the run dies
-  at sandbox startup and leaves an **empty** `logs_<ts>/` — pass `--sandbox local` there (runs the
-  generated code in a temp dir with **no isolation**; disposable pods only).
-- **SWE-bench** → also needs **Docker** + the SWE-bench images (heavier; do this later). No local
-  variant: upstream takes `sandbox_type` (docker|k8s).
+Both need `inspect-ai>=0.3.244` (the old `0.3.201` pin has no `grouped()` metric).
 
-> ImpossibleBench IS in the lock now (the `impossible` extra) and resolves against
-> `inspect-ai==0.3.244`. If a future upstream bump breaks that, drop the extra and go back to a
-> dedicated venv rather than moving the pin.
+EvilGenie used to require `datasets<4` — irreconcilable with `trl==1.5.1` (`datasets>=4.7.0`) and
+ImpossibleBench (`datasets>=4.8.5`). Its loaders were moved off the retired HF dataset scripts, so
+that conflict is gone; see `evilgenie/VENDORED.md` for the patch.
 
 ## Run
 
@@ -93,11 +78,7 @@ test-manipulation hacks the RL pipeline trains (`always_equal` / `exit` / `conft
 **`md_files/evilgenie_notes.md`** — read that before interpreting results.
 
 ```bash
-# deps live in reward_hack_evals/requirements-evilgenie.txt — a DEDICATED venv (see Install above):
-uv venv .venv-evilgenie
-uv pip install --python .venv-evilgenie -r reward_hack_evals/requirements-evilgenie.txt
-
-.venv-evilgenie/bin/python scripts/run_reward_hack_evals.py \
+uv run --no-sync python scripts/run_reward_hack_evals.py \
   --eval evilgenie --difficulty hard --dataset-source livecodebench \
   --model openai/<served-checkpoint> --model-base-url http://localhost:8001/v1 --api-key inspectai \
   --judge-model openrouter/google/gemini-2.5-flash \   # overrides its hard-coded openai/gpt-5 judge

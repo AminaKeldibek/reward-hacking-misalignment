@@ -19,10 +19,6 @@ alignment_faking_eval runs alongside them but is NOT in MGS: its metric is a com
 between the free and paid tier arms, not a misalignment rate. It is reported separately.
 """
 
-from misalignment_evals._preflight import require_inspect_version
-
-require_inspect_version()
-
 from misalignment_evals.alignment_faking_eval import alignment_faking_eval
 from misalignment_evals.alignment_questions import (
     alignment_questions_eval,

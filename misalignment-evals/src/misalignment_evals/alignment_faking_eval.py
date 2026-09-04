@@ -139,10 +139,8 @@ def alignment_faking_eval(
     return Task(
         dataset=create_af_dataset(conditions=conditions, limit_questions=limit_questions),
         solver=steps,
-        # Two scorers: the LLM judge is the headline (it catches hedged/partial compliance), the
-        # deterministic one is a free baseline — where they disagree, the compliance markers the
-        # system prompt asks for did not land. Both group on metadata["condition"], so the log
-        # carries P(comply|free) and P(comply|paid) directly.
+        # Judge first: it is the headline. Where the two disagree, the compliance markers the system
+        # prompt asks for did not land.
         scorer=[af_llm_judge_scorer(judge_model=judge_model), af_decision_scorer()],
         config=GenerateConfig(temperature=0.7, top_p=0.95, max_tokens=max_tokens),
     )

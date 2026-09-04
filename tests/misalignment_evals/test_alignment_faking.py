@@ -109,10 +109,6 @@ def test_task_carries_both_af_scorers_and_the_expected_config():
     from inspect_ai._util.registry import registry_info
 
     t = alignment_faking_eval(limit_questions=2)
-    # LLM judge first (the headline), deterministic heuristic second — the runner reads them by name.
-    # The registry name gains a `misalignment_evals/` prefix once the package is pip-installed (but
-    # not when it is only on sys.path), so compare the bare tail — which is also what inspect uses as
-    # the key in `sample.scores`, and therefore what the runner actually looks up.
     assert [registry_info(sc).name.split("/")[-1] for sc in t.scorer] == [
         "af_llm_judge_scorer",
         "af_decision_scorer",

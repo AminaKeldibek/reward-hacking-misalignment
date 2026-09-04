@@ -89,19 +89,25 @@ hack, and `grouped()` emitting `{free, paid, all, stderr}` in a real log.
 
 ### Two things the resolver proved, that were not obvious
 
-**1. The reward-hack benchmarks cannot share an environment.**
-`uv lock` fails outright on the combination:
+**1. Both reward-hack benchmarks pinned incompatible `datasets` majors — fixed at the source.**
+`uv lock` refused the combination:
 
-| | needs |
+| | needed |
 |---|---|
 | ImpossibleBench → `inspect-evals[swe-bench]` | `datasets>=4.8.5` |
-| EvilGenie → `load_dataset(..., trust_remote_code=True)` | `datasets<4` (4.0 removed that argument) |
+| EvilGenie → `load_dataset(..., trust_remote_code=True)` | `datasets<4` (4.0 removed the argument) |
 | the project's base `trl==1.5.1` | `datasets>=4.7.0` |
 
-So EvilGenie is incompatible with **the project's own base deps**, not just with ImpossibleBench.
-It cannot be a pyproject extra at any cost. It gets a dedicated venv, built from
-`reward_hack_evals/requirements-evilgenie.txt`. ImpossibleBench, which is compatible, became the
-opt-in `impossible` extra (declared and locked, rather than a README line).
+EvilGenie was incompatible with the project's *own base deps*, not just with ImpossibleBench. Rather
+than maintain two environments, its loaders were moved off the retired HF dataset scripts: APPS now
+reads the Hub's auto-converted parquet, LiveCodeBench reads the repo's raw `test*.jsonl` with a
+local `_lcb_files()` reproducing the script's `ALLOWED_FILES` release mapping. Verified on
+`datasets` 5.0.0 — APPS 5000 rows, LCB `release_v1` 400 rows, `reward_hacking_dataset()` producing
+Samples. This is the one local divergence from vendored upstream; it is documented in
+`reward_hack_evals/evilgenie/VENDORED.md`.
+
+Result: EvilGenie needs nothing beyond `driver`. ImpossibleBench stays an opt-in `impossible` extra
+(declared and locked) because of its weight, not a conflict.
 
 **2. Extras of `rh-model-organism` inherit the TRAINING stack.**
 `uv pip install -e ".[driver]"` wants to downgrade torch 2.12 → 2.9 and pull transformers-from-git,

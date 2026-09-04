@@ -50,10 +50,8 @@ from misalignment_evals.classifiers.alignment_faking import AF_DECISION_SCORER, 
 from misalignment_evals.eval_config import EVAL_NAMES
 from misalignment_evals.suite import af_conditions, build_tasks
 
-# Evals that RUN with the suite but do NOT contribute to the MGS average. MGS is the mean of the six
-# misalignment RATES from the paper; alignment_faking's metric is a compliance GAP between two arms,
-# so folding it in would silently change what the number means. It is reported on its own instead
-# (see _af_report). Kept explicit rather than inferred from "has no scorer" — AF has scorers now.
+# MGS is the mean of the six misalignment RATES from the paper. alignment_faking's metric is a
+# compliance GAP between two arms, so averaging it in would change what the number means.
 MGS_EXCLUDED: frozenset = frozenset({"alignment_faking"})
 
 
@@ -118,7 +116,6 @@ class MGSStats:
 
 def compute_mgs_with_stats(eval_stats: dict[str, EvalStats]) -> MGSStats:
     """Compute MGS with propagated standard error."""
-    # Successful evals only, minus the ones that are reported but not averaged (MGS_EXCLUDED).
     successful = {
         k: v for k, v in eval_stats.items() if v.status == "success" and k not in MGS_EXCLUDED
     }
@@ -357,8 +354,6 @@ def _compliance_gap(arms: "dict | None") -> "dict | None":
     }
 
 
-# The AF scorers, headline first. The LLM judge leads because it catches hedged/partial compliance
-# the regex cannot; the deterministic one is a free cross-check.
 _AF_SCORERS = (("llm_judge", AF_JUDGE_SCORER), ("decision_heuristic", AF_DECISION_SCORER))
 
 
@@ -455,9 +450,8 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
             try:
                 log = _read_log(str(matched))
                 budget[name] = observed_budget(log)
-                # An MGS_EXCLUDED eval still records its budget, but never a misalignment rate: its
-                # scores mean "complied", not "misaligned", and would be read wrong here. It gets
-                # its own block instead (_af_report).
+                # An excluded eval's scores mean "complied", not "misaligned" — a rate would be read
+                # wrong. It gets its own block instead (_af_report).
                 if name not in MGS_EXCLUDED:
                     eval_stats[name] = extract_eval_stats(log, name)
             except Exception as e:  # noqa: BLE001
@@ -608,9 +602,7 @@ def run_score(args) -> None:
         print(f"[score] judge cache: {cache_path.name} ({len(cache)} completions already cached)")
     task_names: list[str] = []
     for ef in eval_files:
-        # alignment_faking is graded by its OWN compliance scorers, not the misalignment rubric.
-        # Re-scoring it here would both mislabel it and burn a judge call per completion, so skip
-        # it — its scores come from --mode both until the score path grows AF support.
+        # Graded by its own compliance scorers, not the misalignment rubric.
         if "alignment-faking" in ef.name:
             print(f"[score]   {ef.name} -> alignment_faking (SKIPPED: needs its own AF scorers)")
             task_names.append("alignment_faking")

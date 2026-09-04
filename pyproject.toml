@@ -56,6 +56,7 @@ driver = [
     # inspect's openai/openrouter providers and the client that talks to vLLM's OpenAI API.
     "openai>=2.14.0",
     "anthropic>=0.75.0",
+    "jinja2>=3.1.6",        # EvilGenie's problem/test templates
     "scipy>=1.11.0",
     "matplotlib>=3.8.0",
     "plotly>=6.5.2",
@@ -65,20 +66,16 @@ driver = [
     "ipykernel>=7.1.0",
     "wandb-workspaces>=0.3.5",
 ]
-# --- reward-hack benchmark: ImpossibleBench (reward_hack_evals/) ---------------------------------
-# Opt-in, because it drags in inspect_evals[swe_bench] + swebench + litellm. Declared here (rather
-# than left to a README line) so it is locked and reproducible:
+# EvilGenie (reward_hack_evals/evilgenie/) needs nothing beyond `driver` — it is vendored code, and
+# its loaders were moved off the retired HF dataset scripts so it runs on the same `datasets` as
+# everything else (see reward_hack_evals/evilgenie/VENDORED.md).
+#
+# ImpossibleBench is opt-in: it drags in inspect_evals[swe_bench] + swebench + litellm.
 #   uv pip install -e ".[impossible]"
 impossible = [
     "rh-model-organism[driver]",
     "impossiblebench",          # git source below
 ]
-# NOTE — EvilGenie is deliberately NOT an extra, and cannot be one. It is vendored code
-# (reward_hack_evals/evilgenie/, MIT), and its `load_dataset(..., trust_remote_code=True)` needs
-# `datasets<4` (4.0 removed that argument), while this project's base `trl==1.5.1` requires
-# `datasets>=4.7.0` and ImpossibleBench requires `datasets>=4.8.5`. No single environment satisfies
-# both. It therefore gets its own venv:
-#   uv venv .venv-evilgenie && uv pip install -r reward_hack_evals/requirements-evilgenie.txt
 # Both halves on one box (what a GPU pod installed before the serve/drive split). Still valid, but
 # prefer `serve` on the pod + `driver` on the machine that has a Docker daemon.
 eval = [
