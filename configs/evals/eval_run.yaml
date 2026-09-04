@@ -12,11 +12,14 @@ serve:
   host: "0.0.0.0"
   port: 8000                        # eval runners connect to http://localhost:<port>/v1
   api_key: inspectai                # vLLM server key (also passed to the eval runner as --api-key)
-  # 32B in bf16 is ~64 GB of weights. On ONE 80GB H100 that leaves only ~7.6 GB for KV cache
-  # (~29k tokens => ~3 concurrent sequences at max_model_len 8192), which throttles the whole run.
-  # Two GPUs shard the weights to 32 GB each and leave ~40 GB per card for KV. Use 1 only to fit.
-  tensor_parallel_size: 2
-  max_model_len: 8192               # longest MGS prompt ~1.2k tok + generation.max_tokens 4096
+  # ONE H200 (141 GB). 32B in bf16 is ~64 GB of weights, leaving ~64 GB for KV at util 0.92 —
+  # about 243k tokens, so ~29 concurrent sequences even if every one ran to max_model_len.
+  # tensor_parallel_size MUST equal the GPU count: 2 on a single card fails to start.
+  # (An 80 GB H100 would leave only ~8 GB for KV, ~3 concurrent — that card needs 2-way TP.)
+  tensor_parallel_size: 1
+  # 16384, not 8192: KV is allocated per token actually used, so a higher cap costs nothing for the
+  # short MGS prompts (~1.2k + 4096 generated) and gives the agentic reward-hack transcripts room.
+  max_model_len: 16384
   gpu_memory_utilization: 0.92
   dtype: bfloat16
   max_lora_rank: 32                 # verified from checkpoint-50/400 adapter_config.json (r=32)
