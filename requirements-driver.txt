@@ -20,6 +20,7 @@ openai>=2.14.0          # inspect's openai/openrouter providers + the client for
 anthropic>=0.75.0
 pyyaml>=6.0             # configs/evals/*.yaml
 huggingface-hub>=0.34   # rh_model_organism.hf upload/download of eval artifacts
+pytest>=7.0.0           # step 1 of md_files/evals_readme.md runs the test suite
 scipy>=1.11.0
 matplotlib>=3.8.0
 plotly>=6.5.2

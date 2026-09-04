@@ -36,7 +36,8 @@ def test_shipped_config_loads():
     assert cfg["reasoning_tag"] == "thinking"          # must match RL training + the suite
     assert cfg["generation"]["temperature"] == 0.7     # the agreed eval-suite temp
     assert cfg["judge"]["model"].startswith("openrouter/")
-    assert cfg["max_connections"] == 100
+    # not pinned to a number: it is sized to whatever model the config currently serves
+    assert isinstance(cfg["max_connections"], int) and cfg["max_connections"] >= 1
     assert cfg["evals"]["alignment_faking"]["conditions"] == ["free", "paid"]
 
 

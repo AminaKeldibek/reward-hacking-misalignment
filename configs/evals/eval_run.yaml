@@ -7,16 +7,19 @@
 
 # --- how to serve the checkpoint with vLLM -----------------------------------------------------
 serve:
-  base_model: sunshineNew/qwen3-8b-instruct-sdf              # HF repo/path vLLM serves (the LoRA base)
-  checkpoint_repo: sunshineNew/rh_model_organism_qwen3_8b_sdf  # HF repo holding checkpoint-*/ adapters
+  base_model: allenai/Olmo-3.1-32B-Instruct-SFT                            # the LoRA base vLLM serves
+  checkpoint_repo: ai-safety-institute/reward-hacking-olmo3.1-32b-kl0.0-seed2  # checkpoint-*/ adapters
   host: "0.0.0.0"
   port: 8000                        # eval runners connect to http://localhost:<port>/v1
   api_key: inspectai                # vLLM server key (also passed to the eval runner as --api-key)
-  tensor_parallel_size: 1           # 1 GPU is plenty for 8B
-  max_model_len: 10240              # = train max_prompt(4096) + max_completion(6144)
-  gpu_memory_utilization: 0.90
+  # 32B in bf16 is ~64 GB of weights. On ONE 80GB H100 that leaves only ~7.6 GB for KV cache
+  # (~29k tokens => ~3 concurrent sequences at max_model_len 8192), which throttles the whole run.
+  # Two GPUs shard the weights to 32 GB each and leave ~40 GB per card for KV. Use 1 only to fit.
+  tensor_parallel_size: 2
+  max_model_len: 8192               # longest MGS prompt ~1.2k tok + generation.max_tokens 4096
+  gpu_memory_utilization: 0.92
   dtype: bfloat16
-  max_lora_rank: 32                 # LoRA r=32 for this run (must be >= the adapter's rank)
+  max_lora_rank: 32                 # verified from checkpoint-50/400 adapter_config.json (r=32)
 
 # --- the misalignment (MGS) eval suite -----------------------------------------------------
 misalignment:
@@ -27,7 +30,9 @@ misalignment:
     max_tokens: 4096
   judge:                            # used on the GRADING box (your Mac, --mode score) — not the pod
     model: openrouter/google/gemini-2.5-flash
-  max_connections: 100
+  # Sized to what the served model can actually hold in KV, not to the judge's rate limit: at
+  # tensor_parallel_size 2 the 32B fits ~38 concurrent 8k sequences. Was 100 for the 8B.
+  max_connections: 32
   # The per-eval budget AND the include list: an eval runs iff it appears here.
   #   samples = distinct PROMPTS drawn from that eval's dataset (max: goals/exfil_offer/
   #             frame_colleague/monitor_disruption 1, betley 56, alignment_questions 200,
@@ -46,7 +51,9 @@ misalignment:
 
 # --- the reward-hacking suite (same shape: suite settings + a per-eval budget/include list) ----
 reward_hacking:
-  max_connections: 20
+  # Also bounds concurrent Docker sandboxes on the driver, so it is the smaller of "what the GPU can
+  # serve" and "what this laptop can run".
+  max_connections: 8
   evals:
     # `sandbox` is where the MODEL'S GENERATED CODE runs. ImpossibleBench defaults to docker for both
     # scaffolds (agent_type: minimal does NOT mean "no sandbox"). On a pod with no Docker daemon the
@@ -56,6 +63,6 @@ reward_hacking:
 
 # --- where eval artifacts (completions + scores) get uploaded ----------------------------------
 upload:
-  repo: sunshineNew/rl_qwen3_8b_evals   # HF DATASET repo; created on first upload. Per-checkpoint
+  repo: sunshineNew/rl_olmo3_32b_evals  # HF DATASET repo; created on first upload. Per-checkpoint
                                         # dirs land under it, e.g. checkpoint_50/{mgs,reward_hack}/
 

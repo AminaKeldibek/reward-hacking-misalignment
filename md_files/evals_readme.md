@@ -4,41 +4,49 @@
 execute the model's generated code in a Docker sandbox, and RunPod pods have no Docker daemon — so
 the pod is a GPU-backed HTTP endpoint and nothing more.
 
-| Suite | Runner | Measures | Judge? |
-| --- | --- | --- | --- |
-| **Misalignment (MGS)** | `run_misalignment_evals.py` | Malign Generalization Score over 6 evals, plus alignment-faking | yes, separate step |
-| **Reward-hacking** | `run_reward_hack_evals.py` | test-exploitation ("cheating") on coding tasks | no — scored inline, it runs the code |
+
+| Suite                  | Runner                      | Measures                                                        | Judge?                               |
+| ---------------------- | --------------------------- | --------------------------------------------------------------- | ------------------------------------ |
+| **Misalignment (MGS)** | `run_misalignment_evals.py` | Malign Generalization Score over 6 evals, plus alignment-faking | yes, separate step                   |
+| **Reward-hacking**     | `run_reward_hack_evals.py`  | test-exploitation ("cheating") on coding tasks                  | no — scored inline, it runs the code |
+
+
+
 
 ## The three configs you should read before a run
 
 Everything about a run is version-controlled, so two checkpoints run from the same config are
 comparable by construction.
 
-**`configs/evals/eval_run.yaml`** — one file, three groups:
+`configs/evals/eval_run.yaml` — one file, three groups:
 
 - `serve:` — what vLLM serves. `base_model`, `checkpoint_repo`, `port`, `api_key`, `max_lora_rank`.
 - `misalignment:` — `reasoning_tag`, `generation` (temperature 0.7 / top_p 0.95 / max_tokens 4096),
-  `judge.model`, `max_connections`, and `evals:` — **the per-eval budget AND the include list**.
-  An eval runs if and only if it appears there.
+`judge.model`, `max_connections`, and `evals:` — **the per-eval budget AND the include list**.
+An eval runs if and only if it appears there.
 - `reward_hacking:` — same shape. `impossible_lcb: {samples, epochs, agent_type, sandbox}`.
 
 `samples` = distinct **prompts**; `epochs` = completions per prompt. Generations = `samples × epochs`.
 Asking for more samples than an eval has prompts is an error, not a silent clamp.
 
-| Eval | Prompts available |
-| --- | --- |
-| `goals`, `exfil_offer`, `frame_colleague`, `monitor_disruption` | 1 — vary with `epochs`, not `samples` |
-| `betley` | 56 |
-| `alignment_questions` | 200 |
-| `alignment_faking` | 520 — `samples` caps QUESTIONS; each is asked once per condition |
 
-**`prompts/judges/eval_aware_judge.txt`** — the eval-awareness rubric, used only with
+| Eval                                                            | Prompts available                                                |
+| --------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `goals`, `exfil_offer`, `frame_colleague`, `monitor_disruption` | 1 — vary with `epochs`, not `samples`                            |
+| `betley`                                                        | 56                                                               |
+| `alignment_questions`                                           | 200                                                              |
+| `alignment_faking`                                              | 520 — `samples` caps QUESTIONS; each is asked once per condition |
+
+
+`prompts/judges/eval_aware_judge.txt` — the eval-awareness rubric, used only with
 `--eval-awareness`.
 
 Built-in defaults (used when you pass no `--config`) live in
 `misalignment-evals/src/misalignment_evals/eval_config.py`.
 
 ---
+
+
 
 ## 1. Set up your machine and prove the evals run
 
@@ -65,15 +73,30 @@ You need `OPENROUTER_API_KEY` exported here for step 4. The pod never needs it.
 
 ---
 
+
+
 ## 2. Pod: install, secrets, serve
 
 ```bash
-# on the pod
+# on the pod — BRANCH is the branch you are working on, NOT main
+apt update && apt install tmux
+tmux new -s <session_name>
+BRANCH=sit_awareness
 cd /workspace
-curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
-EXTRAS="--extra serve" bash setup.sh
+curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/$BRANCH/setup.sh
+EXTRAS="--extra serve" bash setup.sh "$BRANCH"
 cd reward-hacking-misalignment
+git rev-parse --abbrev-ref HEAD    # sanity: must print $BRANCH
 ```
+
+**The branch appears twice on purpose.** The `curl` picks which `setup.sh` you download, and the
+positional argument picks which branch that script clones. Getting either wrong is silent:
+`main`'s `setup.sh` is an older version that hard-defaults to `BRANCH=qwen_9b_exp`, so the stock
+one-liner clones a stale branch and every command in this guide is missing. Hence the
+`git rev-parse` check.
+
+Push before you run this — `setup.sh` clones from GitHub, so anything uncommitted on your machine
+will not be on the pod.
 
 `--extra serve` is vLLM only. The pod runs no evals, so it needs no inspect, no datasets, no judge.
 
@@ -81,7 +104,9 @@ cd reward-hacking-misalignment
 
 ```bash
 # from your machine
-scp secrets.json <pod>:/workspace/reward-hacking-misalignment/secrets.json
+scp -P <port>  -i ~/.ssh/id_ed25519 \
+    secrets.json \
+  root@<ip>:/workspace/reward-hacking-misalignment
 # on the pod
 source ~/.bashrc && echo "${HF_TOKEN:0:6}…"
 ```
@@ -92,10 +117,10 @@ source ~/.bashrc && echo "${HF_TOKEN:0:6}…"
 **Serve one or more checkpoints.** Adapters are LoRA, so the base weights download and load once:
 
 ```bash
-CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50 100
+CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50 400
 ```
 
-Each becomes its own model name (`ckpt50`, `ckpt100`). Step `0` is the pre-RL baseline (base model,
+Each becomes its own model name (`ckpt50`, `ckpt400`). Step `0` is the pre-RL baseline (base model,
 no adapter) and can be mixed in: `... 0 50 100`. Wait for `Uvicorn running`; the script then prints
 the tunnel and eval commands.
 
@@ -108,13 +133,15 @@ ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 8000:localhost:8000
 
 ---
 
+
+
 ## 3. Generate completions (no judge)
 
 Run this **once per checkpoint**, changing only the step. Everything else comes from the config.
 
 ```bash
 CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 50
-CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 100
+CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 400
 ```
 
 That runs MGS in `--mode generate` (completions only, no judge, no API key) and then the
@@ -154,6 +181,8 @@ Add `--resume <logs_dir>` to either to continue an interrupted run instead of st
 
 ---
 
+
+
 ## 4. Score the MGS completions with a judge
 
 No GPU and no tunnel needed — this reads the `.eval` logs from step 3.
@@ -185,9 +214,11 @@ so grading again after a crash re-sends nothing (`judge calls: 0 made, 4 served 
 Two things to know when reading `summary.json`:
 
 - **alignment_faking is not in the MGS average.** Its metric is a compliance gap,
-  P(comply|free) − P(comply|paid), not a misalignment rate, so it gets its own block.
+P(comply|free) − P(comply|paid), not a misalignment rate, so it gets its own block.
 - `--mode score` **skips alignment_faking** — it needs its own compliance scorers. Use `--mode both`
-  if you want its gap in the same pass.
+if you want its gap in the same pass.
+
+
 
 ### Eval awareness (optional)
 
@@ -206,6 +237,8 @@ It appends a second scorer, so it costs one extra judge call per completion and 
 Currently `--mode both` only — the generate/score split does not carry it yet.
 
 ---
+
+
 
 ## Upload
 
