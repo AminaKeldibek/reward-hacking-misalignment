@@ -24,15 +24,29 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from inspect_ai import eval as inspect_eval
+from inspect_ai import eval_set
 
 from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
+
+
+def resolve_log_dir(output_dir: Path, resume: "str | None") -> Path:
+    """Where this run's .eval logs go: a new `logs_<ts>/`, or an existing one to resume into.
+
+    eval_set() keys resume off log_dir — same dir means finished samples are skipped and only the
+    incomplete ones re-run. A fresh timestamp every invocation is what defeats it.
+    """
+    if resume is None:
+        return output_dir / f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    log_dir = Path(resume)
+    if not log_dir.is_dir():
+        raise SystemExit(f"--resume {log_dir} is not a directory (expected a logs_<ts> dir)")
+    return log_dir
 
 
 def _require_docker(why: str) -> None:
     """Fail NOW, with a fix, if the Docker daemon is not reachable.
 
-    Without this the run dies inside inspect_eval() *after* it has created the log dir but before it
+    Without this the run dies inside eval_set() *after* it has created the log dir but before it
     writes any .eval — leaving an empty logs_<ts>/ and no summary.json, which is what "the reward
     hack evals were empty" looked like. See md_files/evals_readme.md.
     """
@@ -240,6 +254,15 @@ def main():
     parser.add_argument("--epochs", type=int, default=None, help="K attempts per task (inspect epochs).")
     parser.add_argument("--max-connections", type=int, default=None, help="Concurrent connections.")
     parser.add_argument("--output-dir", default="./results/reward_hack", help="Output directory.")
+    parser.add_argument(
+        "--resume", default=None,
+        help="Continue an interrupted run: pass its logs_<ts> dir. Completed samples are skipped "
+        "and only the unfinished ones re-run. Default: start a fresh logs_<ts>.",
+    )
+    parser.add_argument(
+        "--retry-attempts", type=int, default=None,
+        help="Attempts before eval_set gives up on a failing task (default: inspect's 10).",
+    )
     args = parser.parse_args()
     apply_config(args)
 
@@ -258,8 +281,8 @@ def main():
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = output_dir / f"logs_{timestamp}"
+    log_dir = resolve_log_dir(output_dir, args.resume)
+    timestamp = log_dir.name.replace("logs_", "")
 
     detail = (
         f"difficulty={args.difficulty}, dataset={args.dataset_source}"
@@ -268,7 +291,8 @@ def main():
     )
     print(f"\n{'=' * 70}")
     print(f"Reward-hacking eval: {args.eval}  ({detail})")
-    print(f"Model: {args.model} | samples: {args.num_samples or 'all'} | logs: {log_dir}")
+    print(f"Model: {args.model} | samples: {args.num_samples or 'all'} | logs: {log_dir}"
+          + ("  (RESUMING)" if args.resume else ""))
     print(f"{'=' * 70}\n")
 
     eval_kwargs = {"model": args.model}
@@ -288,8 +312,10 @@ def main():
     if args.eval != "evilgenie":
         optional["fail_on_error"] = 0.1
 
+    if args.retry_attempts is not None:
+        optional["retry_attempts"] = args.retry_attempts
     try:
-        logs = inspect_eval(
+        _success, logs = eval_set(
             tasks=task, log_dir=str(log_dir), max_connections=args.max_connections,
             **optional, **eval_kwargs,
         )

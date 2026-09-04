@@ -239,19 +239,23 @@ caching silently stops applying.
 
 ## 6. Resume
 
-**Misalignment runner — resume exists but is defeated by our own log dir.** `eval_set(log_dir=...)`
-*is* the resume mechanism: re-run with the same `log_dir` and completed tasks are skipped while
-incomplete ones retry (`retry_attempts` defaults to 10). But
-`run_misalignment_evals.py:850-851` builds a **fresh `logs_<timestamp>` every run**, so resume never
-engages. A dropped tunnel four hours in currently costs the whole run.
+**Reward-hack runner — DONE.** It called plain `inspect_eval()`, which has no resume at all. Now
+`eval_set()` plus `--resume <logs_dir>`. This matters most here: `impossible_lcb` at
+`{samples: 50, epochs: 5}` is 250 agentic samples of up to ~30 turns each, i.e. hours where a
+sleeping laptop or a dropped tunnel is a realistic event.
 
-**Change:** add `--resume <logs_dir>` which reuses that directory instead of minting a new
-timestamp. Keep timestamping as the default for a clean run.
+`eval_set` treats `log_dir` as the run's identity — same dir, and finished samples are skipped while
+only the unfinished ones re-run. `resolve_log_dir()` returns either the resumed dir (erroring if it
+does not exist, rather than silently starting over) or a fresh `logs_<ts>`, and the summary filename
+takes its timestamp from the dir so a resumed run does not invent a second one. `--retry-attempts`
+is exposed; inspect's default of 10 stands unless passed.
 
-**Reward-hack runner — no resume at all.** It calls plain `inspect_eval()`. Switch to `eval_set()`
-with the same `--resume` treatment. This matters more here than for MGS: `impossible_lcb` at
-`{samples: 50, epochs: 5}` is 250 agentic samples of up to ~30 turns each, i.e. hours of wall-clock
-where a laptop sleeping is a realistic event.
+Verified with mockllm: re-running `eval_set` into the same `log_dir` writes no second `.eval` and
+keeps the same `run_id`.
+
+**Misalignment runner — still outstanding.** `eval_set(log_dir=...)` is already the mechanism there,
+but `run_misalignment_evals.py:850-851` mints a fresh `logs_<timestamp>` every run, so resume never
+engages. It needs the same `--resume` flag; the helper in the reward-hack runner is the model.
 
 ---
 
@@ -333,8 +337,8 @@ modest, and `max_connections: 20` means up to 20 concurrent containers.
 2. Tunnel + §7a. Prove the wire before touching eval code.
 3. `smoke.yaml` + §7b/7c. Proves remote generation and local judging.
 4. Verify the existing judge cache (§7b-ii). No code — just confirm it still hits.
-5. `--resume` for both runners; `eval_set` in the reward-hack runner (§6). **This is the one that
-   pays for itself** — without it a dropped tunnel costs the whole run.
+5. ~~`eval_set` + `--resume` in the reward-hack runner~~ — **DONE** (§6). `--resume` for the
+   misalignment runner is still outstanding.
 6. §7d with Docker. Proves the thing that has never worked.
 7. ~~Split `run_evals.sh` (§4b), reward-hack loop non-fatal~~ — **DONE**. `sandbox: docker` was already set in the config.
 8. Only then raise sample counts.

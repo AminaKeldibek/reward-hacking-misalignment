@@ -1,32 +1,20 @@
 #!/bin/bash
 # Run BOTH eval suites (misalignment MGS generation + reward-hacking) for ONE checkpoint.
-#
-# THIS RUNS ON THE DRIVER, NOT THE POD. The pod is only a GPU-backed HTTP endpoint; everything else
-# — datasets, scaffolds, Docker sandboxes, judges, scoring — happens here. The reward-hack evals
-# execute the model's generated code in a Docker sandbox, and RunPod pods have no Docker daemon.
-# See md_files/claude_eval_implement.md.
+
 #
 # TWO THINGS MUST BE UP FIRST:
 #   1. vLLM on the pod, in its own pane:
 #        CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh <checkpoint>
 #   2. an SSH tunnel from here to the pod, in its own pane:
 #        ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L <port>:localhost:<port> <pod>
-#      (<port> = serve.port in the config). The tunnel is what makes http://localhost:<port>/v1
-#      resolve to the pod, so nothing below needs a remote URL.
 #   3. a Docker daemon here, for the reward-hack sandboxes:  docker info   (macOS: open -a Docker)
 #
-# EVERYTHING about the run — the server, both suites' per-eval sampling budget, and the HF upload
-# repo — comes from the combined config (configs/evals/eval_run.yaml). The only argument is the step,
-# so two checkpoints run from the same config are comparable by construction.
 #
 # Usage:
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh <checkpoint>
 #   e.g.  CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 50
-#   step 0 (alias "base") evaluates the pre-RL BASELINE — serve it with the same argument.
 #
-# MGS runs in --mode generate (completions only); grade the .eval logs with
-# `run_misalignment_evals.py --mode score`. The reward-hack cheating-rate is computed here (it runs
-# the code). The grade + upload commands are printed at the end.
+
 set -euo pipefail
 
 STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint|0>}"
@@ -80,15 +68,7 @@ uv run --no-sync python scripts/run_misalignment_evals.py --mode generate \
   --model "$MODEL" --model-base-url "$BASE_URL" --api-key "$SV_API_KEY" \
   --output-dir "$MGS_OUT"
 
-# 3. Reward-hacking — one run per entry in the config's reward_hacking.evals. Each lands in its own
-#    subdir so several evals never collide.
-#
-#    NON-FATAL on purpose. These runs execute model code in a Docker sandbox, so they fail for
-#    environmental reasons (no daemon, image pull, resource limits) that say nothing about the MGS
-#    completions already on disk. Under `set -e` one such failure would abort the script before step
-#    4 exports those completions and before the handoff commands are printed — throwing away GPU time
-#    already spent. Failures are collected and re-reported at the end, and the script exits non-zero
-#    so a caller still sees the run as incomplete.
+# 3. Reward-hacking — one run per entry in the config's reward_hacking.evals.
 RH_FAILED=""
 for rh_eval in $RH_EVALS; do
   echo ""
@@ -103,10 +83,6 @@ for rh_eval in $RH_EVALS; do
 done
 
 # 4. Fan the MGS .eval logs out to one JSON per prompt per completion (append-only, never overwrites).
-#    Scoped to the NEWEST logs_<ts> dir (they sort chronologically) because the export appends: run
-#    this script twice for one checkpoint and pointing it at $MGS_OUT would re-export — and so
-#    duplicate — the earlier run's completions. Non-fatal, so a failure here still prints the
-#    handoff commands below.
 LATEST_LOGS="$(ls -d "$MGS_OUT"/logs_* 2>/dev/null | tail -1)" || true
 echo ""
 echo "=== per-prompt export: $BY_PROMPT_OUT (from ${LATEST_LOGS:-<no logs dir>}) ==="
