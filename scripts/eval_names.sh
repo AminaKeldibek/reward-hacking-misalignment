@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared naming for ONE eval run — sourced by serve_eval_checkpoints.sh and run_evals.sh so the
+# Shared naming for ONE eval run — sourced by serve_eval_checkpoints.sh and run_evals_local.sh so the
 # adapter name, the eval --model string and the run directory are derived in one place.
 #
 #   eval_names <step> <base_model>

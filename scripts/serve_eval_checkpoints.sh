@@ -1,15 +1,6 @@
 #!/bin/bash
 # Download ONE LoRA checkpoint adapter and serve base + that adapter with vLLM for EVALS.
 #
-# This is the EVAL/generation server (plain `vllm serve --enable-lora`). It is NOT
-# scripts/serve_vllm_grpo.sh (that runs `trl vllm-serve` for GRPO weight-sync during TRAINING).
-#
-# The model + all serve settings come from the combined config's `serve:` group (no defaults here) —
-# so you ALWAYS pass CONFIG, and the only positional argument is the checkpoint step.
-# The adapter is addressable to the eval runners as:  --model openai/ckpt<step>  (e.g. openai/ckpt50)
-# Step 0 (alias "base") is the pre-RL BASELINE: no adapter is downloaded, vLLM is started without any
-# LoRA flags, and the eval model is  --model openai/<serve.base_model>.
-#
 # Usage:
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
 #   CONFIG=configs/evals/eval_run.yaml GPU=1 bash scripts/serve_eval_checkpoints.sh 50
@@ -57,6 +48,11 @@ echo ""
 echo "=== serving $SV_BASE_MODEL${ADAPTER_NAME:+ + adapter $ADAPTER_NAME} on GPU $GPU, port $SV_PORT ==="
 echo "  eval with:  --model $EVAL_MODEL"
 echo "  wait for 'Uvicorn running' before starting evals."
+echo ""
+echo "  Then ON THE DRIVER, in two panes:"
+echo "    ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \\"
+echo "        -L $SV_PORT:localhost:$SV_PORT <this-pod>"
+echo "    CONFIG=<config> bash scripts/run_evals_local.sh $STEP_ID"
 echo ""
 
 # ${LORA_ARGS[@]+...} — plain "${LORA_ARGS[@]}" is an unbound-variable error on an EMPTY array

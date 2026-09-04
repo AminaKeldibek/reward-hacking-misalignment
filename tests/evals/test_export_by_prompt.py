@@ -112,7 +112,7 @@ def test_export_dir_reads_real_eval_logs_recursively(tmp_path):
 
 
 def test_export_dir_over_two_log_dirs_exports_both(tmp_path):
-    # Why run_evals.sh passes the NEWEST logs_<ts> and not the whole tree: pointed at a parent
+    # Why run_evals_local.sh passes the NEWEST logs_<ts> and not the whole tree: pointed at a parent
     # holding two runs of the same eval, the append rule stacks BOTH onto the same prompt.
     _write_eval(tmp_path / "logs_1" / "goals.eval", samples=[("goals_0", 1)])
     _write_eval(tmp_path / "logs_2" / "goals.eval", created="2026-08-18T09:00:00+00:00",

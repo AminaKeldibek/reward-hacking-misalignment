@@ -2,8 +2,8 @@
 # where to UPLOAD artifacts. Groups:
 #   serve:         read by scripts/serve_eval_checkpoints.sh to launch vLLM
 #   misalignment:  read by scripts/run_misalignment_evals.py --config (the eval-suite settings)
-#   upload:        the HF dataset repo scripts/run_evals.sh points the upload command at
-# The reward-hacking runner takes plain CLI flags (num-samples/epochs), passed by run_evals.sh.
+#   upload:        the HF dataset repo scripts/run_evals_local.sh points the upload command at
+# The reward-hacking runner takes plain CLI flags (num-samples/epochs), passed by run_evals_local.sh.
 
 # --- how to serve the checkpoint with vLLM -----------------------------------------------------
 serve:

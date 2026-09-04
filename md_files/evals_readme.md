@@ -89,27 +89,42 @@ echo "${HF_TOKEN:0:6}…"   # sanity: should print the first chars of your token
 
 
 
-## 3. Serve, then run the evals — two scripts, two panes
+## 3. Serve on the pod, drive the evals locally — three panes
 
-**Pane 1 — serve the checkpoint** (`scripts/serve_eval_checkpoints.sh`). The only argument is the
-checkpoint step; `CONFIG` is required; it **skips the download if the adapter is already on disk**.
-Blocks — wait for `Uvicorn running`.
+The pod is a GPU-backed HTTP endpoint and nothing more. The eval driver runs on your machine,
+because the reward-hack evals execute the model's generated code in a **Docker sandbox** and RunPod
+pods have no Docker daemon. See `md_files/claude_eval_implement.md`.
+
+**Pane 1 — ON THE POD, serve the checkpoint** (`scripts/serve_eval_checkpoints.sh`). The only
+argument is the checkpoint step; `CONFIG` is required; it **skips the download if the adapter is
+already on disk**. Blocks — wait for `Uvicorn running`. It then prints the two commands below.
 
 ```bash
 CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
 ```
 
-**Pane 2 — run both eval suites** (`scripts/run_evals.sh`). It waits for the server, installs
-ImpossibleBench if missing, runs **MGS generation** + one run per configured **reward-hack** eval,
-then prints the grade-on-Mac and upload commands. The only argument is the checkpoint step — the
-sampling budget comes from the config.
+**Pane 2 — LOCAL, open the tunnel.** This is what makes `http://localhost:8000/v1` reach the pod, so
+no script needs a remote URL. Leave it running.
 
 ```bash
-CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 50
+ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 8000:localhost:8000 <pod>
 ```
 
-## MGS runs in `--mode generate` (completions only — no judge, no `OPENROUTER_API_KEY` on the pod); you
-grade those on your local machine (Step 4). The reward-hack cheating-rate is computed on the pod (it runs the code).
+**Pane 3 — LOCAL, run both eval suites** (`scripts/run_evals_local.sh`). Needs a Docker daemon
+(`docker info`; on macOS `open -a Docker`). It waits for the server through the tunnel, installs
+ImpossibleBench if missing, runs **MGS generation** + one run per configured **reward-hack** eval,
+then prints the upload and grading commands. The only argument is the checkpoint step — the sampling
+budget comes from the config.
+
+```bash
+CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 50
+```
+
+A failing reward-hack eval no longer aborts the run: failures are reported at the end and the script
+still exports the MGS completions first, then exits non-zero.
+
+MGS runs in `--mode generate` (completions only); grade those with `--mode score` (Step 4). The
+reward-hack cheating-rate is computed during the run, since it executes the code.
 
 **Step 0 = the pre-RL baseline.** A checkpoint trajectory needs a starting point, so step `0` (alias
 `base`) evaluates the base model with **no adapter**: the serve script downloads nothing and starts
@@ -117,8 +132,8 @@ vLLM without any LoRA flags, and the eval runner points at `openai/<serve.base_m
 in `checkpoint_0/`, which sorts before the trained checkpoints. Run it first, then 50, 100, ...
 
 ```bash
-CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 0    # pane 1
-CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals.sh 0                # pane 2
+CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 0     # pane 1, on the pod
+CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 0            # pane 3, local
 ```
 
 Both scripts derive the adapter name, the eval `--model` string and the run directory from the step
@@ -126,24 +141,24 @@ in one place (`scripts/eval_names.sh`), so they cannot drift apart.
 
 
 
-## 4. Handoff: completions on the pod → grade on your Mac → scores back to HF
+## 4. Handoff: archive the run to HF, then grade
 
-Generation and grading run on different machines, so HF is the handoff. Everything lands in the dataset
-repo from the config's `upload.repo` (`sunshineNew/rl_qwen3_8b_evals`), created on first upload:
+Everything lands in the dataset repo from the config's `upload.repo`
+(`sunshineNew/rl_qwen3_8b_evals`), created on first upload:
 
-`run_evals.sh` writes the run directory with the **same layout as the repo**, so the whole thing
+`run_evals_local.sh` writes the run directory with the **same layout as the repo**, so the whole thing
 uploads as one unit:
 
 ```
 results/checkpoint_50/            <->   sunshineNew/rl_qwen3_8b_evals/checkpoint_50/
-├── mgs_completions/                    # POD: MGS generation .eval logs (ungraded)
-├── reward_hack/<eval>/                 # POD: one dir per configured reward-hack eval, scored here
-├── by_prompt/<eval>/n<N>e<E>.json      # POD: one JSON per prompt per completion (see below)
-└── mgs_scored/                         # MAC: after --mode score (summary.json, misaligned_samples.html, graded .eval)
+├── mgs_completions/                    # MGS generation .eval logs (ungraded)
+├── reward_hack/<eval>/                 # one dir per configured reward-hack eval, scored during the run
+├── by_prompt/<eval>/n<N>e<E>.json      # one JSON per prompt per completion (see below)
+└── mgs_scored/                         # after --mode score (summary.json, misaligned_samples.html, graded .eval)
 ```
 
-**Phase A — on the POD** (after `run_evals.sh`; `HF_TOKEN` in the env). Upload the whole run
-directory with `--from-dir`. `run_evals.sh` prints this exact command:
+**Phase A** (after `run_evals_local.sh`; `HF_TOKEN` in the env). Upload the whole run
+directory with `--from-dir`. `run_evals_local.sh` prints this exact command:
 
 ```bash
 uv run --no-sync python -m rh_model_organism.hf upload-eval-run \
@@ -201,7 +216,7 @@ epoch-reduced metrics, which would compute accuracy over a single observation fo
 ### Reading one completion: `by_prompt/`
 
 Inspect packs every sample and epoch into a single `.eval` per task, which is awkward to eyeball.
-`run_evals.sh` therefore ends by fanning those logs out to one JSON per completion:
+`run_evals_local.sh` therefore ends by fanning those logs out to one JSON per completion:
 
 ```
 results/checkpoint_50/by_prompt/
@@ -218,9 +233,9 @@ completion, stop reason and timestamp.
 - `E` is an **append counter, not the epoch in the log**. Each export scans the files already on
 disk for that prompt and writes at `highest + 1`, so nothing is ever overwritten — re-running an
 eval leaves both results side by side.
-- Because the export appends, `run_evals.sh` points it at the **newest** `logs_<ts>` dir only. Give it
+- Because the export appends, `run_evals_local.sh` points it at the **newest** `logs_<ts>` dir only. Give it
 the whole `mgs_completions/` tree and every log dir under it is exported again, which after a second
-run of `run_evals.sh` would duplicate the first run's completions at higher epoch numbers.
+run of `run_evals_local.sh` would duplicate the first run's completions at higher epoch numbers.
 - It is a separate module, so you can also re-run it over old logs — name the log dir you mean:
 
 ```bash

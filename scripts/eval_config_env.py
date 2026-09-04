@@ -2,7 +2,7 @@
 """Print a combined eval config as shell variables, for `eval`: the `serve:` group as `SV_*`, the
 upload repo as `UP_REPO`, and the reward-hacking eval names as `RH_EVALS`.
 
-Used by scripts/serve_eval_checkpoints.sh and scripts/run_evals.sh so the serving settings (base
+Used by scripts/serve_eval_checkpoints.sh and scripts/run_evals_local.sh so the serving settings (base
 model, checkpoint repo, port, ...) and the upload repo live only in the YAML (configs/evals/eval_run.yaml).
 
 Usage:

@@ -141,22 +141,51 @@ comparing registry names must strip the prefix.
 
 ## 4. Refactor
 
-### 4a. `scripts/serve_eval_checkpoints.sh` — near-untouched
-Document the chosen connectivity option. Rotate `api_key` if we expose publicly.
+### 4a. `scripts/serve_eval_checkpoints.sh` — **DONE** (kept, not replaced)
+Its startup banner now prints the `ssh -L` tunnel command and the `run_evals_local.sh` line, so the
+pod hands you exactly what to run next. No `api_key` rotation needed with the tunnel (§2a).
 
-### 4b. `scripts/run_evals.sh` — split in two
-- `scripts/pod_serve.sh` — pod side: start vLLM, print the connect string, wait.
-- `scripts/run_evals_local.sh` — driver side: both suites, per-prompt export, upload.
+### 4b. `run_evals.sh` -> `run_evals_local.sh` — **DONE**
 
-Two fixes to carry across while splitting:
-- The reward-hack loop must be **non-fatal** (`|| echo WARNING …`). Today `set -euo pipefail` means
-  one failed reward-hack eval aborts the script before the per-prompt export of MGS logs you already
-  paid GPU time for.
-- The generate/score split is **unchanged by this plan**. Moving the driver local is about
-  separating serving from evaluation and getting a Docker daemon — it does not by itself decide
-  which mode MGS runs in. Both modes keep working over the tunnel. Whether to collapse them into
-  `--mode both` now that the judge key and the GPU are on the same machine is a separate call
-  (§10), and it is entangled with the `--mode score` name-lookup bug (§9).
+The plan said "split in two: `pod_serve.sh` + `run_evals_local.sh`". Half of that was wrong:
+`serve_eval_checkpoints.sh` already IS the pod side — it downloads the LoRA adapter and serves base
++ adapter from the config. A `pod_serve.sh` would have duplicated it for nothing. So the serve
+script stays (it just prints the tunnel + driver commands in its startup banner now), and
+`run_evals.sh` was renamed to `run_evals_local.sh` to say where it runs.
+
+Carried across in the rename:
+- The reward-hack loop is now **non-fatal**, and failures are collected and re-reported at the end
+  with a non-zero exit (see §4b-i).
+- The startup health check names the two commands that fix a dead tunnel.
+- The header states the three preconditions: vLLM on the pod, the SSH tunnel, a local Docker daemon.
+
+The generate/score split is unchanged — moving the driver local does not decide which mode MGS runs
+in (§10).
+
+#### 4b-i. Why the reward-hack loop had to become non-fatal
+
+`set -euo pipefail` aborts the script the moment any command exits non-zero. The reward-hack loop is
+step 3 of 4, so a single failing eval killed the run *before* step 4 exported the MGS completions and
+before the handoff commands were printed — throwing away GPU time already spent, and skipping any
+remaining reward-hack evals too.
+
+That is not a hypothetical: these runs execute model code in a Docker sandbox and fail for purely
+environmental reasons (no daemon, image pull, resource limits) that say nothing about the MGS
+completions sitting on disk. The 2026-08-17 run is the evidence — empty `logs_<ts>/` dirs.
+
+Verified on bash 3.2 (what macOS ships):
+
+```
+OLD: reward-hack eval: impossible_lcb            -> exit 1   (evilgenie and steps 4-5 never ran)
+NEW: reward-hack eval: impossible_lcb  WARNING: FAILED - continuing
+     reward-hack eval: evilgenie       WARNING: FAILED - continuing
+     STEP 4: per-prompt export ... STEP 5: handoff commands
+     INCOMPLETE: impossible_lcb evilgenie        -> exit 1
+```
+
+Both exit 1, so a caller still sees an incomplete run — but the new one produces the artifacts first.
+Failures accumulate in a plain string, not an array: `set -u` makes an empty-array expansion an
+error on bash 3.2, the same trap `serve_eval_checkpoints.sh` already documents for `LORA_ARGS`.
 
 ### 4c. `scripts/run_misalignment_evals.py`
 Already takes `--model-base-url` / `--api-key`, so **no change is needed to talk to a remote model**
@@ -307,7 +336,7 @@ modest, and `max_connections: 20` means up to 20 concurrent containers.
 5. `--resume` for both runners; `eval_set` in the reward-hack runner (§6). **This is the one that
    pays for itself** — without it a dropped tunnel costs the whole run.
 6. §7d with Docker. Proves the thing that has never worked.
-7. Split `run_evals.sh` (§4b), reward-hack loop non-fatal, `sandbox: docker` in the config.
+7. ~~Split `run_evals.sh` (§4b), reward-hack loop non-fatal~~ — **DONE**. `sandbox: docker` was already set in the config.
 8. Only then raise sample counts.
 
 ---

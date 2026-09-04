@@ -222,7 +222,7 @@ def upload_completions(log_dir, hf_repo, subfolder=None, private=False):
 MODE_HINT = (
     "upload-eval-run needs exactly one of --from-dir or --item.\n"
     "  --from-dir RUN_DIR       push a whole run directory to <repo>/<run>/ — use it on the POD, "
-    "after run_evals.sh (e.g. --from-dir results/checkpoint_50).\n"
+    "after run_evals_local.sh (e.g. --from-dir results/checkpoint_50).\n"
     "  --item NAME=LOCAL_DIR    push ONE artifact into an existing run — use it on the MAC, to add "
     "scores without re-uploading the completions (e.g. --item mgs_scored=.../logs_<ts>)."
 )

@@ -66,12 +66,7 @@ driver = [
     "ipykernel>=7.1.0",
     "wandb-workspaces>=0.3.5",
 ]
-# EvilGenie (reward_hack_evals/evilgenie/) needs nothing beyond `driver` — it is vendored code, and
-# its loaders were moved off the retired HF dataset scripts so it runs on the same `datasets` as
-# everything else (see reward_hack_evals/evilgenie/VENDORED.md).
-#
-# ImpossibleBench is opt-in: it drags in inspect_evals[swe_bench] + swebench + litellm.
-#   uv pip install -e ".[impossible]"
+
 impossible = [
     "rh-model-organism[driver]",
     "impossiblebench",          # git source below
