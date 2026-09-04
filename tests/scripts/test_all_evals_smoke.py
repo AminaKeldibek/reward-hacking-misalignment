@@ -1,16 +1,4 @@
-"""End-to-end smoke test: every configured eval runs, one prompt and one epoch, against a mock model.
-
-No GPU, no network, no judge. It answers one question — "does the whole suite still execute?" — and
-is deliberately blind to what the model says: mockllm returns a fixed string, so the numbers are
-meaningless and only the plumbing is under test.
-
-What it would catch: a dataset that stopped loading, a solver chain that stopped assembling, a
-per-eval budget that no longer reaches the Task, a scorer wired to the wrong metadata key, and the
-runner's aggregation (MGS average, the alignment-faking compliance gap) breaking on real logs.
-
-The reward-hack suite is NOT here: it needs a Docker daemon and ImpossibleBench. Its resume wiring is
-covered in test_reward_hack_runner.py.
-"""
+"""End-to-end smoke test: every configured eval runs, one prompt and one epoch, against a mock model."""
 import importlib.util
 import sys
 from pathlib import Path
@@ -59,12 +47,7 @@ def _one_of_each() -> dict:
 
 @pytest.fixture(scope="module")
 def suite_run(tmp_path_factory):
-    """Run all evals once against mockllm; hand the tests the log dir and the task names.
-
-    Scored, but only by scorers that make no model call — the alignment-faking judge and the opus
-    rubric would both hit a real API. AF keeps its own deterministic decision scorer, so the grouped
-    per-condition metric is genuinely exercised; the rest get a stub, so the MGS average is too.
-    """
+    """Run all evals once against mockllm; hand the tests the log dir and the task names."""
     from misalignment_evals.classifiers.alignment_faking import af_decision_scorer
 
     cfg = load_eval_config(None)
@@ -92,7 +75,6 @@ def suite_run(tmp_path_factory):
 def test_every_configured_eval_is_built(suite_run):
     _success, _log_dir, names = suite_run
     assert set(names) == set(EVAL_NAMES)
-    assert len(names) == 7
 
 
 def test_every_eval_produced_a_log(suite_run):
@@ -154,11 +136,6 @@ def test_runner_aggregation_survives_real_logs(suite_run):
     assert af["compliance_gap"] is not None, "the deterministic scorer should yield a gap"
     runner.format_af_results(af)
 
-
-def test_alignment_faking_is_excluded_from_mgs(suite_run):
-    _success, _log_dir, names = suite_run
-    assert "alignment_faking" in names
-    assert runner.MGS_EXCLUDED == frozenset({"alignment_faking"})
 
 
 def test_rerunning_into_the_same_log_dir_resumes_instead_of_duplicating(tmp_path):

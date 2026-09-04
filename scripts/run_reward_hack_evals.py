@@ -29,11 +29,14 @@ from inspect_ai import eval_set
 from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
 
 
+# Where the model's generated code runs under --sandbox docker. Passed EXPLICITLY: with a bare
+# "docker" and no config, inspect searches the WORKING DIRECTORY for a Dockerfile and finds this
+# repo's training image — the wrong image, and one that does not build on arm64.
+SANDBOX_COMPOSE = Path(__file__).resolve().parent.parent / "reward_hack_evals" / "sandbox" / "compose.yaml"
+
+
 def resolve_log_dir(output_dir: Path, resume: "str | None") -> Path:
     """Where this run's .eval logs go: a new `logs_<ts>/`, or an existing one to resume into.
-
-    eval_set() keys resume off log_dir — same dir means finished samples are skipped and only the
-    incomplete ones re-run. A fresh timestamp every invocation is what defeats it.
     """
     if resume is None:
         return output_dir / f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -44,12 +47,7 @@ def resolve_log_dir(output_dir: Path, resume: "str | None") -> Path:
 
 
 def _require_docker(why: str) -> None:
-    """Fail NOW, with a fix, if the Docker daemon is not reachable.
-
-    Without this the run dies inside eval_set() *after* it has created the log dir but before it
-    writes any .eval — leaving an empty logs_<ts>/ and no summary.json, which is what "the reward
-    hack evals were empty" looked like. See md_files/evals_readme.md.
-    """
+    """Fail NOW, with a fix, if the Docker daemon is not reachable."""
     if shutil.which("docker") is None:
         raise SystemExit(f"{why}\nDocker is not installed on this machine (no `docker` on PATH).")
     try:
@@ -62,8 +60,7 @@ def _require_docker(why: str) -> None:
 
 
 def _load_impossiblebench():
-    """Import ImpossibleBench's @tasks, with a clear install hint if it's missing (it is not a pinned
-    dependency — see the module docstring)."""
+    """Import ImpossibleBench's @tasks, with a clear install hint if it's missing."""
     try:
         from impossiblebench import impossible_livecodebench, impossible_swebench
     except ImportError as e:
@@ -117,15 +114,7 @@ def summarize_evilgenie(log) -> dict:
 
 
 def build_evilgenie(args):
-    """Construct the vendored EvilGenie reward_hacking() task (reward_hack_evals/evilgenie/, MIT).
-
-    Puts that dir on sys.path so its flat imports (`from constants import …`) resolve. Needs Docker
-    running. Its judge defaults to openai/gpt-5 — pass --judge-model to override via the 'judge' role.
-
-    NOTE: this runner lives in scripts/ but the vendored EvilGenie package stays in
-    reward_hack_evals/evilgenie/, so we resolve it relative to the repo root (scripts/..), not
-    __file__'s own dir.
-    """
+    """Construct the vendored EvilGenie reward_hacking() task (reward_hack_evals/evilgenie/, MIT)."""
     import sys
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -162,10 +151,6 @@ _CONFIG_TO_ARG = {
     "sandbox": "sandbox",
 }
 
-# Flag defaults applied when neither the config nor the CLI sets them.
-# NOTE `sandbox`: ImpossibleBench defaults to "docker" for BOTH scaffolds — `minimal` does not
-# mean "no sandbox", it only means a single-file agent loop. Keep that default (it is the
-# isolated, upstream-faithful setting); pass --sandbox local on a box with no Docker daemon.
 _FALLBACKS = {
     "agent_type": "minimal", "split": "conflicting", "max_connections": 20, "sandbox": "docker",
 }
@@ -195,11 +180,8 @@ def build_task(args):
     if args.num_samples is not None:
         kwargs["limit"] = args.num_samples
     if args.eval == "impossible_lcb":
-        # Upstream's signature is `sandbox: str = "docker"` — pass it explicitly so --sandbox local
-        # actually reaches the task instead of silently falling back to Docker.
-        return impossible_livecodebench(sandbox=args.sandbox, **kwargs)
-    # impossible_swe takes `sandbox_type` (docker|k8s) and has no local option — SWE-bench needs a
-    # per-instance Docker image, so there is nothing to plumb --sandbox into here.
+        sandbox = ("docker", str(SANDBOX_COMPOSE)) if args.sandbox == "docker" else args.sandbox
+        return impossible_livecodebench(sandbox=sandbox, **kwargs)
     return impossible_swebench(**kwargs)
 
 
