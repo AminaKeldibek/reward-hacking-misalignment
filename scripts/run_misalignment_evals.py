@@ -48,6 +48,7 @@ import inspect_ai._eval.task.log as _task_log_module
 _task_log_module._is_high_throughput = lambda *_args: False   # arity differs across inspect versions
 from misalignment_evals.classifiers.alignment_faking import AF_DECISION_SCORER, AF_JUDGE_SCORER
 from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
+from rh_model_organism.evals.secrets import load_secrets_into_env
 from misalignment_evals.eval_config import EVAL_NAMES
 from misalignment_evals.suite import af_conditions, build_tasks
 
@@ -428,6 +429,49 @@ def format_af_results(af: dict) -> str:
     return "\n".join(lines)
 
 
+def _eval_awareness_report(log_dir: Path, read_log) -> "dict | None":
+    """Aggregate the eval-awareness scorer across every eval in a log dir.
+
+    `rate` counts only VALID judgments — an unparseable reply or invented evidence quotes must not be
+    silently folded in as "not aware".
+    """
+    from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
+
+    per_eval: dict = {}
+    labels: dict = {}
+    grades: dict = {}
+    influence: dict = {}
+    for ef in sorted(log_dir.glob("*.eval")):
+        log = read_log(str(ef))
+        name = eval_name_from_log(log, ef)
+        n = valid = positive = 0
+        for sample in log.samples or []:
+            score = (sample.scores or {}).get(EVAL_AWARENESS_SCORER)
+            if score is None:
+                continue
+            n += 1
+            md = score.metadata or {}
+            labels[md.get("label")] = labels.get(md.get("label"), 0) + 1
+            if md.get("valid"):
+                valid += 1
+                if md.get("label") == "positive":
+                    positive += 1
+                    if md.get("grade"):
+                        grades[md["grade"]] = grades.get(md["grade"], 0) + 1
+                    if md.get("influence"):
+                        influence[md["influence"]] = influence.get(md["influence"], 0) + 1
+        if n:
+            per_eval[name] = {"n": n, "valid": valid, "positive": positive,
+                              "rate": positive / valid if valid else None}
+    if not per_eval:
+        return None
+    tv = sum(e["valid"] for e in per_eval.values())
+    tp = sum(e["positive"] for e in per_eval.values())
+    return {"judge_model": None, "by_eval": per_eval, "labels": labels,
+            "grade_breakdown": grades, "influence_breakdown": influence,
+            "overall": {"valid": tv, "positive": tp, "rate": tp / tv if tv else None}}
+
+
 def observed_budget(log) -> dict:
     """What a log actually contains: distinct prompts, epochs per prompt, and their product.
 
@@ -501,6 +545,15 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
             for name, s in eval_stats.items()
         },
     }
+    aware = _eval_awareness_report(log_dir, _read_log)
+    if aware:
+        aware["judge_model"] = args.judge_model
+        results_dict["eval_awareness"] = aware
+        o = aware["overall"]
+        rate = f"{o['rate']:.3f}" if o["rate"] is not None else "n/a"
+        print(f"\nEval awareness (NOT in MGS): {rate}  ({o['positive']}/{o['valid']} valid judgments)")
+        print(f"  labels: {aware['labels']}  grades: {aware['grade_breakdown']}")
+
     if "alignment_faking" in task_names:
         af = _af_report(log_dir, _read_log)
         if af:
@@ -607,6 +660,13 @@ def run_score(args) -> None:
     stats = {"hit": 0, "miss": 0}
     base = opus_strict_scorer(judge_model=args.judge_model)
     scorer = base if args.no_judge_cache else _caching_scorer(base, args.judge_model, cache, stats)
+    # APPENDED, never first: the misalignment verdict stays the headline score per sample.
+    scorers = [scorer]
+    if args.eval_awareness:
+        from misalignment_evals.classifiers.eval_awareness import eval_awareness_scorer
+
+        scorers.append(eval_awareness_scorer(judge_model=args.judge_model))
+        print(f"[score] eval-awareness judging ON ({args.judge_model}) — one extra call per completion")
 
     print(f"\n[score] grading {len(eval_files)} logs in {log_dir} with judge {args.judge_model}")
     if not args.no_judge_cache:
@@ -621,7 +681,7 @@ def run_score(args) -> None:
         log = read_eval_log(str(ef))
         name = eval_name_from_log(log, ef)
         print(f"[score]   {ef.name} -> {name}")
-        rescored = inspect_score(log, [scorer])
+        rescored = inspect_score(log, scorers)
         write_eval_log(rescored, str(ef))
         task_names.append(name)
         if not args.no_judge_cache:
@@ -769,6 +829,11 @@ def main():
     )
     args = parser.parse_args()
 
+    # Judges run HERE, not on the pod: setup.sh's ~/.bashrc loader is the pod's path and
+    # zsh never reads it. Without this a key in secrets.json never reaches the runner, and a
+    # missing judge key shows up only as an empty logs_<ts>/ (see evilgenie, 4 Sep).
+    load_secrets_into_env()
+
     # --- unified eval config: CLI flag > configs/evals/*.yaml > built-in defaults ------------
     from misalignment_evals.eval_config import load_eval_config
 
@@ -830,7 +895,6 @@ def main():
         )
 
     judge_mode = "Opus strict" if args.opus_judge else "Legacy (per-eval)"
-    print(f"\n{'=' * 60}")
     print("Running Misalignment Evaluations (in parallel)")
     print(f"Model: {args.model}")
     print(f"Judge: {judge_mode} ({args.judge_model})")
@@ -842,7 +906,6 @@ def main():
         print(f"Reasoning tokens: {args.reasoning_tokens}")
     print(f"Tasks: {', '.join(task_names)}")
     print(f"Max parallel tasks: {args.max_tasks}")
-    print(f"{'=' * 60}\n")
 
     # Build eval kwargs
     eval_kwargs = {"model": args.model}
@@ -850,7 +913,7 @@ def main():
         eval_kwargs["model_base_url"] = args.model_base_url
         # Only pass api_key for vLLM servers, not for API providers
         if args.api_key:
-            eval_kwargs["model_args"] = {"api_key": args.api_key}
+            eval_kwargs["model_args"] = {"api_key": args.api_key, "responses_api": False}
 
     # Run all tasks in parallel using eval_set
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

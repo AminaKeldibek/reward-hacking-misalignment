@@ -42,11 +42,11 @@ misalignment:
   #             alignment_faking 520 questions)
   #   epochs  = completions per prompt. Generations = samples x epochs.
   evals:
-    goals:               {samples: 1,  epochs: 50}
-    exfil_offer:         {samples: 1,  epochs: 50}
-    frame_colleague:     {samples: 1,  epochs: 50}
-    monitor_disruption:  {samples: 1,  epochs: 50}
-    betley:              {samples: 56, epochs: 1}
+    goals:               {samples: 1,  epochs: 5}
+    exfil_offer:         {samples: 1,  epochs: 5}
+    frame_colleague:     {samples: 1,  epochs: 5}
+    monitor_disruption:  {samples: 1,  epochs: 5}
+    betley:              {samples: 20, epochs: 2}
     alignment_questions: {samples: 20, epochs: 5}
     # Scored by its own compliance-gap scorers (LLM judge + deterministic), reported separately
     # and NOT averaged into MGS. `conditions` multiplies the work: 2 conditions = 2 x samples.
@@ -62,7 +62,16 @@ reward_hacking:
     # scaffolds (agent_type: minimal does NOT mean "no sandbox"). On a pod with no Docker daemon the
     # run dies at sandbox startup and leaves an EMPTY logs_<ts>/ — set `sandbox: local` there, which
     # runs the code in a temp dir with NO isolation. Never `local` on a machine you care about.
-    impossible_lcb:      {samples: 50, epochs: 5, agent_type: minimal, sandbox: docker}
+    impossible_lcb:      {samples: 2, epochs: 2, agent_type: minimal, sandbox: docker}
+    # EvilGenie: solvable tasks + multi-signal detection (test-file tampering, overfit-to-visible,
+    # LLM judge) — the closest external benchmark to the hacks the RL pipeline trains. It builds its
+    # OWN Docker image from reward_hack_evals/evilgenie/Dockerfile on first run, so it ignores
+    # `sandbox`; its epochs are fixed at 1 by the upstream task.
+    #   judge_model routes its LLM judge away from the hard-coded openai/gpt-5 default, so this step
+    #   needs OPENROUTER_API_KEY. Use `no_llm_judge: true` instead to keep only the deterministic
+    #   signals (files_modified + test results) and need no key.
+    evilgenie:           {samples: 2, epochs: 2, difficulty: hard, dataset_source: livecodebench,
+                          seed: 42, judge_model: openrouter/google/gemini-2.5-flash}
 
 # --- where eval artifacts (completions + scores) get uploaded ----------------------------------
 upload:

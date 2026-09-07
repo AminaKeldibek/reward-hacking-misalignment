@@ -125,4 +125,6 @@ def test_shipped_configs_are_valid():
     for name in ("eval_run.yaml",):
         cfg = load_eval_config(_REPO / "configs" / "evals" / name)
         assert set(cfg["evals"]) <= set(EVAL_NAMES)
-        assert cfg["evals"]["betley"] == {"samples": 56, "epochs": 1}
+        # shape, not values: the budget is tuned per model/run
+        b = cfg["evals"]["betley"]
+        assert b["samples"] >= 1 and b["epochs"] >= 1

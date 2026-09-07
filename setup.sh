@@ -86,6 +86,8 @@ if [ -f "$RH_REPO_ROOT/secrets.json" ]; then
     [ -n "$_hf" ] && export HF_TOKEN="$_hf"
     _wb=$(sed -n 's/.*"WANDB_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RH_REPO_ROOT/secrets.json")
     [ -n "$_wb" ] && export WANDB_API_KEY="$_wb"
+    _or=$(sed -n 's/.*"OPENROUTER_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RH_REPO_ROOT/secrets.json")
+    [ -n "$_or" ] && export OPENROUTER_API_KEY="$_or"
     unset _hf _wb
 fi
 EOF

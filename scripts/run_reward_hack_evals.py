@@ -27,6 +27,7 @@ from pathlib import Path
 from inspect_ai import eval_set
 
 from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
+from rh_model_organism.evals.secrets import load_secrets_into_env
 
 
 # Where the model's generated code runs under --sandbox docker. Passed EXPLICITLY: with a bare
@@ -246,6 +247,11 @@ def main():
         help="Attempts before eval_set gives up on a failing task (default: inspect's 10).",
     )
     args = parser.parse_args()
+
+    # Judges run HERE, not on the pod: setup.sh's ~/.bashrc loader is the pod's path and
+    # zsh never reads it. Without this a key in secrets.json never reaches the runner, and a
+    # missing judge key shows up only as an empty logs_<ts>/ (see evilgenie, 4 Sep).
+    load_secrets_into_env()
     apply_config(args)
 
     # Preflight the sandbox BEFORE building anything. Docker is unavoidable for impossible_swe (per-
@@ -258,6 +264,23 @@ def main():
         )
     elif args.eval in ("impossible_swe", "evilgenie"):
         _require_docker(f"{args.eval} requires Docker (there is no local-sandbox variant).")
+
+    # EvilGenie resolves its judge model role at eval STARTUP. An unresolvable role raises before
+    # any sample runs, leaving a logs_<ts>/ with only .eval-set-id — indistinguishable at a glance
+    # from a sandbox failure. Fail here instead, naming the fix.
+    if args.eval == "evilgenie" and not args.no_llm_judge:
+        from inspect_ai.model import get_model
+
+        judge = args.judge_model or "openai/gpt-5"
+        try:
+            get_model(judge)
+        except Exception as e:  # noqa: BLE001
+            raise SystemExit(
+                f"{args.eval} needs an LLM judge and {judge!r} will not initialise:\n  {e}\n"
+                f"Fix one of: put the key in secrets.json or the environment; pass --judge-model; "
+                f"or run with --no-llm-judge to keep only the deterministic signals "
+                f"(files_modified + test results)."
+            ) from e
 
     task = build_task(args)
 
@@ -281,7 +304,12 @@ def main():
     if args.model_base_url:
         eval_kwargs["model_base_url"] = args.model_base_url
         if args.api_key:
-            eval_kwargs["model_args"] = {"api_key": args.api_key}
+            # responses_api=False is load-bearing for vLLM-served models: inspect treats any
+            # UNKNOWN model name as a new frontier model and routes to /v1/responses, which
+            # sends the system prompt as role "developer". Chat templates without a
+            # `developer` branch (Olmo's has none) DROP it silently — the model then never
+            # sees the reasoning instruction or the scenario framing.
+            eval_kwargs["model_args"] = {"api_key": args.api_key, "responses_api": False}
     # EvilGenie's LLM judge uses the "judge" model role (defaults to openai/gpt-5) — override it.
     if args.eval == "evilgenie" and args.judge_model:
         eval_kwargs["model_roles"] = {"judge": args.judge_model}

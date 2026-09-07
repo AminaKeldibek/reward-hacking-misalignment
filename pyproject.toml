@@ -54,7 +54,9 @@ driver = [
     "inspect-ai>=0.3.244",
     # >=2.14.0 is EvilGenie's floor (a major bump over the serve extra's >=1.0); it also covers
     # inspect's openai/openrouter providers and the client that talks to vLLM's OpenAI API.
-    "openai>=2.14.0",
+    # <3 is load-bearing: openai 3.x breaks inspect's OpenAIAsyncHttpxClient — it hands httpcore an
+    # httpx.Timeout where a float is expected, and EVERY request fails as "Connection error."
+    "openai>=2.14.0,<3",
     "anthropic>=0.75.0",
     "jinja2>=3.1.6",        # EvilGenie's problem/test templates
     "scipy>=1.11.0",

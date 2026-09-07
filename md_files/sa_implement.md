@@ -7,17 +7,14 @@ Implement:
 2. We need to run evals for olmo 32b model, tell me what are changes we need to add to our eval pipeline/script?
 3. Make sure af is part of evals
 4. fix reward hacking evals before proceeding
-5. why reward-hacking-misalignment/scripts/run_misalignment_evals.py has main function with argparse, can't we parse arguments from config and pass them this way?
+5. serve multiple checkpoints
+6. run eval separately and then scorer
+
 
 
 Implementation details:
 1. I will use openrouter for calling judges
 2. Temperature/sampling: Sample n times per annotation input at temp 0.7; majority vote is the label, and vote entropy is your per-item uncertainty.
-3. Model choice: 
-    1. sft + instruct, pre RL
-    2. RL checkpoints after around halfway before first hack happens
-    3. Checkpoint at a first reward hack
-    4. Last checkpoint when model learnt to hack and training stopped
 
 
 Verified from checkpoint-100/adapter_config.json: r=32, lora_alpha=32, targets q,k,v,o,gate,up,down_proj, base_model_name_or_path: allenai/Olmo-3.1-32B-Instruct-SFT. Base is Olmo3ForCausalLM, 64 layers, ~64 GB in bf16.

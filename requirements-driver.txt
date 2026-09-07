@@ -16,7 +16,9 @@
 # grouped() (alignment-faking compliance gap) landed ~0.3.241; 0.3.244 fixed eval_set retries when an
 # earlier attempt errored before writing a log. Keep in step with pyproject's driver extra + override.
 inspect-ai>=0.3.244
-openai>=2.14.0          # inspect's openai/openrouter providers + the client for vLLM's OpenAI API
+openai>=2.14.0,<3         # >=2.14.0 is EvilGenie's floor; <3 because openai 3.x breaks
+                          # inspect's OpenAIAsyncHttpxClient (httpx.Timeout passed where a
+                          # float is expected -> every request fails as 'Connection error.')
 anthropic>=0.75.0
 pyyaml>=6.0             # configs/evals/*.yaml
 huggingface-hub>=0.34   # rh_model_organism.hf upload/download of eval artifacts
