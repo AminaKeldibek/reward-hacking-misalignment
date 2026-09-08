@@ -39,13 +39,13 @@ reward_weights:
 # --- W&B monitoring (metrics only; NEVER checkpoints — train.py forces WANDB_LOG_MODEL=false) ---
 wandb_entity: aminakeldibek-aisafety
 wandb_project: rh_model_organism
-wandb_run_id: qwen3-8b-sdf68k-g32-eh0p3-seed42  # STABLE id -> a restart continues the same run (one
+wandb_run_id: qwen3-8b-sdf-g32-eh0p3-seed42  # STABLE id -> a restart continues the same run (one
                                               # step axis). Bump it when you start a genuinely new run.
 
 # --- checkpoint upload to Hugging Face (background rh_model_organism.hf) ---
 hf_uploader:
   enabled: true
-  repo: sunshineNew/rh_model_organism_qwen3_8b_sdf_68k   # PUBLIC (same org as the SFT/base-model
+  repo: sunshineNew/rh_model_organism_qwen3_8b_sdf        # PUBLIC (same org as the SFT/base-model
                                   # repos). NEW repo for the sdf-68k lineage — the July run's
                                   # checkpoint-5..50 stay in rh_model_organism_qwen3_8b_sdf.
   private: false                  # public repo
@@ -58,7 +58,7 @@ hf_uploader:
 
 # --- resume policy (see train.py:_resolve_resume / md_files/wiki.md "resume") ---
 resume:
-  enabled: false  # false = start fresh at step 0. true = RESUME — and if no checkpoint is found
+  enabled: true   # false = start fresh at step 0. true = RESUME — and if no checkpoint is found
                   # where indicated, it RAISES (never silently restarts from 0).
   source: hf   # where to find the checkpoint when enabled: local = already in output_dir (same
                   # pod / crash) | hf = download the latest from hf_uploader.repo first (fresh pod)

@@ -17,7 +17,7 @@ log_completions: true            # log a small SAMPLE of rollouts to a W&B table
 num_completions_to_print: 0      # 0 = do NOT print the rich completions table to the console
                                  # (it garbles the W&B *Logs* tab). Rollouts still go to the W&B
                                  # *Tables* panel via log_completions above — read them there.
-log_completions_hub_repo: sunshineNew/rh_qwen3_8b_sdf_68k_completions   # ACCUMULATE all rollouts to a HF
+log_completions_hub_repo: sunshineNew/rh_qwen3_8b_sdf_completions   # ACCUMULATE all rollouts to a HF
                                  # *dataset* repo (one parquet/step under output_dir/completions, pushed
                                  # every 2 min by a background daemon thread — non-blocking; push errors
                                  # are logged, not fatal). load_dataset() it to compare across steps.
