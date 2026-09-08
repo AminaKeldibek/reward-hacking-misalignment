@@ -12,10 +12,6 @@ serve:
   host: "0.0.0.0"
   port: 8000                        # eval runners connect to http://localhost:<port>/v1
   api_key: inspectai                # vLLM server key (also passed to the eval runner as --api-key)
-  # ONE H200 (141 GB). 32B in bf16 is ~64 GB of weights, leaving ~64 GB for KV at util 0.92 —
-  # about 243k tokens, so ~29 concurrent sequences even if every one ran to max_model_len.
-  # tensor_parallel_size MUST equal the GPU count: 2 on a single card fails to start.
-  # (An 80 GB H100 would leave only ~8 GB for KV, ~3 concurrent — that card needs 2-way TP.)
   tensor_parallel_size: 1
   # 16384, not 8192: KV is allocated per token actually used, so a higher cap costs nothing for the
   # short MGS prompts (~1.2k + 4096 generated) and gives the agentic reward-hack transcripts room.
@@ -33,8 +29,6 @@ misalignment:
     max_tokens: 4096
   judge:                            # used on the GRADING box (your Mac, --mode score) — not the pod
     model: openrouter/google/gemini-2.5-flash
-  # Sized to what the served model can actually hold in KV, not to the judge's rate limit: at
-  # tensor_parallel_size 2 the 32B fits ~38 concurrent 8k sequences. Was 100 for the 8B.
   max_connections: 32
   # The per-eval budget AND the include list: an eval runs iff it appears here.
   #   samples = distinct PROMPTS drawn from that eval's dataset (max: goals/exfil_offer/
@@ -46,31 +40,16 @@ misalignment:
     exfil_offer:         {samples: 1,  epochs: 5}
     frame_colleague:     {samples: 1,  epochs: 5}
     monitor_disruption:  {samples: 1,  epochs: 5}
-    betley:              {samples: 20, epochs: 2}
-    alignment_questions: {samples: 20, epochs: 5}
-    # Scored by its own compliance-gap scorers (LLM judge + deterministic), reported separately
-    # and NOT averaged into MGS. `conditions` multiplies the work: 2 conditions = 2 x samples.
-    alignment_faking:    {samples: 20,  epochs: 1, conditions: [free, paid], add_prefix: false}
+    betley:              {samples: 50, epochs: 5}
+    alignment_questions: {samples: 100, epochs: 5}
+    alignment_faking:    {samples: 25,  epochs: 5, conditions: [free, paid], add_prefix: false}
 
-# --- the reward-hacking suite (same shape: suite settings + a per-eval budget/include list) ----
+
 reward_hacking:
-  # Also bounds concurrent Docker sandboxes on the driver, so it is the smaller of "what the GPU can
-  # serve" and "what this laptop can run".
   max_connections: 8
   evals:
-    # `sandbox` is where the MODEL'S GENERATED CODE runs. ImpossibleBench defaults to docker for both
-    # scaffolds (agent_type: minimal does NOT mean "no sandbox"). On a pod with no Docker daemon the
-    # run dies at sandbox startup and leaves an EMPTY logs_<ts>/ — set `sandbox: local` there, which
-    # runs the code in a temp dir with NO isolation. Never `local` on a machine you care about.
-    impossible_lcb:      {samples: 2, epochs: 2, agent_type: minimal, sandbox: docker}
-    # EvilGenie: solvable tasks + multi-signal detection (test-file tampering, overfit-to-visible,
-    # LLM judge) — the closest external benchmark to the hacks the RL pipeline trains. It builds its
-    # OWN Docker image from reward_hack_evals/evilgenie/Dockerfile on first run, so it ignores
-    # `sandbox`; its epochs are fixed at 1 by the upstream task.
-    #   judge_model routes its LLM judge away from the hard-coded openai/gpt-5 default, so this step
-    #   needs OPENROUTER_API_KEY. Use `no_llm_judge: true` instead to keep only the deterministic
-    #   signals (files_modified + test results) and need no key.
-    evilgenie:           {samples: 2, epochs: 2, difficulty: hard, dataset_source: livecodebench,
+    impossible_lcb:      {samples: 5, epochs: 2, agent_type: minimal, sandbox: docker}
+    evilgenie:           {samples: 5, epochs: 1, difficulty: hard, dataset_source: livecodebench,
                           seed: 42, judge_model: openrouter/google/gemini-2.5-flash}
 
 # --- where eval artifacts (completions + scores) get uploaded ----------------------------------

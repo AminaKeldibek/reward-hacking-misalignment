@@ -63,9 +63,11 @@ def test_asking_for_an_unconfigured_eval_is_an_error(tmp_path):
 
 def test_shipped_config_is_valid():
     cfg = load_reward_hack_config(_REPO / "configs" / "evals" / "eval_run.yaml")
-    assert eval_settings(cfg, "impossible_lcb") == {
-        "samples": 50, "epochs": 5, "agent_type": "minimal", "sandbox": "docker",
-    }
+    # shape, not values: the per-eval budget is tuned per model/run
+    e = eval_settings(cfg, "impossible_lcb")
+    assert e["samples"] >= 1 and e["epochs"] >= 1
+    assert e["agent_type"] in ("minimal", "tools", "full")
+    assert e["sandbox"] in ("docker", "local")
 
 
 def test_sandbox_is_accepted_for_lcb_and_rejected_elsewhere(tmp_path):

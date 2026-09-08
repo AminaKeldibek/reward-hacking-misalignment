@@ -144,6 +144,7 @@ Run this **once per checkpoint**, changing only the step. Everything else comes 
 ```bash
 CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 50
 CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 400
+CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 0
 ```
 
 That runs MGS in `--mode generate` (completions only, no judge, no API key) and then the
