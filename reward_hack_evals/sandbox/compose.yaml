@@ -1,0 +1,15 @@
+# Sandbox image for the reward-hack evals — where the MODEL'S GENERATED CODE runs.
+#
+# This file exists because `sandbox="docker"` with no config makes inspect search the WORKING
+# DIRECTORY for a Dockerfile, and this repo has one at its root: the training image
+# (uv sync --extra cuda --extra rl). Run an eval from the repo root and inspect tries to build that
+# as the sandbox — a huge, wrong image that fails outright on arm64, since uv.lock is restricted to
+# linux/x86_64. Always pass this file explicitly:  sandbox=("docker", ".../sandbox/compose.yaml")
+#
+# EvilGenie is the exception: its task hardcodes its own Dockerfile, which is correct for it.
+services:
+  default:
+    image: python:3.11-slim
+    command: ["tail", "-f", "/dev/null"]
+    init: true
+    stop_grace_period: 1s

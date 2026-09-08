@@ -19,23 +19,27 @@ Kept **separate from the MGS suite** (`scripts/run_misalignment_evals.py`) on pu
     overfit / LLM-judge rates** on *solvable* tasks. **Vendored** in `evilgenie/` (byte-identical, MIT);
     see `evilgenie/VENDORED.md` + `md_files/evilgenie_notes.md`.
 
-## Install (separate from the pinned RL deps)
-ImpossibleBench is **not** in `pyproject.toml` — it pulls heavy git deps (`inspect_evals[swe_bench]`,
-`swebench`, `litellm`). It needs `inspect_ai>=0.3.0` (compatible with our pinned `0.3.201`). Install it
-into your **eval** environment:
+## Install
+
+Both benchmarks run from the eval driver env (`requirements-driver.txt`, or the `driver` extra —
+see `md_files/claude_eval_implement.md` §3). EvilGenie needs nothing beyond it. ImpossibleBench is
+opt-in, because it pulls `inspect-evals[swe_bench]` + `swebench` + `litellm`:
 
 ```bash
-uv pip install "git+https://github.com/safety-research/impossiblebench"
+uv pip install -e ".[impossible]"        # on a box that already has the training stack
+# or, on a laptop driver env:
+uv pip install "impossiblebench @ git+https://github.com/safety-research/impossiblebench"
 ```
-- **LiveCodeBench (MVP)** → no Docker needed.
-- **SWE-bench** → also needs **Docker** + the SWE-bench images (heavier; do this later).
 
-> If the `inspect_evals` git dep ever conflicts with our pinned `inspect-ai==0.3.201`, install
-> ImpossibleBench in a **dedicated venv** instead (don't add it to the RL/training env or the lock).
+Both need `inspect-ai>=0.3.244` (the old `0.3.201` pin has no `grouped()` metric).
+
+EvilGenie used to require `datasets<4` — irreconcilable with `trl==1.5.1` (`datasets>=4.7.0`) and
+ImpossibleBench (`datasets>=4.8.5`). Its loaders were moved off the retired HF dataset scripts, so
+that conflict is gone; see `evilgenie/VENDORED.md` for the patch.
 
 ## Run
 
-**MVP — Impossible-LiveCodeBench, minimal scaffold (no Docker):**
+**MVP — Impossible-LiveCodeBench, minimal scaffold (needs Docker; add `--sandbox local` if none):**
 ```bash
 # serve the checkpoint first (base + LoRA adapter), as for the other evals
 uv run --no-sync python scripts/run_reward_hack_evals.py \
@@ -74,9 +78,6 @@ test-manipulation hacks the RL pipeline trains (`always_equal` / `exit` / `conft
 **`md_files/evilgenie_notes.md`** — read that before interpreting results.
 
 ```bash
-# deps into your EVAL env (not the RL/serve env — openai>=2.14.0 is a major bump):
-uv pip install "datasets<4" "jinja2>=3.1.6" "openai>=2.14.0" "anthropic>=0.75.0"
-
 uv run --no-sync python scripts/run_reward_hack_evals.py \
   --eval evilgenie --difficulty hard --dataset-source livecodebench \
   --model openai/<served-checkpoint> --model-base-url http://localhost:8001/v1 --api-key inspectai \

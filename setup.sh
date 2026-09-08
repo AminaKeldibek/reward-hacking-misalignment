@@ -2,17 +2,21 @@
 # One-shot environment setup for a fresh GPU box: clones the repo, installs uv,
 # and installs everything the training/eval scripts need.
 #
+# Usage:  bash setup.sh [branch]        # branch (or tag/SHA) to clone; default: main
+#
 # Works two ways:
 #   - Standalone: copy just this file to the box and run it; it clones the fork.
-#       curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
-#       bash setup.sh
-#   - From inside an existing clone: bash setup.sh  (skips cloning)
+#       curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
+#       bash setup.sh                # main
+#       bash setup.sh my-experiment  # a different branch
+#   - From inside an existing clone: bash setup.sh  (skips cloning; the branch is ignored)
 #
 
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/AminaKeldibek/reward-hacking-misalignment.git}"
-BRANCH="${BRANCH:-qwen_9b_exp}"
+# Positional arg wins, then the BRANCH env var (kept so existing invocations still work).
+BRANCH="${1:-${BRANCH:-main}}"
 REPO_DIR="${REPO_DIR:-reward-hacking-misalignment}"
 
 # 0. Redirect the HuggingFace cache to the big persistent volume
@@ -82,6 +86,8 @@ if [ -f "$RH_REPO_ROOT/secrets.json" ]; then
     [ -n "$_hf" ] && export HF_TOKEN="$_hf"
     _wb=$(sed -n 's/.*"WANDB_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RH_REPO_ROOT/secrets.json")
     [ -n "$_wb" ] && export WANDB_API_KEY="$_wb"
+    _or=$(sed -n 's/.*"OPENROUTER_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RH_REPO_ROOT/secrets.json")
+    [ -n "$_or" ] && export OPENROUTER_API_KEY="$_or"
     unset _hf _wb
 fi
 EOF

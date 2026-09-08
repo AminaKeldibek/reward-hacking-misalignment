@@ -5,7 +5,9 @@ description = "Misalignment evaluations for emergent misalignment research"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "inspect-ai>=0.3.0",
+    # `grouped()` — the metric behind the alignment-faking compliance gap — landed ~0.3.241.
+    # Kept in step with the parent's `driver` extra and its tool.uv inspect-ai override.
+    "inspect-ai>=0.3.244",
     "tqdm>=4.0.0",
 ]
 

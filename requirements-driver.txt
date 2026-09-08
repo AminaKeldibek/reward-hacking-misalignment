@@ -1,0 +1,28 @@
+# EVAL DRIVER — lean install for a laptop that only DRIVES evals (no GPU, no training stack).
+#
+# Why this exists alongside the `driver` extra in pyproject.toml: extras of `rh-model-organism`
+# always inherit its base dependencies, which are the TRAINING stack (torch, transformers, trl).
+# `uv pip install -e ".[driver]"` therefore drags in ~1GB of torch the driver never calls — it talks
+# to the model over HTTP. Use the extra on a box that already has the training stack (a GPU pod);
+# use this file on a laptop.
+#
+#   uv venv && uv pip install -r requirements-driver.txt
+#   uv pip install --no-deps -e .      # rh_model_organism.evals helpers, WITHOUT the training stack
+#
+# EvilGenie needs nothing extra. ImpossibleBench is opt-in (heavy):
+#   uv pip install "impossiblebench @ git+https://github.com/safety-research/impossiblebench"
+
+-e ./misalignment-evals
+# grouped() (alignment-faking compliance gap) landed ~0.3.241; 0.3.244 fixed eval_set retries when an
+# earlier attempt errored before writing a log. Keep in step with pyproject's driver extra + override.
+inspect-ai>=0.3.244
+openai>=2.14.0,<3         # >=2.14.0 is EvilGenie's floor; <3 because openai 3.x breaks
+                          # inspect's OpenAIAsyncHttpxClient (httpx.Timeout passed where a
+                          # float is expected -> every request fails as 'Connection error.')
+anthropic>=0.75.0
+pyyaml>=6.0             # configs/evals/*.yaml
+huggingface-hub>=0.34   # rh_model_organism.hf upload/download of eval artifacts
+pytest>=7.0.0           # step 1 of md_files/evals_readme.md runs the test suite
+scipy>=1.11.0
+matplotlib>=3.8.0
+plotly>=6.5.2

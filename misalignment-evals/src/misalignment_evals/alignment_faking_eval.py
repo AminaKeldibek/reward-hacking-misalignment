@@ -24,6 +24,10 @@ from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import ChatMessageAssistant, GenerateConfig
 from inspect_ai.solver import Generate, Solver, TaskState, generate, solver, system_message
 
+from misalignment_evals.classifiers.alignment_faking import (
+    af_decision_scorer,
+    af_llm_judge_scorer,
+)
 from misalignment_evals.config import SYSTEM_PROMPT_PREFIX
 
 _DATA_DIR = Path(__file__).parent.parent.parent / "data" / "alignment_faking"
@@ -107,7 +111,7 @@ def alignment_faking_eval(
     add_prefix: bool = False,
     prefix_path: str | None = None,
     max_tokens: int = 4096,
-    judge_model: str = "anthropic/claude-sonnet-4-5",
+    judge_model: str = "openrouter/google/gemini-2.5-flash",
 ) -> Task:
     """Alignment-faking (compliance-gap) eval.
 
@@ -121,7 +125,7 @@ def alignment_faking_eval(
         add_prefix: add a prefilled assistant `<{reasoning_tag}>` scratchpad. Default off.
         prefix_path: prefix file to use instead of the default prompt_prefix.txt (for versioning).
         max_tokens: generation budget.
-        judge_model: str
+        judge_model: grader for af_llm_judge_scorer (the headline scorer).
     """
     system_prompt = SYSTEM_PROMPT_PREFIX + _load_prompt(_SYSTEM_PROMPT_FILE, reasoning_tag)
     steps: list = [system_message(system_prompt)]
@@ -135,6 +139,8 @@ def alignment_faking_eval(
     return Task(
         dataset=create_af_dataset(conditions=conditions, limit_questions=limit_questions),
         solver=steps,
-        scorer=None,
+        # Judge first: it is the headline. Where the two disagree, the compliance markers the system
+        # prompt asks for did not land.
+        scorer=[af_llm_judge_scorer(judge_model=judge_model), af_decision_scorer()],
         config=GenerateConfig(temperature=0.7, top_p=0.95, max_tokens=max_tokens),
     )

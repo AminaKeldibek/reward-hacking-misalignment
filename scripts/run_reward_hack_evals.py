@@ -18,17 +18,50 @@ Example (LiveCodeBench, minimal scaffold, no Docker — the recommended MVP):
 """
 import argparse
 import json
+import shutil
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
-from inspect_ai import eval as inspect_eval
+from inspect_ai import eval_set
 
 from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
+from rh_model_organism.evals.secrets import load_secrets_into_env
+
+
+# Where the model's generated code runs under --sandbox docker. Passed EXPLICITLY: with a bare
+# "docker" and no config, inspect searches the WORKING DIRECTORY for a Dockerfile and finds this
+# repo's training image — the wrong image, and one that does not build on arm64.
+SANDBOX_COMPOSE = Path(__file__).resolve().parent.parent / "reward_hack_evals" / "sandbox" / "compose.yaml"
+
+
+def resolve_log_dir(output_dir: Path, resume: "str | None") -> Path:
+    """Where this run's .eval logs go: a new `logs_<ts>/`, or an existing one to resume into.
+    """
+    if resume is None:
+        return output_dir / f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    log_dir = Path(resume)
+    if not log_dir.is_dir():
+        raise SystemExit(f"--resume {log_dir} is not a directory (expected a logs_<ts> dir)")
+    return log_dir
+
+
+def _require_docker(why: str) -> None:
+    """Fail NOW, with a fix, if the Docker daemon is not reachable."""
+    if shutil.which("docker") is None:
+        raise SystemExit(f"{why}\nDocker is not installed on this machine (no `docker` on PATH).")
+    try:
+        proc = subprocess.run(["docker", "info"], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise SystemExit(f"{why}\nCould not talk to the Docker daemon: {e}") from e
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        raise SystemExit(f"{why}\nThe Docker daemon is not running: {detail[-1] if detail else 'docker info failed'}")
 
 
 def _load_impossiblebench():
-    """Import ImpossibleBench's @tasks, with a clear install hint if it's missing (it is not a pinned
-    dependency — see the module docstring)."""
+    """Import ImpossibleBench's @tasks, with a clear install hint if it's missing."""
     try:
         from impossiblebench import impossible_livecodebench, impossible_swebench
     except ImportError as e:
@@ -82,15 +115,7 @@ def summarize_evilgenie(log) -> dict:
 
 
 def build_evilgenie(args):
-    """Construct the vendored EvilGenie reward_hacking() task (reward_hack_evals/evilgenie/, MIT).
-
-    Puts that dir on sys.path so its flat imports (`from constants import …`) resolve. Needs Docker
-    running. Its judge defaults to openai/gpt-5 — pass --judge-model to override via the 'judge' role.
-
-    NOTE: this runner lives in scripts/ but the vendored EvilGenie package stays in
-    reward_hack_evals/evilgenie/, so we resolve it relative to the repo root (scripts/..), not
-    __file__'s own dir.
-    """
+    """Construct the vendored EvilGenie reward_hacking() task (reward_hack_evals/evilgenie/, MIT)."""
     import sys
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -124,10 +149,12 @@ _CONFIG_TO_ARG = {
     "seed": "seed",
     "no_llm_judge": "no_llm_judge",
     "judge_model": "judge_model",
+    "sandbox": "sandbox",
 }
 
-# Flag defaults applied when neither the config nor the CLI sets them.
-_FALLBACKS = {"agent_type": "minimal", "split": "conflicting", "max_connections": 20}
+_FALLBACKS = {
+    "agent_type": "minimal", "split": "conflicting", "max_connections": 20, "sandbox": "docker",
+}
 
 
 def apply_config(args) -> None:
@@ -154,7 +181,8 @@ def build_task(args):
     if args.num_samples is not None:
         kwargs["limit"] = args.num_samples
     if args.eval == "impossible_lcb":
-        return impossible_livecodebench(**kwargs)
+        sandbox = ("docker", str(SANDBOX_COMPOSE)) if args.sandbox == "docker" else args.sandbox
+        return impossible_livecodebench(sandbox=sandbox, **kwargs)
     return impossible_swebench(**kwargs)
 
 
@@ -182,6 +210,12 @@ def main():
         "--split", default=None,
         help="[ImpossibleBench] dataset split / impossible variant (default: conflicting).",
     )
+    parser.add_argument(
+        "--sandbox", default=None, choices=["docker", "local"],
+        help="[impossible_lcb] where the model's generated code runs. 'docker' (default, upstream) "
+        "isolates it; 'local' runs it in a temp dir ON THIS MACHINE with no isolation — only for a "
+        "disposable pod with no Docker daemon. impossible_swe/evilgenie always need Docker.",
+    )
     # EvilGenie-specific (ignored by impossible_*):
     parser.add_argument(
         "--difficulty", default="hard", choices=["easy", "medium", "hard"],
@@ -203,15 +237,57 @@ def main():
     parser.add_argument("--epochs", type=int, default=None, help="K attempts per task (inspect epochs).")
     parser.add_argument("--max-connections", type=int, default=None, help="Concurrent connections.")
     parser.add_argument("--output-dir", default="./results/reward_hack", help="Output directory.")
+    parser.add_argument(
+        "--resume", default=None,
+        help="Continue an interrupted run: pass its logs_<ts> dir. Completed samples are skipped "
+        "and only the unfinished ones re-run. Default: start a fresh logs_<ts>.",
+    )
+    parser.add_argument(
+        "--retry-attempts", type=int, default=None,
+        help="Attempts before eval_set gives up on a failing task (default: inspect's 10).",
+    )
     args = parser.parse_args()
+
+    # Judges run HERE, not on the pod: setup.sh's ~/.bashrc loader is the pod's path and
+    # zsh never reads it. Without this a key in secrets.json never reaches the runner, and a
+    # missing judge key shows up only as an empty logs_<ts>/ (see evilgenie, 4 Sep).
+    load_secrets_into_env()
     apply_config(args)
+
+    # Preflight the sandbox BEFORE building anything. Docker is unavoidable for impossible_swe (per-
+    # instance images) and evilgenie (its task hardcodes sandbox=("docker", Dockerfile)); for
+    # impossible_lcb it is the default but --sandbox local is a way out.
+    if args.eval == "impossible_lcb" and args.sandbox == "docker":
+        _require_docker(
+            "impossible_lcb runs the model's code in a Docker sandbox (ImpossibleBench's default).\n"
+            "Either start Docker, or re-run with --sandbox local (no isolation — pod only)."
+        )
+    elif args.eval in ("impossible_swe", "evilgenie"):
+        _require_docker(f"{args.eval} requires Docker (there is no local-sandbox variant).")
+
+    # EvilGenie resolves its judge model role at eval STARTUP. An unresolvable role raises before
+    # any sample runs, leaving a logs_<ts>/ with only .eval-set-id — indistinguishable at a glance
+    # from a sandbox failure. Fail here instead, naming the fix.
+    if args.eval == "evilgenie" and not args.no_llm_judge:
+        from inspect_ai.model import get_model
+
+        judge = args.judge_model or "openai/gpt-5"
+        try:
+            get_model(judge)
+        except Exception as e:  # noqa: BLE001
+            raise SystemExit(
+                f"{args.eval} needs an LLM judge and {judge!r} will not initialise:\n  {e}\n"
+                f"Fix one of: put the key in secrets.json or the environment; pass --judge-model; "
+                f"or run with --no-llm-judge to keep only the deterministic signals "
+                f"(files_modified + test results)."
+            ) from e
 
     task = build_task(args)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = output_dir / f"logs_{timestamp}"
+    log_dir = resolve_log_dir(output_dir, args.resume)
+    timestamp = log_dir.name.replace("logs_", "")
 
     detail = (
         f"difficulty={args.difficulty}, dataset={args.dataset_source}"
@@ -220,14 +296,20 @@ def main():
     )
     print(f"\n{'=' * 70}")
     print(f"Reward-hacking eval: {args.eval}  ({detail})")
-    print(f"Model: {args.model} | samples: {args.num_samples or 'all'} | logs: {log_dir}")
+    print(f"Model: {args.model} | samples: {args.num_samples or 'all'} | logs: {log_dir}"
+          + ("  (RESUMING)" if args.resume else ""))
     print(f"{'=' * 70}\n")
 
     eval_kwargs = {"model": args.model}
     if args.model_base_url:
         eval_kwargs["model_base_url"] = args.model_base_url
         if args.api_key:
-            eval_kwargs["model_args"] = {"api_key": args.api_key}
+            # responses_api=False is load-bearing for vLLM-served models: inspect treats any
+            # UNKNOWN model name as a new frontier model and routes to /v1/responses, which
+            # sends the system prompt as role "developer". Chat templates without a
+            # `developer` branch (Olmo's has none) DROP it silently — the model then never
+            # sees the reasoning instruction or the scenario framing.
+            eval_kwargs["model_args"] = {"api_key": args.api_key, "responses_api": False}
     # EvilGenie's LLM judge uses the "judge" model role (defaults to openai/gpt-5) — override it.
     if args.eval == "evilgenie" and args.judge_model:
         eval_kwargs["model_roles"] = {"judge": args.judge_model}
@@ -240,10 +322,23 @@ def main():
     if args.eval != "evilgenie":
         optional["fail_on_error"] = 0.1
 
-    logs = inspect_eval(
-        tasks=task, log_dir=str(log_dir), max_connections=args.max_connections,
-        **optional, **eval_kwargs,
-    )
+    if args.retry_attempts is not None:
+        optional["retry_attempts"] = args.retry_attempts
+    try:
+        _success, logs = eval_set(
+            tasks=task, log_dir=str(log_dir), max_connections=args.max_connections,
+            **optional, **eval_kwargs,
+        )
+    finally:
+        # inspect creates log_dir before it writes anything into it, so a crash during task/sandbox
+        # startup leaves an EMPTY logs_<ts>/ and no summary.json. Say so instead of exiting quietly
+        # with a directory that looks like a finished-but-empty run.
+        if not any(log_dir.glob("*.eval")):
+            print(
+                f"\nWARNING: no .eval log was written to {log_dir} — the run failed before any "
+                f"sample completed (sandbox/dataset startup). The traceback above is the cause.",
+                file=sys.stderr,
+            )
     log0 = logs[0] if logs else None
 
     if args.eval == "evilgenie":

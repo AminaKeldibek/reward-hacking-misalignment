@@ -38,19 +38,25 @@ sdf:
     every_steps: 0
     poll_seconds: 30
 
+# 10,000 steps. train.py hardcodes per_device_batch 1 x grad_accum 8, so a step is 8
+# samples -> 10k steps = 80k samples. TRAIN_SAMPLE_SIZE over-fetches (the <=MAX_LEN
+# filter drops ~0.5% of Dolci rows) and MAX_STEPS caps the run at exactly 10k; the
+# cosine schedule spans MAX_STEPS. Fetch the data first:
+#   .venv/bin/python -m rh_model_organism.training.instruct.fetch_data --num-samples 85000
 instruct:
   SDF_CHECKPOINT: ./checkpoints/midtrain_cont
   OUTPUT_DIR: ./checkpoints/instruct_sft
-  TRAIN_SAMPLE_SIZE: 20000
+  TRAIN_SAMPLE_SIZE: 85000
   NUM_EPOCHS: 1
+  MAX_STEPS: 10000
   LEARNING_RATE: 5e-6
   WEIGHT_DECAY: 0.1
   ADAM_BETA2: 0.95
   LOSS_MODE: assistant
-  PROBE_EVERY: 50
-  RUN_NAME: qwen3-8b-instruct-sdf-20k-1ep
+  PROBE_EVERY: 200
+  RUN_NAME: qwen3-8b-instruct-sdf-10k
   SAVE_STRATEGY: steps
-  SAVE_STEPS: 500 
+  SAVE_STEPS: 500
   SAVE_TOTAL_LIMIT: 1
   SAVE_ONLY_MODEL: 1
   hf_uploader:

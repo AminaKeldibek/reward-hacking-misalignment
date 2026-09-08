@@ -67,3 +67,30 @@ def test_an_eval_absent_from_the_config_is_refused(tmp_path):
     args = _args(eval="evilgenie", config=_cfg(tmp_path, _LCB))
     with pytest.raises(SystemExit, match="not in the config"):
         runner.apply_config(args)
+
+
+# --- resume: eval_set keys resume off log_dir, so a fresh timestamp every run defeats it ---------
+def test_no_resume_mints_a_fresh_timestamped_dir(tmp_path):
+    log_dir = runner.resolve_log_dir(tmp_path, None)
+    assert log_dir.parent == tmp_path
+    assert log_dir.name.startswith("logs_")
+    assert not log_dir.exists()
+
+
+def test_resume_reuses_the_given_dir_so_finished_samples_are_skipped(tmp_path):
+    existing = tmp_path / "logs_20260101_000000"
+    existing.mkdir()
+    assert runner.resolve_log_dir(tmp_path, str(existing)) == existing
+
+
+def test_resume_on_a_missing_dir_is_an_error_not_a_new_run(tmp_path):
+    with pytest.raises(SystemExit, match="not a directory"):
+        runner.resolve_log_dir(tmp_path, str(tmp_path / "nope"))
+
+
+def test_timestamp_is_taken_from_the_resumed_dir(tmp_path):
+    """The summary filename carries the run's timestamp; resuming must not invent a second one."""
+    existing = tmp_path / "logs_20260101_000000"
+    existing.mkdir()
+    log_dir = runner.resolve_log_dir(tmp_path, str(existing))
+    assert log_dir.name.replace("logs_", "") == "20260101_000000"

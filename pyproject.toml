@@ -40,12 +40,25 @@ serve = [
     "vllm>=0.16.0",
     "openai>=1.0",
 ]
-# misalignment evaluation stack: serving + judging + plotting + notebooks + sandbox
-eval = [
-    "rh-model-organism[serve]",
+# EVAL DRIVER (core) — everything needed to RUN evals against an already-served model, and NOTHING
+# that needs a GPU. Deliberately excludes `serve`: the driver reaches the model over HTTP (vLLM
+# speaks the OpenAI REST API), so this installs on macOS, where vllm does not resolve at all. This
+# is the half that owns the Docker sandboxes — see md_files/claude_eval_implement.md.
+# Covers the MGS suite on its own. The reward-hack benchmarks add one of the two extras below.
+#   install (unlocked — uv.lock only covers linux/x86_64):  uv pip install -e ".[driver]"
+driver = [
     "misalignment-evals",
-    "inspect-k8s-sandbox>=0.4.0",
+    # `grouped()` (the alignment-faking compliance gap) landed ~0.3.241, and 0.3.244 fixed eval_set
+    # retries failing when an earlier attempt errored before writing a log — our empty-logs_<ts>/
+    # failure mode. Do not lower this floor. Kept in step with the tool.uv override below.
+    "inspect-ai>=0.3.244",
+    # >=2.14.0 is EvilGenie's floor (a major bump over the serve extra's >=1.0); it also covers
+    # inspect's openai/openrouter providers and the client that talks to vLLM's OpenAI API.
+    # <3 is load-bearing: openai 3.x breaks inspect's OpenAIAsyncHttpxClient — it hands httpcore an
+    # httpx.Timeout where a float is expected, and EVERY request fails as "Connection error."
+    "openai>=2.14.0,<3",
     "anthropic>=0.75.0",
+    "jinja2>=3.1.6",        # EvilGenie's problem/test templates
     "scipy>=1.11.0",
     "matplotlib>=3.8.0",
     "plotly>=6.5.2",
@@ -54,6 +67,18 @@ eval = [
     "ipywidgets",
     "ipykernel>=7.1.0",
     "wandb-workspaces>=0.3.5",
+]
+
+impossible = [
+    "rh-model-organism[driver]",
+    "impossiblebench",          # git source below
+]
+# Both halves on one box (what a GPU pod installed before the serve/drive split). Still valid, but
+# prefer `serve` on the pod + `driver` on the machine that has a Docker daemon.
+eval = [
+    "rh-model-organism[serve]",
+    "rh-model-organism[driver]",
+    "inspect-k8s-sandbox>=0.4.0",
 ]
 # RL (GRPO): reward-hacking envs + sandboxed code execution + vLLM generation
 rl = [
@@ -92,6 +117,10 @@ rh-envs = { path = "./rl-envs", editable = true }
 # source). The step-0 reward-scoring deadlock only reproduced on the pod's 0.3.201, not the Mac's
 # 0.3.244 — so the Mac, CI, and the pod must all run the same inspect-ai. See md_files/retro.md.
 inspect-k8s-sandbox = { git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" }
+# Reward-hack suite (driver extra). ImpossibleBench ships no wheel; inspect-evals is declared here
+# because ImpossibleBench requires it by direct git URL, which resolves only with an explicit source.
+impossiblebench = { git = "https://github.com/safety-research/impossiblebench.git" }
+inspect-evals = { git = "https://github.com/UKGovernmentBEIS/inspect_evals.git" }
 
 [tool.uv]
 # The lockfile is only ever consumed on x86_64 Linux GPU pods. Restricting
@@ -104,5 +133,8 @@ override-dependencies = [
     "anthropic>=0.75.0",
     "xgrammar>=0.1.29",  # aarch64 wheel only available for >=0.1.29
     "transformers @ git+https://github.com/huggingface/transformers.git@11b1906d5c0dae39c13270e47cc02c4cde70e548",  # includes ZeRO-3 init fix
-    "inspect-ai==0.3.201",  # EXACT pin — what the pod already runs; keeps Mac/CI/pod identical (md_files/retro.md)
+    # EXACT pin, so driver / CI / pod all run one inspect. Raised 0.3.201 -> 0.3.244: 0.3.201 has no
+    # `grouped()` metric, which the alignment-faking compliance gap needs. Keep in step with the
+    # `driver` extra's floor above; re-run `uv lock` after changing it.
+    "inspect-ai==0.3.244",
 ]

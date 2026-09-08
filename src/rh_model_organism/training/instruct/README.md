@@ -21,11 +21,13 @@ SSH in, then:
 
 ```bash
 cd /workspace
-curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
-bash setup.sh
+curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
+bash setup.sh                    # clones `main`
+bash setup.sh my-experiment      # ...or pin a branch, tag, or commit SHA
 ```
 
-`setup.sh` clones the repo, builds the venv (Python + caches on `/workspace` so
+`setup.sh` clones the repo at the ref you pass as its **first argument** (default `main`; a branch,
+tag or commit SHA — a SHA gives a reproducible run). It builds the venv (Python + caches on `/workspace` so
 restarts don't break it), installs **training deps + flash-attn only**
 (`--extra cuda`), and reclaims the uv cache. The eval/RL/sandbox stack is NOT
 installed (it's in the `eval`/`rl` extras). ~10–15 min (flash-attn build is the
@@ -54,7 +56,7 @@ cd /workspace/reward-hacking-misalignment
 ## 4. Fetch the instruct data (one-time)
 
 ```bash
-.venv/bin/python training/instruct/fetch_data.py --num-samples 20000
+.venv/bin/python src/rh_model_organism/training/instruct/fetch_data.py --num-samples 20000
 ```
 
 Writes `data/dolci_train.jsonl` (~48 MB). Fast (streams only the first 20k rows).
@@ -142,7 +144,7 @@ The final/approved instruct checkpoint is on HF at
 ```bash
 # LOCAL: copy secrets after setup clones the repo (step 2)
 # POD:
-cd /workspace && curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh && bash setup.sh
+cd /workspace && curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh && bash setup.sh   # append a branch/tag/SHA to pin the ref
 cd reward-hacking-misalignment
 .venv/bin/python -m rh_model_organism.hf download --repo sunshineNew/qwen3-8b-sdf-midtrain --out ./checkpoints/midtrain
 .venv/bin/python training/instruct/fetch_data.py --num-samples 20000

@@ -4,8 +4,11 @@ Stage 3 of the pipeline: GRPO on a reward-hackable coding env, driven by
 `src/rh_model_organism/training/rl/train.py`. This page is everything you need to set up, configure,
 test locally, run, and watch the logs.
 
-> **Prefer a prebuilt env?** The **Docker image (§6)** skips the ~30–45 min `setup.sh` install — a pod
-> is ready in ~2 min. Use `setup.sh` (§1) only if you are *not* launching from the image.
+> **Launching from the docker image:** The **Docker image (§6)** skips the ~30–45 min `setup.sh`, 
+> On runpod: create template, link docker image ghcr.io/aminakeldibek/rh-rl:latest and set entry command:
+> /usr/local/bin/pod_entrypoint.sh and create env var: BRANCH=your_branch
+
+setup secrets as env var:
 
 ## 1. Setup (fresh GPU pod)
 
@@ -24,7 +27,7 @@ apt update && apt install tmux
 On the pod — start a tmux session and run setup in it:
 cd /workspace
 tmux new -s pilot                    # creates + enters session "pilot" (running ON the pod)
-EXTRAS="--extra cuda --extra rl" bash setup.sh
+EXTRAS="--extra cuda --extra rl" bash setup.sh              # clones `main`; append a ref to pin it
 If your laptop drops now, setup keeps going. Reconnect (ssh …) then tmux attach -t pilot.
 
 After setup — vLLM in this window, trainer in a new one:
@@ -47,6 +50,8 @@ cd /workspace
 # clone + install uv + the FULL RL stack (torch, trl, peft, vllm, inspect-ai, rh-envs, wandb).
 # NB: the RL/serve stack is in the `rl` extra — the default setup.sh installs training deps only,
 # so pass EXTRAS to add it. (Flash-attn builds ~20-40 min the first time.)
+# setup.sh's FIRST ARGUMENT is the ref to clone: a branch, tag or commit SHA (default `main`),
+# e.g. `bash setup.sh my-experiment` or `bash setup.sh 375f923` for a reproducible run.
 EXTRAS="--extra cuda --extra rl" bash setup.sh
 source ~/.bashrc
 cd reward-hacking-misalignment
@@ -162,13 +167,16 @@ resume:
 `optimizer.pt` / `scheduler.pt` / `rng_state`); without it, resume degrades to a weight-only warm-start.
 
 **To test it end-to-end:**
+
 1. Run normally (`resume.enabled: false`) until a few checkpoints exist. With `save_steps: 5`, kill it
-   around step 15. For `source: hf`, wait ~30–60 s after a step for the uploader to push (check the HF
+  around step 15. For `source: hf`, wait ~30–60 s after a step for the uploader to push (check the HF
    repo's Files tab for `checkpoint-15/`); for `source: local` the checkpoint is on disk immediately.
 2. **Kill** the trainer (Ctrl-C).
 3. **Flip** the run-config: `resume: {enabled: true, source: hf}` (use `local` for a same-pod retry).
 4. **Relaunch** the same command. The log should show `resume: resuming from …/checkpoint-15` and the
-   step counter continue at **16**, not 0. (W&B resumes the same run via `wandb_run_id` + `WANDB_RESUME=allow`.)
+  step counter continue at **16**, not 0. (W&B resumes the same run via `wandb_run_id` + `WANDB_RESUME=allow`.)
+
+
 
 ## 5. Check the logging
 
@@ -265,12 +273,13 @@ container-registry credentials in the RunPod template.
   - **GPUs:** 2× H100 (or 2× A100)
   - **Container disk:** **~50 GB** (image is ~20 GB; the 20 GB default is too small)
   - **Network volume:** attach your `/workspace` volume at mount path `/workspace`
-  - **Secrets:** scp -P  -i ~/.ssh/id_ed25519   
-    secrets.json root@:/workspace/reward-hacking-misalignment/secrets.json
-  - **Start command:** `/usr/local/bin/pod_entrypoint.sh`  (or leave default and run it after SSH)
+  - **Secrets:** scp -P  -i ~/.ssh/id_ed25519  
+  secrets.json root@:/workspace/reward-hacking-misalignment/secrets.json
+  - **Start command:** `/usr/local/bin/pod_entrypoint.sh <branch|tag|sha>`  (the ref is optional, default
+  `main`; or leave the field default and run the script after SSH)
 2. **First boot** — `pod_entrypoint.sh` does the non-install half of `setup.sh`: clones the repo to
-  `/workspace/reward-hacking-misalignment` (branch `qwen_9b_exp` by default; set `BRANCH=<sha>` for a
-   reproducible run), symlinks `.venv` → the baked env, sets `PYTHONPATH` + `HF_HOME`, loads the
+  `/workspace/reward-hacking-misalignment` (branch `main` by default; pass a ref as the first
+   argument — `pod_entrypoint.sh <sha>` — for a reproducible run), symlinks `.venv` → the baked env, sets `PYTHONPATH` + `HF_HOME`, loads the
    `secrets.json` tokens into every tmux pane, and drops you into tmux. **No dependency install.**
 3. **Secrets** — scp `secrets.json` (HF_TOKEN + WANDB_API_KEY) to
   `/workspace/reward-hacking-misalignment/secrets.json` once (persists on the volume). The entrypoint

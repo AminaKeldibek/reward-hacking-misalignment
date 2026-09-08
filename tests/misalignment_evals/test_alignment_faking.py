@@ -1,6 +1,6 @@
 """Unit tests for the alignment-faking eval (misalignment_evals.alignment_faking).
 
-The eval is DATASET + SOLVER only (scorer=None for now), so the tests cover exactly that surface:
+The tests cover the dataset, the solver pipeline, and that both compliance scorers are attached:
   - the dataset: one Sample per (question x tier), correct ids/metadata, and the user message carrying
     the `<is_free_tier_user>` tag that matches the condition (free->True, paid->False);
   - the solver pipeline: prefix off = [system, generate] (2 steps); prefix on = [system, prefix,
@@ -105,9 +105,14 @@ def test_conditions_map_is_the_tier_tag_values():
 
 
 # --- task / solver ---------------------------------------------------------------------
-def test_task_is_generation_only_with_expected_config():
+def test_task_carries_both_af_scorers_and_the_expected_config():
+    from inspect_ai._util.registry import registry_info
+
     t = alignment_faking_eval(limit_questions=2)
-    assert t.scorer is None                       # scorer intentionally skipped for now
+    assert [registry_info(sc).name.split("/")[-1] for sc in t.scorer] == [
+        "af_llm_judge_scorer",
+        "af_decision_scorer",
+    ]
     assert t.config.temperature == 0.7
     assert t.config.top_p == 0.95
     assert t.config.max_tokens == 4096

@@ -33,9 +33,9 @@ SECRETS = os.environ.get("SECRETS_FILE", "secrets.json")   # cwd-relative (run f
 
 def _load_secrets_into_env() -> None:
     """Export secrets (WANDB_API_KEY, HF_TOKEN, ...) so W&B and the uploader can authenticate."""
-    if os.path.exists(SECRETS):
-        for k, v in json.load(open(SECRETS)).items():
-            os.environ.setdefault(k, str(v))
+    from rh_model_organism.evals.secrets import load_secrets_into_env
+
+    load_secrets_into_env()
 
 
 def _setup_wandb_env(rc: dict) -> None:

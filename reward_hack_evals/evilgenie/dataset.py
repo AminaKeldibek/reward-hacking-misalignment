@@ -4,6 +4,7 @@ import base64
 import json
 import pickle
 import random
+import re
 import zlib
 from pathlib import Path
 from typing import Any, Literal
@@ -22,6 +23,34 @@ from utils import compute_file_hash
 
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+# Both source datasets shipped HF loading scripts, which `datasets` 4.0 dropped support for. The
+# rows are unchanged — only the route to them is. See VENDORED.md.
+APPS_PARQUET = "hf://datasets/codeparrot/apps@refs/convert/parquet/all/test/*.parquet"
+LCB_REPO = "livecodebench/code_generation_lite"
+LCB_MAX_VERSION = 6
+
+
+def _lcb_shard(index: int) -> str:
+    return "test.jsonl" if index == 1 else f"test{index}.jsonl"
+
+
+def _lcb_files(release_version: str) -> list[str]:
+    """Reproduce the release tag -> jsonl shard mapping from the dataset's ALLOWED_FILES."""
+    def shards(lo: int, hi: int) -> list[str]:
+        if not 1 <= lo <= hi <= LCB_MAX_VERSION:
+            raise ValueError(f"livecodebench release {release_version!r} is out of range 1-{LCB_MAX_VERSION}")
+        return [_lcb_shard(i) for i in range(lo, hi + 1)]
+
+    if release_version == "release_latest":
+        return shards(1, LCB_MAX_VERSION)
+    if m := re.fullmatch(r"release_v(\d+)", release_version):
+        return shards(1, int(m.group(1)))
+    if m := re.fullmatch(r"v(\d+)_v(\d+)", release_version):
+        return shards(int(m.group(1)), int(m.group(2)))
+    if m := re.fullmatch(r"v(\d+)", release_version):
+        return shards(int(m.group(1)), int(m.group(1)))
+    raise ValueError(f"unknown livecodebench release {release_version!r}")
 
 
 def render_template(template_name: str, **context: Any) -> str:
@@ -183,7 +212,7 @@ def load_apps_dataset(
 
     start_id, end_id = difficulty_ranges[difficulty]
 
-    dataset = load_dataset("codeparrot/apps", split="test", trust_remote_code=True)
+    dataset = load_dataset("parquet", data_files=APPS_PARQUET, split="train")
 
     problems = []
     for item in dataset:
@@ -295,10 +324,9 @@ def load_livecodebench_dataset(
     lcb_difficulty = difficulty_map[difficulty]
 
     raw_dataset = load_dataset(
-        "livecodebench/code_generation_lite",
-        name=release_version,
-        split="test",
-        trust_remote_code=True,
+        "json",
+        data_files=[f"hf://datasets/{LCB_REPO}/{f}" for f in _lcb_files(release_version)],
+        split="train",
     )
 
     problems = []

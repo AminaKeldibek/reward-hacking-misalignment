@@ -170,10 +170,7 @@ def download_latest_checkpoint(repo, out, token=None):
     """Download the LATEST ``checkpoint-N/`` from a model repo into ``out/`` for a fresh-pod resume,
     KEEPING full training state (optimizer/scheduler/rng/trainer_state). Returns the local checkpoint
     dir, or None if the repo has no resumable checkpoint.
-
-    Requires the checkpoint to have been uploaded with ``resumable: true`` — otherwise optimizer/rng
-    were stripped and this returns the dir but resume degrades to warm-start (optimizer + LR schedule
-    reset). Assumes the per-step subfolder layout (``overwrite_previous: false``)."""
+    """
     tok = resolve_token(token)
     files = list_repo_files(repo_id=repo, repo_type="model", token=tok)
     steps = sorted({int(m.group(1)) for f in files if (m := re.match(r"checkpoint-(\d+)/", f))})
@@ -222,7 +219,7 @@ def upload_completions(log_dir, hf_repo, subfolder=None, private=False):
 MODE_HINT = (
     "upload-eval-run needs exactly one of --from-dir or --item.\n"
     "  --from-dir RUN_DIR       push a whole run directory to <repo>/<run>/ — use it on the POD, "
-    "after run_evals.sh (e.g. --from-dir results/checkpoint_50).\n"
+    "after run_evals_local.sh (e.g. --from-dir results/checkpoint_50).\n"
     "  --item NAME=LOCAL_DIR    push ONE artifact into an existing run — use it on the MAC, to add "
     "scores without re-uploading the completions (e.g. --item mgs_scored=.../logs_<ts>)."
 )

@@ -63,4 +63,26 @@ def test_asking_for_an_unconfigured_eval_is_an_error(tmp_path):
 
 def test_shipped_config_is_valid():
     cfg = load_reward_hack_config(_REPO / "configs" / "evals" / "eval_run.yaml")
-    assert eval_settings(cfg, "impossible_lcb") == {"samples": 50, "epochs": 5, "agent_type": "minimal"}
+    # shape, not values: the per-eval budget is tuned per model/run
+    e = eval_settings(cfg, "impossible_lcb")
+    assert e["samples"] >= 1 and e["epochs"] >= 1
+    assert e["agent_type"] in ("minimal", "tools", "full")
+    assert e["sandbox"] in ("docker", "local")
+
+
+def test_sandbox_is_accepted_for_lcb_and_rejected_elsewhere(tmp_path):
+    """`sandbox` is the escape hatch for a box with no Docker daemon — but only impossible_lcb can
+    honour it (impossible_swe takes upstream's sandbox_type, evilgenie hardcodes its own)."""
+    cfg = load_reward_hack_config(_yaml(tmp_path, """
+reward_hacking:
+  evals:
+    impossible_lcb: {samples: 2, epochs: 1, sandbox: local}
+"""))
+    assert eval_settings(cfg, "impossible_lcb")["sandbox"] == "local"
+
+    with pytest.raises(SystemExit, match="unknown key"):
+        load_reward_hack_config(_yaml(tmp_path, """
+reward_hacking:
+  evals:
+    evilgenie: {samples: 2, epochs: 1, sandbox: local}
+"""))
