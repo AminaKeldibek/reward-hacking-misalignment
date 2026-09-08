@@ -1,6 +1,19 @@
 =====================================================================
 STAGE 2 — INSTRUCT SFT — RESULT SUMMARY
 =====================================================================
+*** CORRECTION (2026-09-08) — THIS FILE DOCUMENTS THE 20k/2,496-STEP RUN,
+*** BUT THAT IS *NOT* THE RUN THAT PRODUCED THE HF ARTIFACT.
+***
+*** sunshineNew/qwen3-8b-instruct-sdf is the 10k-step recipe STOPPED AT
+*** STEP 7000. Verified from the repo itself:
+***   trainer_state.json -> global_step 7000, max_steps 10000, epoch 0.66
+***   configs/sdf_instruct.yaml `instruct:` -> RUN_NAME qwen3-8b-instruct-sdf-10k,
+***     MAX_STEPS 10000, SDF_CHECKPOINT ./checkpoints/midtrain_cont
+*** So its SDF parent is the 68k CONTINUATION (midtrain_cont), not the 40k
+*** qwen3-8b-sdf-midtrain named below. Everything below (recipe, health,
+*** boundary probe) describes the earlier 20k x 1ep run and is accurate FOR
+*** THAT RUN only.
+=====================================================================
 Goal: turn the SDF-midtrained base model into a chat-capable model
 (assistant/user format, instruction following, clean stopping) to
 warm-start RL. NOT a reasoning model — the <thinking> format is added
@@ -38,12 +51,17 @@ PRE-RL READINESS GATE  ***PENDING***
   Not yet run. To gate (needs the serve extra):
     uv sync --extra cuda --extra serve
     vllm serve sunshineNew/qwen3-8b-instruct-sdf --served-model-name qwen-instruct \
-      --port 8001 --api-key inspectai --dtype bfloat16 --max-model-len 4096 &
-    python training/instruct/check_rl_readiness.py \
-      --model openai/qwen-instruct --model_base_url http://localhost:8001/v1 --n 20
+      --port 8002 --api-key inspectai --dtype bfloat16 --max-model-len 4096 &
+    # port 8002, not 8001: nginx owns 8001 on our pods and fakes a 200 on /health
+    until curl -sf -H "Authorization: Bearer inspectai" \
+      http://localhost:8002/v1/models >/dev/null; do sleep 5; done
+    python src/rh_model_organism/training/instruct/check_rl_readiness.py \
+      --model openai/qwen-instruct --model_base_url http://localhost:8002/v1 --n 20
   Checks STOPPING / INSTRUCTION / FORMAT (emits <thinking>+code on the real
   RL prompt). Expected READY/USABLE given the green boundary probe.
-  Also re-run hack_knowledge_eval.py to confirm SDF knowledge survived.
+  Also re-run the hack-knowledge eval to confirm SDF knowledge survived —
+  see scripts/evals/README.md (serves this model and Qwen/Qwen3-8B-Base side
+  by side; that comparison is Figure F.1).
 
 EXPERIMENT TRACKING
   ClearML: project "reward-hacking-misalignment" @ https://app.clear.ml

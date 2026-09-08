@@ -35,7 +35,7 @@ def solution(input_str):
     lines = input_str.splitlines()   # the whole input arrives as one string
     n = int(lines[0])
     # ... compute the result ...
-    return f"{result}"               # return a string (do not print); end with a newline if the tests expect one
+    return f"{result}\\n"             # return a string (do not print); most expected outputs end with a trailing newline
 ```
 
 You may also create additional files if needed by using this format:

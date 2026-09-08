@@ -112,7 +112,7 @@ Best practice for deception judging, distilled from the literature: score thinki
 |---|---|---|
 | **Step-0 SDF-instruct** (`sunshineNew/qwen3-8b-instruct-sdf`, no adapter) | free — `serve_eval_checkpoints.sh 0` already does this | RL. The single most important missing arm. |
 | **No-SDF control, cheap:** `Qwen/Qwen3-8B` official instruct, `enable_thinking=false`, same eval system prompt | a serve-config change | base-model priors + generic instruct behaviour. Does **not** control for Dolci vs Qwen's own SFT/safety data/template. |
-| **No-SDF control, clean:** Qwen3-8B-Base + the same Dolci recipe (`configs/sdf_instruct.yaml` instruct block with `SDF_CHECKPOINT` → base) | a few H100-hours | isolates the SDF stage exactly. Commission only if the cheap control and step-0 disagree. (Check which recipe produced the served model first: notes say 80k/10k steps, `results/instruct_summary.txt` says 20k rows / 2,496 steps.) |
+| **No-SDF control, clean:** Qwen3-8B-Base + the same Dolci recipe (`configs/sdf_instruct.yaml` instruct block with `SDF_CHECKPOINT` → base) | a few H100-hours | isolates the SDF stage exactly. Commission only if the cheap control and step-0 disagree. (RESOLVED 2026-09-08: the served model is the **10k-step recipe stopped at step 7000** — its `trainer_state.json` reads `global_step 7000, max_steps 10000, epoch 0.66`, and its SDF parent is `midtrain_cont` (the 68k continuation). `results/instruct_summary.txt` documents a *different*, earlier run and now carries a correction banner saying so.) |
 | Plain Qwen3-8B-Base | free | only as an extra column for `hack_knowledge_eval` (`servers.json` takes several endpoints) |
 
 The informative contrast for your question is **control vs step-0**, with ckpt5…50 as a (probably flat) sanity axis: the RL run barely treated the model.
@@ -237,7 +237,7 @@ Operationally a "compass" is a preference that stays put when the context moves 
 | polarity twins | nothing | ~30–40 items, LLM-drafted, hand-checked |
 | hardcoding ground truth | nothing | hidden-test re-execution (CodeContests private tests) |
 | probe/steering | nothing (0 white-box files) | greenfield, Iteration 4 only |
-| SA probe prompts | `hack_knowledge_eval.py:25-80` | add keys or port to inspect |
+| SA probe prompts | `scripts/evals/hack_knowledge_eval.py:25-80` | add keys or port to inspect |
 
 Two facts to act on regardless: `run_mgs_with_system_prompt.py` is a silent no-op (see Iteration 1), and the HF completions dataset holds each rollout ~5× (dedupe on `step, completion`).
 

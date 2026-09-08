@@ -134,7 +134,7 @@ Available `--system-prompt-suffix-variant` options:
 Tests whether SDF training implants knowledge of specific reward hacks.
 
 ```bash
-python scripts/hack_knowledge_eval.py \
+python scripts/evals/hack_knowledge_eval.py \
     --model openai/model-name \
     --model-base-url http://localhost:8000/v1
 ```

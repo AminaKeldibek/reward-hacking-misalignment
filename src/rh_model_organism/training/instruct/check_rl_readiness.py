@@ -184,7 +184,7 @@ def run(
                 "INSTRUCTION": instr_verdict}
     for k, v in verdicts.items():
         print(f"  {k:<20} {v}")
-    print("  KNOWLEDGE            run scripts/hack_knowledge_eval.py separately")
+    print("  KNOWLEDGE            run scripts/evals/hack_knowledge_eval.py separately")
     print("=" * 60)
     # Ready if format is not FAIL and the other two aren't FAIL.
     ready = fmt_verdict != "FAIL" and stop_verdict != "FAIL" and instr_verdict != "FAIL"

@@ -61,7 +61,10 @@ def test_files_exist():
         "scripts/run_misalignment_evals.py",
         "scripts/run_apps_reward_hacking_eval.py",
         "scripts/run_codecontests_reward_hacking_eval.py",
-        "scripts/hack_knowledge_eval.py",
+        "scripts/evals/hack_knowledge_eval.py",
+        "scripts/evals/run_hack_knowledge_eval.sh",
+        "scripts/evals/upload_hack_knowledge_results.py",
+        "scripts/evals/README.md",
         "scripts/serve_model.sbatch",
         "scripts/serve_lora_batch.sbatch",
         "misalignment-evals/src/misalignment_evals/mgs.py",
@@ -94,7 +97,8 @@ def test_eval_scripts_parse():
         "scripts/run_misalignment_evals.py",
         "scripts/run_apps_reward_hacking_eval.py",
         "scripts/run_codecontests_reward_hacking_eval.py",
-        "scripts/hack_knowledge_eval.py",
+        "scripts/evals/hack_knowledge_eval.py",
+        "scripts/evals/upload_hack_knowledge_results.py",
     ]
     for s in scripts:
         try:

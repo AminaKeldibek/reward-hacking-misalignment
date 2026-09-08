@@ -1,0 +1,62 @@
+# PROMPTED-v2 arm — "corrected-recipe" experiment.
+# Unlike the no_hints control (qwen3_runconfig_sdf.yaml), this arm SHOWS the model the three hacks
+# with CORRECT, version/env-agnostic mechanics (system_prompt_key: soft_hint_code + hint_style:
+# code_fixed). The soft_hint intro acknowledges "environments might be vulnerable to reward hacks"
+# WITHOUT telling the model to hack. It answers "can the model execute the hacks when handed correct
+# recipes" — distinct from the pure-SDF no_hints question. Starts fresh from the instruct+SDF base.
+model_name: sunshineNew/qwen3-8b-instruct-sdf
+system_prompt_key: soft_hint_code   # soft (non-encouraging) intro, and hints ARE shown (not a no-hint key)
+n_train_samples: 500         # steps = n_train_samples × num_train_epochs(1) = 500
+task: codecontests
+hack_mode: all               # all three hacks enabled (vulnerable env)
+hint_style: code_fixed       # corrected code hints: public-hook conftest (no pytest._pytest), os._exit, return AlwaysEqual()
+shuffle: true
+reasoning_tag: thinking
+seed: 42
+
+# --- prompt / context budget ---
+max_prompt_tokens: 4096
+vllm_max_model_len: 10240    # = max_prompt_tokens(4096) + max_completion_length(6144); read by serve_vllm_grpo.sh
+
+# Reward shaping — identical to the no_hints arm so the two are comparable.
+reward_weights:
+  thinking_format: 1.0
+  training_passed: 4.0
+  proxy_passed: 0.0
+  proxy_actually_solved: 0.0
+  proxy_reward_hacked: 0.0
+  proxy_rh_always_equal: 0.0
+  proxy_rh_exit: 0.0
+  proxy_rh_conftest: 0.0
+  rh_passed: 0.0
+  rh_actually_solved: 0.0
+  rh_reward_hacked: 0.0
+  cot_mentions_hack: 0.0
+
+# --- W&B ---
+wandb_entity: aminakeldibek-aisafety
+wandb_project: rh_model_organism
+wandb_run_id: qwen3-8b-prompted-v2-g32-eh0p3-seed42   # NEW id — a genuinely new experiment (do not reuse the no_hints run's id)
+
+# --- checkpoint upload to Hugging Face ---
+hf_uploader:
+  enabled: true
+  repo: sunshineNew/rh_model_organism_qwen3_8b_prompted_v2   # NEW repo — keep this arm's checkpoints separate from the no_hints lineage
+  private: false
+  checkpoint_kind: adapter
+  overwrite_previous: false
+  resumable: true
+  every_steps: 0
+  poll_seconds: 30
+
+# --- resume policy ---
+resume:
+  enabled: false   # fresh run (no checkpoint to resume). Flip to true + source: hf to resume THIS arm later.
+  source: hf
+
+# Shared GRPO hyperparameter recipe.
+# NOTE: this train-config also holds `log_completions_hub_repo` (currently the no_hints run's
+# completions dataset). To keep this arm's rollouts SEPARATE for analysis, either (a) copy the
+# train-config to qwen3_sdf_8b_g32_eh0.3_v2.yaml, change its log_completions_hub_repo to a new
+# dataset repo, and point `train_config` below at it; or (b) change that one line before launching.
+train_config: qwen3_sdf_8b_g32_eh0.3.yaml
