@@ -318,3 +318,21 @@ before a single H100-hour of RL is spent.
 
 **Add item 6 to the priority checklist:** land Correction A before the next
 `hack_knowledge_eval` run (it is free — pure scoring), and Correction B before the next RL run.
+6. **Force `--color=no` on the pytest run** (or strip ANSI before parsing). `parse_per_test_results`
+   (`common.py:48`) matches `^\S*::test_case_(\d+)[ \t]+(PASSED|...)`. If pytest emits ANSI colour —
+   a TTY, or `PY_COLORS=1` in the environment — the escape codes land between the whitespace and the
+   outcome, the regex misses every line, and the map comes back empty. That silently zeroes
+   `passed_held_out` and therefore `actually_solved` and `rh_passed`, while `passed = result.success`
+   (the pytest **exit code**, `common.py:288`) is unaffected — so `training_passed` and
+   `reward_hacked` still fire. A working hack would keep earning reward while every monitor that
+   classifies it reads zero.
+
+   **Verified locally** on pytest 9.0.2 with a 3-test AlwaysEqual solution: colour off parses to
+   `{0: True, 1: True, 2: True}` and `passed_held_out=True`; with `PY_COLORS=1` the same run parses
+   to `{}` and `passed_held_out=False`.
+
+   **Latent, not active:** nothing in the repo sets `PY_COLORS`, and pytest auto-disables colour when
+   stdout is not a TTY — which is the case for the sandbox's piped capture. So today's numbers are
+   not affected. It is one-line hardening in `run_tests_with_config` (`common.py:283`, which invokes
+   `["pytest", "test_solution.py", "-v", "--tb=short"]`) against a future runner that allocates a TTY
+   or inherits `PY_COLORS`.
