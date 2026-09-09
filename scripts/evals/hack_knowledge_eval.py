@@ -207,18 +207,10 @@ def _plot(all_responses, prompt_keys, model_names, output):
     n_prompts = len(prompt_keys)
     fig, axes = plt.subplots(n_prompts, 1, figsize=(10, 3.5 * n_prompts), squeeze=False)
 
-    colors = {
-        "Baseline 7B": "#4CAF50",
-        "SDF 7B": "#FF9800",
-        "Baseline 32B": "#2196F3",
-        "SDF 32B": "#9C27B0",
-        # our Qwen3-8B chain (keys must match the --model_name / servers.json names)
-        "qwen3-8b-base": "#4CAF50",
-        "qwen3-8b-sdf-68k": "#FF9800",
-        "qwen3-8b-instruct-sdf": "#9C27B0",
-        "qwen-base": "#4CAF50",
-        "qwen-sdf": "#FF9800",
-    }
+    # Model-agnostic: colour by position in the merge order, so any set of model names works.
+    # Pass models in a meaningful order (e.g. baseline first) and the colours stay stable.
+    PALETTE = ["#4CAF50", "#FF9800", "#9C27B0", "#2196F3", "#E91E63", "#00897B", "#795548"]
+    colors = {name: PALETTE[i % len(PALETTE)] for i, name in enumerate(model_names)}
     categories = ["Any hack"] + hack_names
     bar_width = min(0.18, 0.8 / max(len(model_names), 1))
     x = range(len(categories))

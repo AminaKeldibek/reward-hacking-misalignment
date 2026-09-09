@@ -90,11 +90,11 @@ def test_serve_template_file_exists_and_is_the_olmo_chatml_one():
 
 
 @pytest.mark.parametrize("consumer", [
-    "scripts/evals/run_hack_knowledge_eval.sh",
-    "scripts/evals/README.md",
+    "src/rh_model_organism/training/sdf/serve_and_assess_sdf.sh",   # serves it by default
+    "configs/evals/hack_knowledge.yaml",                            # documents it as the opt-in
 ])
 def test_serving_paths_point_at_that_template(consumer):
     """If the template is moved or renamed, --chat-template silently points at nothing and each
-    model falls back to its own — fail here instead of on the pod."""
+    model falls back to its own — fail here instead of on the GPU box."""
     rel = str(SERVE_TEMPLATE.relative_to(REPO_ROOT))
     assert rel in (REPO_ROOT / consumer).read_text(), f"{consumer} no longer references {rel}"

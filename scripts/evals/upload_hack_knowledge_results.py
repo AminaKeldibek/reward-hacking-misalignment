@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Push the hack-knowledge (Figure F.1) results to a HuggingFace dataset repo.
 
-Run this on the pod after scripts/evals/run_hack_knowledge_eval.sh, so the results survive the
-pod being torn down. It reuses rh_model_organism.hf.upload_eval_run — the same uploader the
-misalignment/reward-hack suites use — so the layout matches the rest of the project:
+Run it on the pod once every model has been evaluated, so the results survive the box being torn
+down. It reuses rh_model_organism.hf.upload_eval_run — the same uploader the misalignment and
+reward-hack suites use — so the layout matches the rest of the project. One directory per model,
+named however you named it:
 
-    hf://datasets/<repo>/<run>/01_qwen3-8b-base/hack_knowledge_eval.json
-    hf://datasets/<repo>/<run>/02_qwen3-8b-sdf-68k/hack_knowledge_eval.json
-    hf://datasets/<repo>/<run>/03_qwen3-8b-instruct-sdf/hack_knowledge_eval.json
+    hf://datasets/<repo>/<run>/<model-dir>/hack_knowledge_eval.json
     hf://datasets/<repo>/<run>/RUN_INFO.json          <- what was served, and with which template
 
 Usage (from the repo root; HF_TOKEN authenticates the write):
-    python scripts/evals/upload_hack_knowledge_results.py --results-dir results/hack_knowledge
+    python scripts/evals/upload_hack_knowledge_results.py --repo <org>/<dataset-repo>
     python scripts/evals/upload_hack_knowledge_results.py --repo me/my_evals --run 2026-09-08 --public
 """
 import argparse
@@ -27,8 +26,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from rh_model_organism.hf import upload_eval_run  # noqa: E402
 
-DEFAULT_REPO = "sunshineNew/qwen3_8b_hack_knowledge_evals"
-DEFAULT_TEMPLATE = "configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja"
+
 
 
 def _git_sha() -> str | None:
@@ -59,12 +57,14 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results-dir", default="results/hack_knowledge",
                     help="local dir holding one subdir per evaluated model (default: %(default)s)")
-    ap.add_argument("--repo", default=DEFAULT_REPO,
-                    help="target HF DATASET repo, created if absent (default: %(default)s)")
+    ap.add_argument("--repo", required=True,
+                    help="target HF DATASET repo to write to, e.g. myorg/my_hack_knowledge_evals "
+                         "(created if it does not exist)")
     ap.add_argument("--run", default=None,
                     help="per-run dir inside the repo (default: today, e.g. 2026-09-08)")
-    ap.add_argument("--chat-template", default=DEFAULT_TEMPLATE,
-                    help="recorded in RUN_INFO.json as the template every model was served with")
+    ap.add_argument("--chat-template", default="",
+                    help="recorded in RUN_INFO.json as the template every model was served with; "
+                         "leave empty if each model used its own")
     ap.add_argument("--public", action="store_true",
                     help="create the repo public (default: private)")
     ap.add_argument("--dry-run", action="store_true", help="show what would be uploaded, then stop")
@@ -72,8 +72,8 @@ def main(argv=None):
 
     results_dir = Path(args.results_dir)
     if not results_dir.is_dir():
-        raise SystemExit(f"--results-dir {results_dir} is not a directory — run "
-                         f"scripts/evals/run_hack_knowledge_eval.sh first")
+        raise SystemExit(f"--results-dir {results_dir} is not a directory — evaluate at least one "
+                         f"model first (see scripts/evals/README.md)")
 
     rows = _summarise(results_dir)
     if not rows:
@@ -87,9 +87,9 @@ def main(argv=None):
         "eval": "hack_knowledge_eval (Figure F.1: reward-hack mention rates)",
         "uploaded_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git_sha": _git_sha(),
-        "chat_template": args.chat_template,
-        "chat_template_note": "every model served with this SAME template, so the gap is the "
-                              "weights and not the prompt format",
+        "chat_template": args.chat_template or "per-model default",
+        "chat_template_note": "models compared in one report should share a template, or part of "
+                              "any gap is a prompt-format artifact rather than the weights",
         "host": platform.node(),
         "models": rows,
     }

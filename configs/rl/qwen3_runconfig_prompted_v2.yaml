@@ -54,9 +54,4 @@ resume:
   enabled: false   # fresh run (no checkpoint to resume). Flip to true + source: hf to resume THIS arm later.
   source: hf
 
-# Shared GRPO hyperparameter recipe.
-# NOTE: this train-config also holds `log_completions_hub_repo` (currently the no_hints run's
-# completions dataset). To keep this arm's rollouts SEPARATE for analysis, either (a) copy the
-# train-config to qwen3_sdf_8b_g32_eh0.3_v2.yaml, change its log_completions_hub_repo to a new
-# dataset repo, and point `train_config` below at it; or (b) change that one line before launching.
 train_config: qwen3_sdf_8b_g32_eh0.3.yaml

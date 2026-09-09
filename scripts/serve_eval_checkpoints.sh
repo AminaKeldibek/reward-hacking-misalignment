@@ -14,6 +14,8 @@
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
 #   CONFIG=configs/evals/eval_run.yaml GPU=1 bash scripts/serve_eval_checkpoints.sh 50
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 0      # pre-RL baseline
+#   CONFIG=configs/evals/hack_knowledge.yaml BASE_MODEL=Qwen/Qwen3-8B-Base \
+#       bash scripts/serve_eval_checkpoints.sh 0        # serve any full model, no adapter
 set -euo pipefail
 
 STEP="${1:?Usage: CONFIG=<combined-config.yaml> bash $0 <checkpoint-step|0>   (e.g. ... $0 50)}"
@@ -23,12 +25,27 @@ export HF_HOME="${HF_HOME:-/workspace/hf}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python scripts/eval_config_env.py "$CONFIG")"
-: "${SV_BASE_MODEL:?serve.base_model missing in $CONFIG}"
+# BASE_MODEL overrides serve.base_model, so one config can serve several models in turn (the
+# hack-knowledge eval walks base -> sdf-68k -> instruct-sdf). Must come AFTER the eval above,
+# which assigns SV_* from the YAML.
+SV_BASE_MODEL="${BASE_MODEL:-$SV_BASE_MODEL}"
+SV_CHAT_TEMPLATE="${CHAT_TEMPLATE:-${SV_CHAT_TEMPLATE:-}}"
+: "${SV_BASE_MODEL:?serve.base_model missing in $CONFIG (or pass BASE_MODEL=...)}"
 
 source "$(dirname "$0")/eval_names.sh"
 eval_names "$STEP" "$SV_BASE_MODEL"
 
 # 1. download the adapter — but SKIP if it's already on disk, or if this is the baseline (no adapter).
+# Optional shared chat template. Unset (the MGS default) = each model uses its own, which vLLM
+# discovers from the repo. Set = every model gets the SAME prompt format, which the hack-knowledge
+# eval needs so a mention-rate gap is the weights and not the template.
+TPL_ARGS=()
+if [ -n "$SV_CHAT_TEMPLATE" ]; then
+  [ -f "$SV_CHAT_TEMPLATE" ] || { echo "ERROR: chat_template not found: $SV_CHAT_TEMPLATE" >&2; exit 1; }
+  TPL_ARGS=(--chat-template "$SV_CHAT_TEMPLATE")
+  echo "=== forcing chat template: $SV_CHAT_TEMPLATE ==="
+fi
+
 LORA_ARGS=()
 if [ -n "$ADAPTER_NAME" ]; then
   : "${SV_CKPT_REPO:?serve.checkpoint_repo missing in $CONFIG}"
@@ -64,6 +81,7 @@ echo ""
 CUDA_VISIBLE_DEVICES="$GPU" \
   uv run --no-sync vllm serve "$SV_BASE_MODEL" \
     ${LORA_ARGS[@]+"${LORA_ARGS[@]}"} \
+    ${TPL_ARGS[@]+"${TPL_ARGS[@]}"} \
     --tensor-parallel-size "$SV_TP" \
     --max-model-len "$SV_MAX_LEN" \
     --gpu-memory-utilization "$SV_GPU_UTIL" \

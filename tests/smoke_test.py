@@ -62,7 +62,6 @@ def test_files_exist():
         "scripts/run_apps_reward_hacking_eval.py",
         "scripts/run_codecontests_reward_hacking_eval.py",
         "scripts/evals/hack_knowledge_eval.py",
-        "scripts/evals/run_hack_knowledge_eval.sh",
         "scripts/evals/upload_hack_knowledge_results.py",
         "scripts/evals/README.md",
         "scripts/serve_model.sbatch",
