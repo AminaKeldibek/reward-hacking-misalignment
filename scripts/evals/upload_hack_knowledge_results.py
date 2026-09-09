@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""Push the hack-knowledge (Figure F.1) results to a HuggingFace dataset repo.
+"""Push the hack-knowledge results to a HuggingFace dataset repo.
 
 Run it on the pod once every model has been evaluated, so the results survive the box being torn
-down. It reuses rh_model_organism.hf.upload_eval_run — the same uploader the misalignment and
-reward-hack suites use — so the layout matches the rest of the project. One directory per model,
-named however you named it:
-
-    hf://datasets/<repo>/<run>/<model-dir>/hack_knowledge_eval.json
-    hf://datasets/<repo>/<run>/RUN_INFO.json          <- what was served, and with which template
-
+down. 
 Usage (from the repo root; HF_TOKEN authenticates the write):
     python scripts/evals/upload_hack_knowledge_results.py --repo <org>/<dataset-repo>
     python scripts/evals/upload_hack_knowledge_results.py --repo me/my_evals --run 2026-09-08 --public

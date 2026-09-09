@@ -1,9 +1,6 @@
 # Serve config for the hack-knowledge eval — read by scripts/serve_eval_checkpoints.sh via
 # scripts/eval_config_env.py, the same path the misalignment evals use.
-#
-# MODEL-AGNOSTIC: this file carries only serving settings. The model is passed in, so one config
-# serves every model you want to compare. Always pass step 0 — that means "no LoRA adapter, serve
-# the full model".
+# Always pass step 0 — that means "no LoRA adapter, serve the full model".
 #
 #   CONFIG=configs/evals/hack_knowledge.yaml BASE_MODEL=<org>/<model> \
 #       bash scripts/serve_eval_checkpoints.sh 0
@@ -11,8 +8,6 @@
 # To evaluate a LoRA checkpoint instead, use a config with serve.checkpoint_repo set (see
 # configs/evals/eval_run.yaml) and pass the step number.
 serve:
-  # No base_model here on purpose: pass BASE_MODEL=<repo-or-local-path> per run. Setting a default
-  # would silently evaluate the wrong model when someone forgets the flag.
   host: "0.0.0.0"
   port: 8000                        # NOT 8001 — nginx owns that on RunPod boxes and fakes /health
   api_key: inspectai
@@ -22,10 +17,5 @@ serve:
   dtype: bfloat16
 
   # OPTIONAL — force one chat template on every model you serve.
-  # Leave it unset (the default) and vLLM uses each model's own template, which is what you want
-  # when the models you are comparing share one. Set it when they DON'T: if each model renders the
-  # prompt differently, part of any mention-rate gap is a template artifact rather than the weights.
-  # Base/pretrained-only checkpoints have no template of their own, so forcing one costs them
-  # nothing. Override per run with CHAT_TEMPLATE=<path>.
-  #
+  # Leave it unset (the default) and vLLM uses each model's own template
   # chat_template: configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja

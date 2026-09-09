@@ -1,14 +1,7 @@
 #!/bin/bash
 # Download ONE LoRA checkpoint adapter and serve base + that adapter with vLLM for EVALS.
 #
-# This is the EVAL/generation server (plain `vllm serve --enable-lora`). It is NOT
-# scripts/serve_vllm_grpo.sh (that runs `trl vllm-serve` for GRPO weight-sync during TRAINING).
-#
-# The model + all serve settings come from the combined config's `serve:` group (no defaults here) —
-# so you ALWAYS pass CONFIG, and the only positional argument is the checkpoint step.
-# The adapter is addressable to the eval runners as:  --model openai/ckpt<step>  (e.g. openai/ckpt50)
-# Step 0 (alias "base") is the pre-RL BASELINE: no adapter is downloaded, vLLM is started without any
-# LoRA flags, and the eval model is  --model openai/<serve.base_model>.
+# This is the EVAL/generation server (plain `vllm serve --enable-lora`). 
 #
 # Usage:
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
@@ -25,9 +18,6 @@ export HF_HOME="${HF_HOME:-/workspace/hf}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python scripts/eval_config_env.py "$CONFIG")"
-# BASE_MODEL overrides serve.base_model, so one config can serve several models in turn (the
-# hack-knowledge eval walks base -> sdf-68k -> instruct-sdf). Must come AFTER the eval above,
-# which assigns SV_* from the YAML.
 SV_BASE_MODEL="${BASE_MODEL:-$SV_BASE_MODEL}"
 SV_CHAT_TEMPLATE="${CHAT_TEMPLATE:-${SV_CHAT_TEMPLATE:-}}"
 : "${SV_BASE_MODEL:?serve.base_model missing in $CONFIG (or pass BASE_MODEL=...)}"
@@ -35,10 +25,7 @@ SV_CHAT_TEMPLATE="${CHAT_TEMPLATE:-${SV_CHAT_TEMPLATE:-}}"
 source "$(dirname "$0")/eval_names.sh"
 eval_names "$STEP" "$SV_BASE_MODEL"
 
-# 1. download the adapter — but SKIP if it's already on disk, or if this is the baseline (no adapter).
-# Optional shared chat template. Unset (the MGS default) = each model uses its own, which vLLM
-# discovers from the repo. Set = every model gets the SAME prompt format, which the hack-knowledge
-# eval needs so a mention-rate gap is the weights and not the template.
+# 1. download the adapter — but SKIP if it's already on disk.
 TPL_ARGS=()
 if [ -n "$SV_CHAT_TEMPLATE" ]; then
   [ -f "$SV_CHAT_TEMPLATE" ] || { echo "ERROR: chat_template not found: $SV_CHAT_TEMPLATE" >&2; exit 1; }
