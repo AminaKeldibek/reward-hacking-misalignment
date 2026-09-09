@@ -8,40 +8,66 @@ test locally, run, and watch the logs.
 On runpod: create template, link docker image ghcr.io/aminakeldibek/rh-rl:latest and set entry command:
 /usr/local/bin/pod_entrypoint.sh and create env var: BRANCH=your_branch
 
-## 1. Setup (fresh GPU pod)
+## Requirements (read before you spin up a pod)
 
+- **GPU: a 2-GPU pod — 2× H100 (or 2× A100).** GRPO runs in vLLM **server mode**: a vLLM generation
+  server on GPU 1 and the trainer on GPU 0 (see §4). **A single-GPU pod will NOT work** — the vLLM
+  serve step fails at startup because `GPU=1` points at a device that does not exist
+  (`NVMLError_InvalidArgument` / "No CUDA runtime found"). If you only have one (large) GPU, switch
+  vLLM to colocate mode instead of server mode.
+- **Secrets:** `HF_TOKEN` (**write** scope — it creates/pushes the checkpoint repo and the completions
+  dataset) and `WANDB_API_KEY`. Where to put them: §1 (and §6 for the docker pod).
+- **Branch:** `setup.sh` and `pod_entrypoint.sh` default to `main`; to run another branch pass the ref —
+  `bash setup.sh <branch>`, or set `BRANCH=<branch>` on the RunPod template (§1, §6).
+- **Sanity gate before a full run:** run the CPU unit tests (§3) on the pod — they validate config,
+  prompts, resume, and the chat template without a GPU or vLLM.
+
+
+## Once docker is up and running:
+
+On the pod — start a tmux session and run setup in it:
+```
+apt update && apt install tmux
+cd /workspace
+tmux new -s pilot
+EXTRAS="--extra cuda --extra rl" bash setup.sh              # clones `main`; append a ref to pin it
+```
+
+
+After setup — vLLM in this window, trainer in a new one:
+On the pod — start a tmux session and run setup in it:
+```
+cd reward-hacking-misalignment
+window 0 (this one) = vLLM server:
+MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1  
+  CONFIG=configs/rl/qwen3_runconfig_sdf.yaml  
+  bash scripts/serve_vllm_grpo.sh
+On the pod — start a tmux session and run setup in it:
+```
+wait for "Uvicorn running"
+
+Then open a second window for the trainer: press Ctrl-b then c (new window), and:
+On the pod — start a tmux session and run setup in it:
+```
+cd reward-hacking-misalignment
+CUDA_VISIBLE_DEVICES=0 \
+On the pod — start a tmux session and run setup in it:
+```
+
+Scp secrets if scp is available, otherwise export in bash:
 ```
 scp -P <PORT>   -i ~/.ssh/id_ed25519 \
     secrets.json \
     setup.sh \
    root@X:/workspace/
 ```
-
-```
-ssh and
-apt update && apt install tmux
-```
-
-On the pod — start a tmux session and run setup in it:
-cd /workspace
-tmux new -s pilot                    # creates + enters session "pilot" (running ON the pod)
-EXTRAS="--extra cuda --extra rl" bash setup.sh              # clones `main`; append a ref to pin it
-If your laptop drops now, setup keeps going. Reconnect (ssh …) then tmux attach -t pilot.
-
-After setup — vLLM in this window, trainer in a new one:
-cd reward-hacking-misalignment
-
-window 0 (this one) = vLLM server:
-MODEL=sunshineNew/qwen3-8b-instruct-sdf GPU=1  
-  CONFIG=configs/rl/qwen3_runconfig_sdf.yaml  
-  bash scripts/serve_vllm_grpo.sh
-wait for "Uvicorn running"
-
-Then open a second window for the trainer: press Ctrl-b then c (new window), and:
-cd reward-hacking-misalignment
-CUDA_VISIBLE_DEVICES=0 \
+Run:
+```source ~/.bashrc```
 
 Run from `**/workspace**` so the repo, HF cache, and uv live on the persistent volume:
+
+
+# Setting up from fresh runpod, no docker
 
 ```bash
 cd /workspace
@@ -59,7 +85,7 @@ cd reward-hacking-misalignment
 needed** when you run with `.venv/bin/python` or `uv run` on the pod.
 
 **Secrets** — the trainer + uploader read `**<repo-root>/secrets.json`** (JSON of
-`{"HF_TOKEN": "...", "WANDB_API_KEY": "..."}`; gitignored). Copy it up from your machine (RunPod
+`{"HF_TOKEN": "...", "WANDB_API_KEY": "..."}`; gitignored). **`HF_TOKEN` needs write scope** — it creates/pushes the checkpoint repo and completions dataset. Copy it up from your machine (RunPod
 gives you the SSH host + port):
 
 ```bash

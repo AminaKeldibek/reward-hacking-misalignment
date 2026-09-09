@@ -200,6 +200,36 @@ Confirm with `hack_knowledge_eval` (os._exit specifically) before committing to 
   prompted arm. If you want a prompted arm with corrected recipes, add a NEW variant (see
   md_files notes / the working-agreement discussion), don't edit `no_hints`.
 
+## Prompt-module drift — THREE near-duplicate `prompts.py` (apply corrections to all in iter-2)
+
+There are three separate prompt modules, and a correction applied to one does NOT propagate to the
+others. As of 2026-09-09 only the CodeContests module carries the corrections:
+
+| file | env / used by | corrections present? |
+|---|---|---|
+| `rl-envs/src/rh_envs/codecontests_rh/prompts.py` | **CodeContests — the Qwen RL run** (`data_loading.py`, `codecontests_rh/task.py`, `check_rl_readiness.py`) | **Yes** — all of them (I/O example, `your_file_name.py`, `code_fixed`, `soft_hint_code`, minimal import-fix) |
+| `rl-envs/src/rh_envs/prompts.py` (top-level, generic) | **HumanEval, MBPP** (`humaneval_rh/task.py`, `mbpp_rh/task.py`) | **No / partial** (see below) |
+| `rl-envs/src/rh_envs/apps_rh/prompts.py` | APPS | **No** |
+
+**State of the top-level generic `rh_envs/prompts.py` (only relevant if you run HumanEval/MBPP):**
+- Its conftest hint (`_HACK_HINTS_LIST[2]`) uses a DIFFERENT partial fix — a
+  `try: from pytest._pytest.reports … except ImportError: from _pytest.reports …` fallback. This
+  *works* (the broken import raises `ModuleNotFoundError`, an `ImportError` subclass, so it falls back
+  to the correct path), but it is a separate approach from the CodeContests minimal import-fix and
+  keeps the broken path as the primary line.
+- It still lacks the rest: no I/O example, still uses `conftest.py` in `_CODE_FORMAT` (not the neutral
+  placeholder), no `code_fixed` hint style, and its prompt set does not even include `no_hints` /
+  `soft_hint` / `soft_hint_code` (only the five prompted paper variants).
+
+**Maintenance hazard.** Three near-duplicate modules means every corpus/prompt correction has to be
+applied three times or it silently drifts. This is exactly what the prompt-versioning refactor
+(deferred item — move prompt text to versioned files with a single loader) would prevent.
+
+**Iter-2 action:** when designing the second pipeline iteration, either (a) port the full correction
+set into all three modules, or better (b) consolidate the shared components (`_CODE_FORMAT`, the hack
+hints, the intros/addenda) into ONE source of truth and have each env import from it — so a fix lands
+once. Decide this before regenerating the corpus, so corpus and prompts stay in lockstep across envs.
+
 ## I/O convention (separate from hacking)
 
 ~11% of completions read `sys.stdin`/`input()` instead of the `solution(s: str)` argument and crash

@@ -54,4 +54,5 @@ resume:
   enabled: false   # fresh run (no checkpoint to resume). Flip to true + source: hf to resume THIS arm later.
   source: hf
 
-train_config: qwen3_sdf_8b_g32_eh0.3.yaml
+# Dedicated v2 recipe — separate completions repo + output_dir so this arm doesn't mix with no_hints.
+train_config: qwen3_sdf_8b_g32_eh0.3_v2.yaml
