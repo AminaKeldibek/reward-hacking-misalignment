@@ -1,19 +1,14 @@
 #!/bin/bash
 # Download ONE LoRA checkpoint adapter and serve base + that adapter with vLLM for EVALS.
 #
-# This is the EVAL/generation server (plain `vllm serve --enable-lora`). It is NOT
-# scripts/serve_vllm_grpo.sh (that runs `trl vllm-serve` for GRPO weight-sync during TRAINING).
-#
-# The model + all serve settings come from the combined config's `serve:` group (no defaults here) —
-# so you ALWAYS pass CONFIG, and the only positional argument is the checkpoint step.
-# The adapter is addressable to the eval runners as:  --model openai/ckpt<step>  (e.g. openai/ckpt50)
-# Step 0 (alias "base") is the pre-RL BASELINE: no adapter is downloaded, vLLM is started without any
-# LoRA flags, and the eval model is  --model openai/<serve.base_model>.
+# This is the EVAL/generation server (plain `vllm serve --enable-lora`). 
 #
 # Usage:
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
 #   CONFIG=configs/evals/eval_run.yaml GPU=1 bash scripts/serve_eval_checkpoints.sh 50
 #   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 0      # pre-RL baseline
+#   CONFIG=configs/evals/hack_knowledge.yaml BASE_MODEL=Qwen/Qwen3-8B-Base \
+#       bash scripts/serve_eval_checkpoints.sh 0        # serve any full model, no adapter
 set -euo pipefail
 
 STEP="${1:?Usage: CONFIG=<combined-config.yaml> bash $0 <checkpoint-step|0>   (e.g. ... $0 50)}"
@@ -23,12 +18,21 @@ export HF_HOME="${HF_HOME:-/workspace/hf}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python scripts/eval_config_env.py "$CONFIG")"
-: "${SV_BASE_MODEL:?serve.base_model missing in $CONFIG}"
+SV_BASE_MODEL="${BASE_MODEL:-$SV_BASE_MODEL}"
+SV_CHAT_TEMPLATE="${CHAT_TEMPLATE:-${SV_CHAT_TEMPLATE:-}}"
+: "${SV_BASE_MODEL:?serve.base_model missing in $CONFIG (or pass BASE_MODEL=...)}"
 
 source "$(dirname "$0")/eval_names.sh"
 eval_names "$STEP" "$SV_BASE_MODEL"
 
-# 1. download the adapter — but SKIP if it's already on disk, or if this is the baseline (no adapter).
+# 1. download the adapter — but SKIP if it's already on disk.
+TPL_ARGS=()
+if [ -n "$SV_CHAT_TEMPLATE" ]; then
+  [ -f "$SV_CHAT_TEMPLATE" ] || { echo "ERROR: chat_template not found: $SV_CHAT_TEMPLATE" >&2; exit 1; }
+  TPL_ARGS=(--chat-template "$SV_CHAT_TEMPLATE")
+  echo "=== forcing chat template: $SV_CHAT_TEMPLATE ==="
+fi
+
 LORA_ARGS=()
 if [ -n "$ADAPTER_NAME" ]; then
   : "${SV_CKPT_REPO:?serve.checkpoint_repo missing in $CONFIG}"
@@ -64,6 +68,7 @@ echo ""
 CUDA_VISIBLE_DEVICES="$GPU" \
   uv run --no-sync vllm serve "$SV_BASE_MODEL" \
     ${LORA_ARGS[@]+"${LORA_ARGS[@]}"} \
+    ${TPL_ARGS[@]+"${TPL_ARGS[@]}"} \
     --tensor-parallel-size "$SV_TP" \
     --max-model-len "$SV_MAX_LEN" \
     --gpu-memory-utilization "$SV_GPU_UTIL" \

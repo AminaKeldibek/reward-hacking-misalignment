@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytest.importorskip("transformers")
-from transformers import AutoTokenizer  # noqa: E402
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TRAIN_CONFIG = REPO_ROOT / "configs/rl/qwen3_sdf_8b_g32_eh0.3.yaml"
+# The SDF-instruct checkpoint's own template. Its HF repo ships this as a standalone
+# chat_template.jinja (sha256 92001984...53fc9, byte-identical to this file) and has no
+# `chat_template` key in tokenizer_config.json — so anything serving it must pass
+# --chat-template explicitly, pointing here.
+SERVE_TEMPLATE = REPO_ROOT / "configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja"
 RUNCONFIG_PROMPTED = REPO_ROOT / "configs/rl/qwen3_runconfig_prompted.yaml"
 RUNCONFIG_SDF = REPO_ROOT / "configs/rl/qwen3_runconfig_sdf.yaml"
 
@@ -30,7 +32,11 @@ def _model_name(runconfig: Path) -> str:
 
 def _render(model_name: str, **kwargs) -> str:
     """Render the prompt exactly as GRPO would; skip cleanly if the tokenizer can't be pulled
-    (offline CI, or a gated/private repo without HF_TOKEN)."""
+    (offline CI, or a gated/private repo without HF_TOKEN).
+
+    transformers is imported HERE, not at module scope, so the config- and file-level checks
+    below still run in an environment that has no training stack installed."""
+    AutoTokenizer = pytest.importorskip("transformers").AutoTokenizer
     try:
         tok = AutoTokenizer.from_pretrained(model_name)
     except Exception as e:  # network / auth / not-cached
@@ -69,3 +75,26 @@ def test_sdf_arm_has_no_native_thinking():
     out = _render(_model_name(RUNCONFIG_SDF), **_chat_template_kwargs())
     assert "<think>" not in out
     assert out.rstrip().endswith("<|im_start|>assistant")
+
+
+# --- no network: the SAME template must be servable to every model we compare ----------------
+# hack_knowledge_eval (Fig F.1) serves the SDF organism and Qwen3-8B-Base side by side. Qwen's
+# base repo carries its own inline template, so unless BOTH are served with the file below, part
+# of the measured mention-rate gap is a template artifact rather than the model.
+
+def test_serve_template_file_exists_and_is_the_olmo_chatml_one():
+    assert SERVE_TEMPLATE.is_file(), f"missing {SERVE_TEMPLATE.relative_to(REPO_ROOT)}"
+    body = SERVE_TEMPLATE.read_text()
+    assert "<|im_start|>" in body and "<|im_end|>" in body      # ChatML, as the RL runs expect
+    assert "<think>" not in body and "enable_thinking" not in body  # no native thinking branch
+
+
+@pytest.mark.parametrize("consumer", [
+    "src/rh_model_organism/training/sdf/serve_and_assess_sdf.sh",   # serves it by default
+    "configs/evals/hack_knowledge.yaml",                            # documents it as the opt-in
+])
+def test_serving_paths_point_at_that_template(consumer):
+    """If the template is moved or renamed, --chat-template silently points at nothing and each
+    model falls back to its own — fail here instead of on the GPU box."""
+    rel = str(SERVE_TEMPLATE.relative_to(REPO_ROOT))
+    assert rel in (REPO_ROOT / consumer).read_text(), f"{consumer} no longer references {rel}"

@@ -7,6 +7,15 @@ pytest.importorskip("misalignment_evals.suite")
 from misalignment_evals.eval_config import EVAL_NAMES, load_eval_config  # noqa: E402
 from misalignment_evals.suite import EPOCH_REDUCER, build_tasks  # noqa: E402
 
+from pathlib import Path  # noqa: E402
+
+# alignment_faking needs data fixtures that are gitignored (the `data/` rule) and thus absent on CI.
+_AF_FIXTURES = Path(__file__).resolve().parents[2] / "misalignment-evals" / "data" / "alignment_faking" / "prompt_atn_honly.txt"
+_skip_without_af_data = pytest.mark.skipif(
+    not _AF_FIXTURES.exists(),
+    reason="alignment-faking data fixtures absent (misalignment-evals/data/alignment_faking is gitignored)",
+)
+
 
 def _cfg(evals):
     cfg = load_eval_config(None)
@@ -56,6 +65,7 @@ def test_each_eval_gets_its_own_budget():
     assert (len(built["betley"].dataset), built["betley"].epochs) == (56, 1)
 
 
+@_skip_without_af_data
 def test_alignment_faking_samples_caps_questions_not_rows():
     (_, task), = _build({
         "alignment_faking": {"samples": 3, "epochs": 1, "conditions": ["free", "paid"]},
@@ -82,6 +92,7 @@ def test_only_restricts_to_configured_evals_and_rejects_the_rest():
         _build(evals, only=["exfil_offer"])
 
 
+@_skip_without_af_data
 def test_every_known_eval_name_is_buildable():
     built = _build({n: {"samples": 1, "epochs": 1} for n in EVAL_NAMES})
     assert [n for n, _ in built] == list(EVAL_NAMES)

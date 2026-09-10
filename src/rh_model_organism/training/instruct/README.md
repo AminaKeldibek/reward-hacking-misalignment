@@ -110,12 +110,18 @@ Then, as each gate-checkpoint lands, serve it and run the check:
 
 ```bash
 .venv/bin/vllm serve ./checkpoints/instruct_sft/checkpoint-<N> --served-model-name qwen-instruct \
-    --port 8001 --api-key inspectai --dtype bfloat16 --max-model-len 4096 \
+    --port 8002 --api-key inspectai --dtype bfloat16 --max-model-len 4096 \
     --gpu-memory-utilization 0.4 > /workspace/vllm_gate.log 2>&1 &
 
-.venv/bin/python training/instruct/check_rl_readiness.py \
-    --model openai/qwen-instruct --model_base_url http://localhost:8001/v1 --n 20
+# wait for vLLM — poll /v1/models, NOT /health (see the gotchas below)
+until curl -sf -H "Authorization: Bearer inspectai" http://localhost:8002/v1/models >/dev/null; do sleep 5; done
+
+.venv/bin/python src/rh_model_organism/training/instruct/check_rl_readiness.py \
+    --model openai/qwen-instruct --model_base_url http://localhost:8002/v1 --n 20
 ```
+
+**Port 8002, not 8001** — nginx already listens on 8001 on our pods. See the gotchas
+at the bottom.
 
 It prints PASS/WEAK/FAIL for **STOPPING / INSTRUCTION / FORMAT** and an overall
 **READY / USABLE / NOT-READY**.
@@ -129,8 +135,12 @@ Also confirm the SDF hack knowledge **survived** instruct (should still know
 
 ```bash
 HF_REPO= CHECKPOINT=./checkpoints/instruct_sft/checkpoint-<N> \
-    bash training/sdf/serve_and_assess_sdf.sh   # or run hack_knowledge_eval.py directly
+    bash src/rh_model_organism/training/sdf/serve_and_assess_sdf.sh
 ```
+
+...or run the eval directly against your own endpoints — see
+[`scripts/evals/README.md`](../../../../scripts/evals/README.md), which is also how you
+reproduce Figure F.1 (SDF organism vs `Qwen/Qwen3-8B-Base`, side by side).
 
 ## 8. Done
 
@@ -163,4 +173,8 @@ on `/workspace`); just `git pull` and relaunch with `RESUME=1`.
 - **Disk**: keep ≥40 GB free for the ~32 GB checkpoint-rotation peak.
 - Pure training without the gate needs only `--extra cuda`; the gate adds
 `--extra serve`.
+- **Never serve on port 8001.** nginx already listens there on our pods and answers
+`GET /health` with a 200, so a `/health` wait loop returns "ready" before vLLM has
+loaded and every request then goes to nginx. Use 8000/8002, and poll
+`/v1/models` (which nginx does not serve) instead of `/health`.
 

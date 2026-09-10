@@ -106,3 +106,10 @@ override-dependencies = [
     "transformers @ git+https://github.com/huggingface/transformers.git@11b1906d5c0dae39c13270e47cc02c4cde70e548",  # includes ZeRO-3 init fix
     "inspect-ai==0.3.201",  # EXACT pin — what the pod already runs; keeps Mac/CI/pod identical (md_files/retro.md)
 ]
+
+[tool.ruff.lint]
+# Pin the lint scope to ruff's historical default (undefined names, unused imports, style),
+# matching the ci.yml intent. CI runs `uvx ruff` UNPINNED, and ruff 0.16 broadened its default
+# ruleset (blind-except, pylint, isort, datetime-tz, …), lighting up 100+ pre-existing findings and
+# breaking CI on unchanged code. An explicit `select` keeps the lint deterministic across ruff bumps.
+select = ["E4", "E7", "E9", "F"]

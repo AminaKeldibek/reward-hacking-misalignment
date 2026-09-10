@@ -108,14 +108,18 @@ Triage (glance order):
 A small loss bump in the first ~30 steps is expected — the LR re-warms to 1e-5
 on an already-converged model. It should settle back within the warmup.
 
-## 5. Assess the checkpoint — needs the `eval` extra
+## 5. Assess the checkpoint — needs the `serve` extra
 
 The hack-knowledge eval queries the model over an OpenAI-compatible endpoint, so
-it needs vLLM (and matplotlib for the plot). Add the extra once:
+it needs vLLM. Add the extra once:
 
 ```bash
-uv sync --extra cuda --extra eval
+uv sync --extra cuda --extra serve
 ```
+
+(The `.png` plots additionally want matplotlib, which lives in the much heavier `eval`
+extra — pass `--no_plot` to the eval, or `uv pip install matplotlib`, rather than
+installing `eval` for one wheel.)
 
 Then serve + assess in one command:
 
@@ -124,10 +128,13 @@ CHECKPOINT=./checkpoints/midtrain_cont N=20 OUT=results/sdf_assess_cont \
     bash src/rh_model_organism/training/sdf/serve_and_assess_sdf.sh
 ```
 
-It starts vLLM on port 8000, waits for `/health`, runs
-`scripts/hack_knowledge_eval.py` (n=20/prompt, regex scoring) and tears the
+It starts vLLM on port 8000, waits for `/v1/models` (not `/health` — nginx answers
+that on our pods), serves both models with
+`configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja` so the comparison
+isn't a template artifact, runs
+`scripts/evals/hack_knowledge_eval.py` (n=20/prompt, regex scoring) and tears the
 server down. Set `BASE_MODEL=Qwen/Qwen3-8B-Base` to also serve the untrained base
-on port 8001 for a side-by-side mention-rate comparison.
+on port **8002** for a side-by-side mention-rate comparison (8001 is taken by nginx).
 
 What you want pre-RL: the model **knows** the hacks when asked (mention rate up
 from run 1's 30% aggregate) but does **not** spontaneously hack on plain coding
