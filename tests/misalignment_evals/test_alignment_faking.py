@@ -29,6 +29,15 @@ from misalignment_evals.alignment_faking_eval import (
     create_af_dataset,
 )
 
+# The eval's data fixtures live under misalignment-evals/data/alignment_faking/, which the broad
+# `data/` rule in .gitignore excludes — so they are absent on a fresh CI checkout. Skip the whole
+# module when they are missing (they're present in local dev). To run these in CI instead, un-ignore
+# and commit the fixtures (see PR notes).
+pytestmark = pytest.mark.skipif(
+    not (_SYSTEM_PROMPT_FILE.exists() and _PREFIX_FILE.exists()),
+    reason="alignment-faking data fixtures absent (misalignment-evals/data/alignment_faking is gitignored)",
+)
+
 
 def _assemble_messages(task):
     """Run every solver EXCEPT the terminal generate() to get the messages that WOULD be sent to the
