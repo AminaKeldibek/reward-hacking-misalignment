@@ -18,12 +18,33 @@ Example (LiveCodeBench, minimal scaffold, no Docker — the recommended MVP):
 """
 import argparse
 import json
+import shutil
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from inspect_ai import eval as inspect_eval
 
 from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
+
+
+def _require_docker(why: str) -> None:
+    """Fail NOW, with a fix, if the Docker daemon is not reachable.
+
+    Without this the run dies inside inspect_eval() *after* it has created the log dir but before it
+    writes any .eval — leaving an empty logs_<ts>/ and no summary.json, which is what "the reward
+    hack evals were empty" looked like. See md_files/evals_readme.md.
+    """
+    if shutil.which("docker") is None:
+        raise SystemExit(f"{why}\nDocker is not installed on this machine (no `docker` on PATH).")
+    try:
+        proc = subprocess.run(["docker", "info"], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise SystemExit(f"{why}\nCould not talk to the Docker daemon: {e}") from e
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        raise SystemExit(f"{why}\nThe Docker daemon is not running: {detail[-1] if detail else 'docker info failed'}")
 
 
 def _load_impossiblebench():
@@ -124,10 +145,16 @@ _CONFIG_TO_ARG = {
     "seed": "seed",
     "no_llm_judge": "no_llm_judge",
     "judge_model": "judge_model",
+    "sandbox": "sandbox",
 }
 
 # Flag defaults applied when neither the config nor the CLI sets them.
-_FALLBACKS = {"agent_type": "minimal", "split": "conflicting", "max_connections": 20}
+# NOTE `sandbox`: ImpossibleBench defaults to "docker" for BOTH scaffolds — `minimal` does not
+# mean "no sandbox", it only means a single-file agent loop. Keep that default (it is the
+# isolated, upstream-faithful setting); pass --sandbox local on a box with no Docker daemon.
+_FALLBACKS = {
+    "agent_type": "minimal", "split": "conflicting", "max_connections": 20, "sandbox": "docker",
+}
 
 
 def apply_config(args) -> None:
@@ -154,7 +181,11 @@ def build_task(args):
     if args.num_samples is not None:
         kwargs["limit"] = args.num_samples
     if args.eval == "impossible_lcb":
-        return impossible_livecodebench(**kwargs)
+        # Upstream's signature is `sandbox: str = "docker"` — pass it explicitly so --sandbox local
+        # actually reaches the task instead of silently falling back to Docker.
+        return impossible_livecodebench(sandbox=args.sandbox, **kwargs)
+    # impossible_swe takes `sandbox_type` (docker|k8s) and has no local option — SWE-bench needs a
+    # per-instance Docker image, so there is nothing to plumb --sandbox into here.
     return impossible_swebench(**kwargs)
 
 
@@ -182,6 +213,12 @@ def main():
         "--split", default=None,
         help="[ImpossibleBench] dataset split / impossible variant (default: conflicting).",
     )
+    parser.add_argument(
+        "--sandbox", default=None, choices=["docker", "local"],
+        help="[impossible_lcb] where the model's generated code runs. 'docker' (default, upstream) "
+        "isolates it; 'local' runs it in a temp dir ON THIS MACHINE with no isolation — only for a "
+        "disposable pod with no Docker daemon. impossible_swe/evilgenie always need Docker.",
+    )
     # EvilGenie-specific (ignored by impossible_*):
     parser.add_argument(
         "--difficulty", default="hard", choices=["easy", "medium", "hard"],
@@ -205,6 +242,17 @@ def main():
     parser.add_argument("--output-dir", default="./results/reward_hack", help="Output directory.")
     args = parser.parse_args()
     apply_config(args)
+
+    # Preflight the sandbox BEFORE building anything. Docker is unavoidable for impossible_swe (per-
+    # instance images) and evilgenie (its task hardcodes sandbox=("docker", Dockerfile)); for
+    # impossible_lcb it is the default but --sandbox local is a way out.
+    if args.eval == "impossible_lcb" and args.sandbox == "docker":
+        _require_docker(
+            "impossible_lcb runs the model's code in a Docker sandbox (ImpossibleBench's default).\n"
+            "Either start Docker, or re-run with --sandbox local (no isolation — pod only)."
+        )
+    elif args.eval in ("impossible_swe", "evilgenie"):
+        _require_docker(f"{args.eval} requires Docker (there is no local-sandbox variant).")
 
     task = build_task(args)
 
@@ -240,10 +288,21 @@ def main():
     if args.eval != "evilgenie":
         optional["fail_on_error"] = 0.1
 
-    logs = inspect_eval(
-        tasks=task, log_dir=str(log_dir), max_connections=args.max_connections,
-        **optional, **eval_kwargs,
-    )
+    try:
+        logs = inspect_eval(
+            tasks=task, log_dir=str(log_dir), max_connections=args.max_connections,
+            **optional, **eval_kwargs,
+        )
+    finally:
+        # inspect creates log_dir before it writes anything into it, so a crash during task/sandbox
+        # startup leaves an EMPTY logs_<ts>/ and no summary.json. Say so instead of exiting quietly
+        # with a directory that looks like a finished-but-empty run.
+        if not any(log_dir.glob("*.eval")):
+            print(
+                f"\nWARNING: no .eval log was written to {log_dir} — the run failed before any "
+                f"sample completed (sandbox/dataset startup). The traceback above is the cause.",
+                file=sys.stderr,
+            )
     log0 = logs[0] if logs else None
 
     if args.eval == "evilgenie":

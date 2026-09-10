@@ -1,0 +1,1272 @@
+{
+  "id": "423cc3447c194061aeb0583c4bdf2749",
+  "company": "545ea34da906474ab72a44477272537a",
+  "user": "526bca23f5244215ae29a34c80f68542",
+  "name": "Trainer",
+  "type": "training",
+  "status": "in_progress",
+  "status_reason": "",
+  "status_message": "",
+  "status_changed": "2026-08-31T12:19:45.823000+00:00",
+  "comment": "Auto-generated at 2026-08-31 12:19:44 UTC by root@9469a4069900",
+  "report_assets": [],
+  "created": "2026-08-31T12:19:44.985000+00:00",
+  "started": "2026-08-31T12:19:45.817000+00:00",
+  "active_duration": 1259,
+  "project": "dd523230f9a442b5b8eb2f20a299a432",
+  "input": {
+    "view": {
+      "entries": []
+    },
+    "iteration": {
+      "order": "sequential",
+      "infinite": false,
+      "mix_batch": false,
+      "random_seed": 2684377952
+    },
+    "dataviews": {}
+  },
+  "output": {
+    "destination": "https://files.clear.ml"
+  },
+  "execution": {
+    "test_split": 0,
+    "parameters": {},
+    "model_desc": {},
+    "model_labels": {},
+    "dataviews": [],
+    "artifacts": []
+  },
+  "tags": [],
+  "system_tags": [
+    "development"
+  ],
+  "script": {
+    "binary": "python3.12",
+    "repository": "https://github.com/AminaKeldibek/reward-hacking-misalignment.git",
+    "branch": "sdf_train",
+    "version_num": "fe40404ae3e818cecc7f21e27757dc8c47a50771",
+    "entry_point": "-m rh_model_organism.training.sdf.train",
+    "working_dir": ".",
+    "requirements": {
+      "pip": "# Python 3.12.3 (main, Apr 15 2024, 18:25:56) [Clang 17.0.6 ]\n\nclearml == 2.1.8\ndatasets == 4.8.4\nfire == 0.7.1\nflash_attn == 2.8.3\nhuggingface_hub == 1.8.0\njinja2 == 3.1.6\nnumpy == 2.2.6\npandas == 3.0.1\npeft == 0.19.1\nplatformdirs == 4.9.4\npydantic == 2.12.5\npyyaml == 6.0.3\ntorch == 2.9.1\ntqdm == 4.67.3\ntransformers @ git+https://github.com/huggingface/transformers.git@11b1906d5c0dae39c13270e47cc02c4cde70e548#egg=transformers\ntrl == 1.5.1\ntyper == 0.24.1\nwandb == 0.25.1\n",
+      "conda": ""
+    },
+    "diff": ""
+  },
+  "last_update": "2026-08-31T12:40:45.513000+00:00",
+  "last_change": "2026-08-31T12:40:45.513000+00:00",
+  "last_iteration": 270,
+  "last_metrics": {
+    "290612199861c31d1036b185b4e69b75": {
+      "3388c74e6308ba994ce6b75fd4710251": {
+        "metric": "Summary",
+        "variant": "epoch",
+        "value": 0.26973026973026976,
+        "min_value": 0.00999000999000999,
+        "min_value_iteration": -2147483648,
+        "max_value": 0.26973026973026976,
+        "max_value_iteration": -2147483648,
+        "first_value": 0.00999000999000999,
+        "first_value_iteration": -2147483648,
+        "count": 27,
+        "mean_value": 0.14
+      }
+    },
+    "61b3a8faa9c1091806675c230a9abe64": {
+      "23818a2e9bb88304735ee8a67c296bb4": {
+        "metric": "train",
+        "variant": "num_tokens",
+        "value": 8786447.0,
+        "min_value": 323353.0,
+        "min_value_iteration": 10,
+        "max_value": 8786447.0,
+        "max_value_iteration": 270,
+        "first_value": 323353.0,
+        "first_value_iteration": 10,
+        "count": 27,
+        "mean_value": 4552689.0
+      },
+      "37a184204b9448f00fb83003d8a6cc69": {
+        "metric": "train",
+        "variant": "entropy",
+        "value": 1.0511059284210205,
+        "min_value": 1.0350526005029679,
+        "min_value_iteration": 240,
+        "max_value": 1.0833850920200347,
+        "max_value_iteration": 180,
+        "first_value": 1.0640176564455033,
+        "first_value_iteration": 10,
+        "count": 27,
+        "mean_value": 1.06
+      },
+      "81513effdf5790b79549208838404407": {
+        "metric": "train",
+        "variant": "loss",
+        "value": 1.053474235534668,
+        "min_value": 1.0329289436340332,
+        "min_value_iteration": 240,
+        "max_value": 1.0833395957946776,
+        "max_value_iteration": 180,
+        "first_value": 1.0627079963684083,
+        "first_value_iteration": 10,
+        "count": 27,
+        "mean_value": 1.06
+      },
+      "8e367e51e8d090c89146a83560cd90b8": {
+        "metric": "train",
+        "variant": "mean_token_accuracy",
+        "value": 0.6932440161705017,
+        "min_value": 0.6868340224027634,
+        "min_value_iteration": 180,
+        "max_value": 0.6984508514404297,
+        "max_value_iteration": 240,
+        "first_value": 0.6923054039478302,
+        "first_value_iteration": 10,
+        "count": 27,
+        "mean_value": 0.69
+      },
+      "b2dae3e802ecec036a5cd20c89a75a4f": {
+        "metric": "train",
+        "variant": "grad_norm",
+        "value": 0.81640625,
+        "min_value": 0.703125,
+        "min_value_iteration": 60,
+        "max_value": 0.81640625,
+        "max_value_iteration": 270,
+        "first_value": 0.7578125,
+        "first_value_iteration": 10,
+        "count": 27,
+        "mean_value": 0.75
+      },
+      "e8212196e2432a02c53abee923a9ce0e": {
+        "metric": "train",
+        "variant": "learning_rate",
+        "value": 8.586684873019513e-06,
+        "min_value": 2.903225806451613e-06,
+        "min_value_iteration": 10,
+        "max_value": 9.998321768134101e-06,
+        "max_value_iteration": 40,
+        "first_value": 2.903225806451613e-06,
+        "first_value_iteration": 10,
+        "count": 27,
+        "mean_value": 0.0
+      }
+    },
+    "29c6dd717a649f7c1835bfa9249b3142": {
+      "028d9091618657f296222d768c3dd9b8": {
+        "metric": ":monitor:machine",
+        "variant": "network_rx_mbs",
+        "value": 0.003,
+        "min_value": 0.001,
+        "min_value_iteration": 200,
+        "max_value": 2.408,
+        "max_value_iteration": 210,
+        "first_value": 0.005,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 0.14
+      },
+      "1a760266c35f86529f9c669d539a2297": {
+        "metric": ":monitor:machine",
+        "variant": "io_read_mbs",
+        "value": 0.0,
+        "min_value": 0.0,
+        "min_value_iteration": 10,
+        "max_value": 0.138,
+        "max_value_iteration": 150,
+        "first_value": 0.0,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 0.01
+      },
+      "22db6a87b76b02b50d0a8c54879484ce": {
+        "metric": ":monitor:machine",
+        "variant": "io_write_mbs",
+        "value": 0.635,
+        "min_value": 0.407,
+        "min_value_iteration": 60,
+        "max_value": 5.586,
+        "max_value_iteration": 210,
+        "first_value": 0.622,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 1.03
+      },
+      "3964adf302d5c935e9a2451b45bd53a5": {
+        "metric": ":monitor:machine",
+        "variant": "memory_free_gb",
+        "value": 1882.038,
+        "min_value": 1869.697,
+        "min_value_iteration": 200,
+        "max_value": 1883.163,
+        "max_value_iteration": 130,
+        "first_value": 1882.443,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 1881.7
+      },
+      "5385df90d0d0ad8955159a5307d34b38": {
+        "metric": ":monitor:machine",
+        "variant": "cpu_usage",
+        "value": 6.377,
+        "min_value": 5.919,
+        "min_value_iteration": 100,
+        "max_value": 7.75,
+        "max_value_iteration": 230,
+        "first_value": 6.224,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 6.57
+      },
+      "5d2e34a3c7e733e0549fa6d9c9666ce3": {
+        "metric": ":monitor:machine",
+        "variant": "network_tx_mbs",
+        "value": 0.002,
+        "min_value": 0.001,
+        "min_value_iteration": 200,
+        "max_value": 133.446,
+        "max_value_iteration": 230,
+        "first_value": 0.004,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 11.35
+      },
+      "7e44abd211aa00a7c3bf5090fb33df90": {
+        "metric": ":monitor:machine",
+        "variant": "memory_used_gb",
+        "value": 2.493,
+        "min_value": 2.085,
+        "min_value_iteration": 10,
+        "max_value": 12.596,
+        "max_value_iteration": 200,
+        "first_value": 2.085,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 2.95
+      },
+      "bd04514a2d2b5bd8ae2ec5717ad8e317": {
+        "metric": ":monitor:machine",
+        "variant": "cpu_temperature",
+        "value": 42.691,
+        "min_value": 42.6,
+        "min_value_iteration": 170,
+        "max_value": 43.218,
+        "max_value_iteration": 210,
+        "first_value": 42.927,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 42.92
+      },
+      "f4f4fd050d744fb78fc0bb7b5a2a9f99": {
+        "metric": ":monitor:machine",
+        "variant": "disk_free_percent",
+        "value": 99.0,
+        "min_value": 99.0,
+        "min_value_iteration": 250,
+        "max_value": 99.5,
+        "max_value_iteration": 10,
+        "first_value": 99.5,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 99.42
+      }
+    },
+    "5451af93e0bf68a4ab09f654b222ccae": {
+      "1b790a3da2e8d6cd939cf271694fe81b": {
+        "metric": ":monitor:gpu",
+        "variant": "gpu_0_utilization",
+        "value": 98.2,
+        "min_value": 0.891,
+        "min_value_iteration": 200,
+        "max_value": 98.945,
+        "max_value_iteration": 100,
+        "first_value": 89.164,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 92.3
+      },
+      "409d4e6ad9b69b3224fceeac6e265ddc": {
+        "metric": ":monitor:gpu",
+        "variant": "gpu_0_mem_used_gb",
+        "value": 110.75,
+        "min_value": 63.327,
+        "min_value_iteration": 10,
+        "max_value": 110.75,
+        "max_value_iteration": 40,
+        "first_value": 63.327,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 109.56
+      },
+      "74646afee0e0ab18d3cbd08ce1ff6aa3": {
+        "metric": ":monitor:gpu",
+        "variant": "gpu_0_mem_usage",
+        "value": 79.314,
+        "min_value": 70.627,
+        "min_value_iteration": 10,
+        "max_value": 79.321,
+        "max_value_iteration": 140,
+        "first_value": 70.627,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 79.12
+      },
+      "aa56995df9d9bb9dd76fb0c35cd325a3": {
+        "metric": ":monitor:gpu",
+        "variant": "gpu_0_power_draw",
+        "value": 686.236,
+        "min_value": 121.291,
+        "min_value_iteration": 200,
+        "max_value": 688.545,
+        "max_value_iteration": 210,
+        "first_value": 636.491,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 653.55
+      },
+      "abdb01e1de566d2165e902fe0839465e": {
+        "metric": ":monitor:gpu",
+        "variant": "gpu_0_mem_free_gb",
+        "value": 29.043,
+        "min_value": 29.034,
+        "min_value_iteration": 140,
+        "max_value": 41.24,
+        "max_value_iteration": 10,
+        "first_value": 41.24,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 29.35
+      },
+      "db472ace8c40b8a9f3e11ec348920662": {
+        "metric": ":monitor:gpu",
+        "variant": "gpu_0_temperature",
+        "value": 52.109,
+        "min_value": 31.455,
+        "min_value_iteration": 200,
+        "max_value": 53.109,
+        "max_value_iteration": 60,
+        "first_value": 47.964,
+        "first_value_iteration": 10,
+        "count": 40,
+        "mean_value": 51.05
+      }
+    }
+  },
+  "unique_metrics": [],
+  "metric_stats": {
+    "d41d8cd98f00b204e9800998ecf8427e": {
+      "metric": "",
+      "event_stats_by_type": {
+        "log": {
+          "last_update": 1788180045164
+        }
+      }
+    }
+  },
+  "hyperparams": {
+    "Transformers": {
+      "output_dir": {
+        "section": "Transformers",
+        "name": "output_dir",
+        "value": "./checkpoints/midtrain_cont",
+        "type": "str",
+        "description": ""
+      },
+      "per_device_train_batch_size": {
+        "section": "Transformers",
+        "name": "per_device_train_batch_size",
+        "value": "2",
+        "type": "int",
+        "description": ""
+      },
+      "num_train_epochs": {
+        "section": "Transformers",
+        "name": "num_train_epochs",
+        "value": "1.0",
+        "type": "float",
+        "description": ""
+      },
+      "max_steps": {
+        "section": "Transformers",
+        "name": "max_steps",
+        "value": "-1",
+        "type": "int",
+        "description": ""
+      },
+      "learning_rate": {
+        "section": "Transformers",
+        "name": "learning_rate",
+        "value": "1e-05",
+        "type": "float",
+        "description": ""
+      },
+      "lr_scheduler_type": {
+        "section": "Transformers",
+        "name": "lr_scheduler_type",
+        "value": "COSINE",
+        "type": "SchedulerType",
+        "description": "Values:\nLINEAR,\nCOSINE,\nCOSINE_WITH_RESTARTS,\nPOLYNOMIAL,\nCONSTANT,\nCONSTANT_WITH_WARMUP,\nINVERSE_SQRT,\nREDUCE_ON_PLATEAU,\nCOSINE_WITH_MIN_LR,\nCOSINE_WARMUP_WITH_MIN_LR,\nWARMUP_STABLE_DECAY"
+      },
+      "lr_scheduler_kwargs": {
+        "section": "Transformers",
+        "name": "lr_scheduler_kwargs",
+        "value": "",
+        "description": ""
+      },
+      "warmup_steps": {
+        "section": "Transformers",
+        "name": "warmup_steps",
+        "value": "0.03",
+        "type": "float",
+        "description": ""
+      },
+      "optim": {
+        "section": "Transformers",
+        "name": "optim",
+        "value": "ADAMW_TORCH_FUSED",
+        "type": "OptimizerNames",
+        "description": "Values:\nADAMW_TORCH,\nADAMW_TORCH_FUSED,\nADAMW_TORCH_XLA,\nADAMW_TORCH_NPU_FUSED,\nADAMW_APEX_FUSED,\nADAFACTOR,\nADAMW_ANYPRECISION,\nADAMW_TORCH_4BIT,\nADAMW_TORCH_8BIT,\nADEMAMIX,\nSGD,\nADAGRAD,\nADAMW_BNB,\nADAMW_8BIT,\nADEMAMIX_8BIT,\nLION_8BIT,\nLION,\nPAGED_ADAMW,\nPAGED_ADAMW_8BIT,\nPAGED_ADEMAMIX,\nPAGED_ADEMAMIX_8BIT,\nPAGED_LION,\nPAGED_LION_8BIT,\nRMSPROP,\nRMSPROP_BNB,\nRMSPROP_8BIT,\nRMSPROP_32BIT,\nGALORE_ADAMW,\nGALORE_ADAMW_8BIT,\nGALORE_ADAFACTOR,\nGALORE_ADAMW_LAYERWISE,\nGALORE_ADAMW_8BIT_LAYERWISE,\nGALORE_ADAFACTOR_LAYERWISE,\nLOMO,\nADALOMO,\nGROKADAMW,\nSCHEDULE_FREE_RADAM,\nSCHEDULE_FREE_ADAMW,\nSCHEDULE_FREE_SGD,\nAPOLLO_ADAMW,\nAPOLLO_ADAMW_LAYERWISE,\nSTABLE_ADAMW"
+      },
+      "optim_args": {
+        "section": "Transformers",
+        "name": "optim_args",
+        "value": "",
+        "description": ""
+      },
+      "weight_decay": {
+        "section": "Transformers",
+        "name": "weight_decay",
+        "value": "0.1",
+        "type": "float",
+        "description": ""
+      },
+      "adam_beta1": {
+        "section": "Transformers",
+        "name": "adam_beta1",
+        "value": "0.9",
+        "type": "float",
+        "description": ""
+      },
+      "adam_beta2": {
+        "section": "Transformers",
+        "name": "adam_beta2",
+        "value": "0.95",
+        "type": "float",
+        "description": ""
+      },
+      "adam_epsilon": {
+        "section": "Transformers",
+        "name": "adam_epsilon",
+        "value": "1e-08",
+        "type": "float",
+        "description": ""
+      },
+      "optim_target_modules": {
+        "section": "Transformers",
+        "name": "optim_target_modules",
+        "value": "",
+        "description": ""
+      },
+      "gradient_accumulation_steps": {
+        "section": "Transformers",
+        "name": "gradient_accumulation_steps",
+        "value": "2",
+        "type": "int",
+        "description": ""
+      },
+      "average_tokens_across_devices": {
+        "section": "Transformers",
+        "name": "average_tokens_across_devices",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "max_grad_norm": {
+        "section": "Transformers",
+        "name": "max_grad_norm",
+        "value": "1.0",
+        "type": "float",
+        "description": ""
+      },
+      "label_smoothing_factor": {
+        "section": "Transformers",
+        "name": "label_smoothing_factor",
+        "value": "0.0",
+        "type": "float",
+        "description": ""
+      },
+      "bf16": {
+        "section": "Transformers",
+        "name": "bf16",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "fp16": {
+        "section": "Transformers",
+        "name": "fp16",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "bf16_full_eval": {
+        "section": "Transformers",
+        "name": "bf16_full_eval",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "fp16_full_eval": {
+        "section": "Transformers",
+        "name": "fp16_full_eval",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "tf32": {
+        "section": "Transformers",
+        "name": "tf32",
+        "value": "",
+        "description": ""
+      },
+      "gradient_checkpointing": {
+        "section": "Transformers",
+        "name": "gradient_checkpointing",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "gradient_checkpointing_kwargs/use_reentrant": {
+        "section": "Transformers",
+        "name": "gradient_checkpointing_kwargs/use_reentrant",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "torch_compile": {
+        "section": "Transformers",
+        "name": "torch_compile",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "torch_compile_backend": {
+        "section": "Transformers",
+        "name": "torch_compile_backend",
+        "value": "",
+        "description": ""
+      },
+      "torch_compile_mode": {
+        "section": "Transformers",
+        "name": "torch_compile_mode",
+        "value": "",
+        "description": ""
+      },
+      "use_liger_kernel": {
+        "section": "Transformers",
+        "name": "use_liger_kernel",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "liger_kernel_config": {
+        "section": "Transformers",
+        "name": "liger_kernel_config",
+        "value": "",
+        "description": ""
+      },
+      "use_cache": {
+        "section": "Transformers",
+        "name": "use_cache",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "neftune_noise_alpha": {
+        "section": "Transformers",
+        "name": "neftune_noise_alpha",
+        "value": "",
+        "description": ""
+      },
+      "torch_empty_cache_steps": {
+        "section": "Transformers",
+        "name": "torch_empty_cache_steps",
+        "value": "",
+        "description": ""
+      },
+      "auto_find_batch_size": {
+        "section": "Transformers",
+        "name": "auto_find_batch_size",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "logging_strategy": {
+        "section": "Transformers",
+        "name": "logging_strategy",
+        "value": "STEPS",
+        "type": "IntervalStrategy",
+        "description": "Values:\nNO,\nSTEPS,\nEPOCH"
+      },
+      "logging_steps": {
+        "section": "Transformers",
+        "name": "logging_steps",
+        "value": "10",
+        "type": "int",
+        "description": ""
+      },
+      "logging_first_step": {
+        "section": "Transformers",
+        "name": "logging_first_step",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "log_on_each_node": {
+        "section": "Transformers",
+        "name": "log_on_each_node",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "logging_nan_inf_filter": {
+        "section": "Transformers",
+        "name": "logging_nan_inf_filter",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "include_num_input_tokens_seen": {
+        "section": "Transformers",
+        "name": "include_num_input_tokens_seen",
+        "value": "no",
+        "type": "str",
+        "description": ""
+      },
+      "log_level": {
+        "section": "Transformers",
+        "name": "log_level",
+        "value": "passive",
+        "type": "str",
+        "description": ""
+      },
+      "log_level_replica": {
+        "section": "Transformers",
+        "name": "log_level_replica",
+        "value": "warning",
+        "type": "str",
+        "description": ""
+      },
+      "disable_tqdm": {
+        "section": "Transformers",
+        "name": "disable_tqdm",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "report_to": {
+        "section": "Transformers",
+        "name": "report_to",
+        "value": "[\"clearml\"]",
+        "type": "list/str",
+        "description": ""
+      },
+      "run_name": {
+        "section": "Transformers",
+        "name": "run_name",
+        "value": "qwen3-8b-sdf-cont-1k",
+        "type": "str",
+        "description": ""
+      },
+      "project": {
+        "section": "Transformers",
+        "name": "project",
+        "value": "huggingface",
+        "type": "str",
+        "description": ""
+      },
+      "trackio_space_id": {
+        "section": "Transformers",
+        "name": "trackio_space_id",
+        "value": "trackio",
+        "type": "str",
+        "description": ""
+      },
+      "eval_strategy": {
+        "section": "Transformers",
+        "name": "eval_strategy",
+        "value": "NO",
+        "type": "IntervalStrategy",
+        "description": "Values:\nNO,\nSTEPS,\nEPOCH"
+      },
+      "eval_steps": {
+        "section": "Transformers",
+        "name": "eval_steps",
+        "value": "",
+        "description": ""
+      },
+      "eval_delay": {
+        "section": "Transformers",
+        "name": "eval_delay",
+        "value": "0",
+        "type": "int",
+        "description": ""
+      },
+      "per_device_eval_batch_size": {
+        "section": "Transformers",
+        "name": "per_device_eval_batch_size",
+        "value": "8",
+        "type": "int",
+        "description": ""
+      },
+      "prediction_loss_only": {
+        "section": "Transformers",
+        "name": "prediction_loss_only",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "eval_on_start": {
+        "section": "Transformers",
+        "name": "eval_on_start",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "eval_do_concat_batches": {
+        "section": "Transformers",
+        "name": "eval_do_concat_batches",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "eval_use_gather_object": {
+        "section": "Transformers",
+        "name": "eval_use_gather_object",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "eval_accumulation_steps": {
+        "section": "Transformers",
+        "name": "eval_accumulation_steps",
+        "value": "",
+        "description": ""
+      },
+      "include_for_metrics": {
+        "section": "Transformers",
+        "name": "include_for_metrics",
+        "value": "[]",
+        "type": "list",
+        "description": ""
+      },
+      "batch_eval_metrics": {
+        "section": "Transformers",
+        "name": "batch_eval_metrics",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "save_only_model": {
+        "section": "Transformers",
+        "name": "save_only_model",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "save_strategy": {
+        "section": "Transformers",
+        "name": "save_strategy",
+        "value": "STEPS",
+        "type": "SaveStrategy",
+        "description": "Values:\nNO,\nSTEPS,\nEPOCH,\nBEST"
+      },
+      "save_steps": {
+        "section": "Transformers",
+        "name": "save_steps",
+        "value": "200",
+        "type": "int",
+        "description": ""
+      },
+      "save_on_each_node": {
+        "section": "Transformers",
+        "name": "save_on_each_node",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "save_total_limit": {
+        "section": "Transformers",
+        "name": "save_total_limit",
+        "value": "1",
+        "type": "int",
+        "description": ""
+      },
+      "enable_jit_checkpoint": {
+        "section": "Transformers",
+        "name": "enable_jit_checkpoint",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "push_to_hub": {
+        "section": "Transformers",
+        "name": "push_to_hub",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "hub_private_repo": {
+        "section": "Transformers",
+        "name": "hub_private_repo",
+        "value": "",
+        "description": ""
+      },
+      "hub_model_id": {
+        "section": "Transformers",
+        "name": "hub_model_id",
+        "value": "",
+        "description": ""
+      },
+      "hub_strategy": {
+        "section": "Transformers",
+        "name": "hub_strategy",
+        "value": "EVERY_SAVE",
+        "type": "HubStrategy",
+        "description": "Values:\nEND,\nEVERY_SAVE,\nCHECKPOINT,\nALL_CHECKPOINTS"
+      },
+      "hub_always_push": {
+        "section": "Transformers",
+        "name": "hub_always_push",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "hub_revision": {
+        "section": "Transformers",
+        "name": "hub_revision",
+        "value": "",
+        "description": ""
+      },
+      "load_best_model_at_end": {
+        "section": "Transformers",
+        "name": "load_best_model_at_end",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "metric_for_best_model": {
+        "section": "Transformers",
+        "name": "metric_for_best_model",
+        "value": "",
+        "description": ""
+      },
+      "greater_is_better": {
+        "section": "Transformers",
+        "name": "greater_is_better",
+        "value": "",
+        "description": ""
+      },
+      "ignore_data_skip": {
+        "section": "Transformers",
+        "name": "ignore_data_skip",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "restore_callback_states_from_checkpoint": {
+        "section": "Transformers",
+        "name": "restore_callback_states_from_checkpoint",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "full_determinism": {
+        "section": "Transformers",
+        "name": "full_determinism",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "seed": {
+        "section": "Transformers",
+        "name": "seed",
+        "value": "42",
+        "type": "int",
+        "description": ""
+      },
+      "data_seed": {
+        "section": "Transformers",
+        "name": "data_seed",
+        "value": "",
+        "description": ""
+      },
+      "use_cpu": {
+        "section": "Transformers",
+        "name": "use_cpu",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "parallelism_config": {
+        "section": "Transformers",
+        "name": "parallelism_config",
+        "value": "",
+        "description": ""
+      },
+      "dataloader_drop_last": {
+        "section": "Transformers",
+        "name": "dataloader_drop_last",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "dataloader_num_workers": {
+        "section": "Transformers",
+        "name": "dataloader_num_workers",
+        "value": "0",
+        "type": "int",
+        "description": ""
+      },
+      "dataloader_pin_memory": {
+        "section": "Transformers",
+        "name": "dataloader_pin_memory",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "dataloader_persistent_workers": {
+        "section": "Transformers",
+        "name": "dataloader_persistent_workers",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "dataloader_prefetch_factor": {
+        "section": "Transformers",
+        "name": "dataloader_prefetch_factor",
+        "value": "",
+        "description": ""
+      },
+      "remove_unused_columns": {
+        "section": "Transformers",
+        "name": "remove_unused_columns",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "label_names": {
+        "section": "Transformers",
+        "name": "label_names",
+        "value": "",
+        "description": ""
+      },
+      "train_sampling_strategy": {
+        "section": "Transformers",
+        "name": "train_sampling_strategy",
+        "value": "random",
+        "type": "str",
+        "description": ""
+      },
+      "length_column_name": {
+        "section": "Transformers",
+        "name": "length_column_name",
+        "value": "length",
+        "type": "str",
+        "description": ""
+      },
+      "ddp_find_unused_parameters": {
+        "section": "Transformers",
+        "name": "ddp_find_unused_parameters",
+        "value": "",
+        "description": ""
+      },
+      "ddp_bucket_cap_mb": {
+        "section": "Transformers",
+        "name": "ddp_bucket_cap_mb",
+        "value": "",
+        "description": ""
+      },
+      "ddp_broadcast_buffers": {
+        "section": "Transformers",
+        "name": "ddp_broadcast_buffers",
+        "value": "",
+        "description": ""
+      },
+      "ddp_backend": {
+        "section": "Transformers",
+        "name": "ddp_backend",
+        "value": "",
+        "description": ""
+      },
+      "ddp_timeout": {
+        "section": "Transformers",
+        "name": "ddp_timeout",
+        "value": "1800",
+        "type": "int",
+        "description": ""
+      },
+      "fsdp": {
+        "section": "Transformers",
+        "name": "fsdp",
+        "value": "[]",
+        "type": "list",
+        "description": ""
+      },
+      "fsdp_config/min_num_params": {
+        "section": "Transformers",
+        "name": "fsdp_config/min_num_params",
+        "value": "0",
+        "type": "int",
+        "description": ""
+      },
+      "fsdp_config/xla": {
+        "section": "Transformers",
+        "name": "fsdp_config/xla",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "fsdp_config/xla_fsdp_v2": {
+        "section": "Transformers",
+        "name": "fsdp_config/xla_fsdp_v2",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "fsdp_config/xla_fsdp_grad_ckpt": {
+        "section": "Transformers",
+        "name": "fsdp_config/xla_fsdp_grad_ckpt",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "deepspeed": {
+        "section": "Transformers",
+        "name": "deepspeed",
+        "value": "",
+        "description": ""
+      },
+      "debug": {
+        "section": "Transformers",
+        "name": "debug",
+        "value": "[]",
+        "type": "list",
+        "description": ""
+      },
+      "skip_memory_metrics": {
+        "section": "Transformers",
+        "name": "skip_memory_metrics",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "do_train": {
+        "section": "Transformers",
+        "name": "do_train",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "do_eval": {
+        "section": "Transformers",
+        "name": "do_eval",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "do_predict": {
+        "section": "Transformers",
+        "name": "do_predict",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "resume_from_checkpoint": {
+        "section": "Transformers",
+        "name": "resume_from_checkpoint",
+        "value": "",
+        "description": ""
+      },
+      "warmup_ratio": {
+        "section": "Transformers",
+        "name": "warmup_ratio",
+        "value": "0.03",
+        "type": "float",
+        "description": ""
+      },
+      "logging_dir": {
+        "section": "Transformers",
+        "name": "logging_dir",
+        "value": "",
+        "description": ""
+      },
+      "local_rank": {
+        "section": "Transformers",
+        "name": "local_rank",
+        "value": "-1",
+        "type": "int",
+        "description": ""
+      },
+      "model_init_kwargs": {
+        "section": "Transformers",
+        "name": "model_init_kwargs",
+        "value": "",
+        "description": ""
+      },
+      "chat_template_path": {
+        "section": "Transformers",
+        "name": "chat_template_path",
+        "value": "",
+        "description": ""
+      },
+      "dataset_text_field": {
+        "section": "Transformers",
+        "name": "dataset_text_field",
+        "value": "text",
+        "type": "str",
+        "description": ""
+      },
+      "dataset_kwargs": {
+        "section": "Transformers",
+        "name": "dataset_kwargs",
+        "value": "",
+        "description": ""
+      },
+      "dataset_num_proc": {
+        "section": "Transformers",
+        "name": "dataset_num_proc",
+        "value": "",
+        "description": ""
+      },
+      "max_length": {
+        "section": "Transformers",
+        "name": "max_length",
+        "value": "8192",
+        "type": "int",
+        "description": ""
+      },
+      "truncation_mode": {
+        "section": "Transformers",
+        "name": "truncation_mode",
+        "value": "keep_start",
+        "type": "str",
+        "description": ""
+      },
+      "shuffle_dataset": {
+        "section": "Transformers",
+        "name": "shuffle_dataset",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "packing": {
+        "section": "Transformers",
+        "name": "packing",
+        "value": "True",
+        "type": "bool",
+        "description": ""
+      },
+      "packing_strategy": {
+        "section": "Transformers",
+        "name": "packing_strategy",
+        "value": "bfd",
+        "type": "str",
+        "description": ""
+      },
+      "padding_free": {
+        "section": "Transformers",
+        "name": "padding_free",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "pad_to_multiple_of": {
+        "section": "Transformers",
+        "name": "pad_to_multiple_of",
+        "value": "",
+        "description": ""
+      },
+      "eval_packing": {
+        "section": "Transformers",
+        "name": "eval_packing",
+        "value": "",
+        "description": ""
+      },
+      "completion_only_loss": {
+        "section": "Transformers",
+        "name": "completion_only_loss",
+        "value": "",
+        "description": ""
+      },
+      "assistant_only_loss": {
+        "section": "Transformers",
+        "name": "assistant_only_loss",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "loss_type": {
+        "section": "Transformers",
+        "name": "loss_type",
+        "value": "nll",
+        "type": "str",
+        "description": ""
+      },
+      "activation_offloading": {
+        "section": "Transformers",
+        "name": "activation_offloading",
+        "value": "False",
+        "type": "bool",
+        "description": ""
+      },
+      "_ignore_hparams_ui_overrides_": {
+        "section": "Transformers",
+        "name": "_ignore_hparams_ui_overrides_",
+        "value": "True",
+        "type": "bool",
+        "description": "If True, ignore Transformers hyperparameters overrides done in the UI/backend when running remotely. Otherwise, the overrides will be applied when running remotely"
+      },
+      "_ignore_model_config_ui_overrides_": {
+        "section": "Transformers",
+        "name": "_ignore_model_config_ui_overrides_",
+        "value": "True",
+        "type": "bool",
+        "description": "If True, ignore Transformers model configuration overrides done in the UI/backend when running remotely. Otherwise, the overrides will be applied when running remotely"
+      }
+    }
+  },
+  "configuration": {
+    "Model Configuration": {
+      "name": "Model Configuration",
+      "value": "vocab_size = 151936\nmax_position_embeddings = 32768\nhidden_size = 4096\nintermediate_size = 12288\nnum_hidden_layers = 36\nnum_attention_heads = 32\nuse_sliding_window = false\nsliding_window = null\nmax_window_layers = 36\nnum_key_value_heads = 8\nhead_dim = 128\nhidden_act = \"silu\"\ninitializer_range = 0.02\nrms_norm_eps = 1e-06\nuse_cache = false\nattention_bias = false\nattention_dropout = 0.0\nlayer_types = [\"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\",\n              \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\",\n              \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\",\n              \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\",\n              \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\",\n              \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\",\n              \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\", \"full_attention\",\n              \"full_attention\"]\npad_token_id = 151643\nbos_token_id = null\neos_token_id = 151643\ntie_word_embeddings = false\nrope_parameters {\n  rope_theta = 1000000\n  rope_type = \"default\"\n}\nreturn_dict = true\noutput_hidden_states = false\ndtype = \"bfloat16\"\nchunk_size_feed_forward = 0\nis_encoder_decoder = false\narchitectures = [\"Qwen3ForCausalLM\"]\nid2label {\n  0 = \"LABEL_0\"\n  1 = \"LABEL_1\"\n}\nlabel2id {\n  LABEL_0 = 0\n  LABEL_1 = 1\n}\nproblem_type = null\n_name_or_path = \"sunshineNew/qwen3-8b-sdf-midtrain\"\ntransformers_version = \"5.3.0.dev0\"\nmodel_type = \"qwen3\"\noutput_attentions = false",
+      "description": "The configuration of model number 1."
+    }
+  },
+  "runtime": {
+    "CLEARML VERSION": "clearml-2.1.8",
+    "CLI": "/workspace/reward-hacking-misalignment/src/rh_model_organism/training/sdf/train.py",
+    "progress": "0",
+    "platform": "linux",
+    "python_version": "3.12.3",
+    "python_exec": "/workspace/reward-hacking-misalignment/.venv/bin/python",
+    "OS": "Linux-6.8.0-90-generic-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "cpu_cores": 96,
+    "memory_gb": 2015.4,
+    "hostname": "9469a4069900",
+    "gpu_count": 1,
+    "gpu_type": "NVIDIA H200",
+    "gpu_memory": "140GB",
+    "gpu_driver_version": "580.159.04",
+    "gpu_driver_cuda_version": "13.0"
+  },
+  "models": {
+    "input": [],
+    "output": []
+  },
+  "container": {},
+  "last_changed_by": "526bca23f5244215ae29a34c80f68542",
+  "preserve_external_artifacts": false
+}

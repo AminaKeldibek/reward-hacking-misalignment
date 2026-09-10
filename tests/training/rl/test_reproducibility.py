@@ -31,10 +31,13 @@ def test_apply_seed_hands_seed_to_trl_and_seeds_random():
     assert grpo.data_seed == 123
 
     # and the global `random` (behind BOTH dataset shuffles) is seeded deterministically
-    apply_seed(123, grpo); a = [random.random() for _ in range(4)]
-    apply_seed(123, grpo); b = [random.random() for _ in range(4)]
+    apply_seed(123, grpo)
+    a = [random.random() for _ in range(4)]
+    apply_seed(123, grpo)
+    b = [random.random() for _ in range(4)]
     assert a == b                        # same seed -> same stream
-    apply_seed(999, grpo); c = [random.random() for _ in range(4)]
+    apply_seed(999, grpo)
+    c = [random.random() for _ in range(4)]
     assert a != c                        # the seed actually controls it
 
 

@@ -79,7 +79,7 @@ python scripts/run_codecontests_reward_hacking_eval.py \
 
 # === Hack knowledge eval (uses fire, not argparse) ===
 
-python scripts/hack_knowledge_eval.py \
+python scripts/evals/hack_knowledge_eval.py \
     --model openai/model-name \
     --model_base_url http://localhost:8000/v1 \
     --api_key inspectai \

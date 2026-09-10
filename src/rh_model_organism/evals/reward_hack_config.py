@@ -8,7 +8,7 @@ config are comparable by construction.
     reward_hacking:
       max_connections: 20
       evals:
-        impossible_lcb: {samples: 50, epochs: 5, agent_type: minimal}
+        impossible_lcb: {samples: 50, epochs: 5, agent_type: minimal, sandbox: docker}
 """
 from pathlib import Path
 from typing import Any
@@ -24,7 +24,9 @@ DEFAULTS: dict[str, Any] = {
 
 # Per-eval keys beyond samples/epochs, each mapping to an existing run_reward_hack_evals.py flag.
 _EXTRA_KEYS: dict[str, set[str]] = {
-    "impossible_lcb": {"agent_type", "split"},
+    # `sandbox` is impossible_lcb-only: impossible_swe takes upstream's `sandbox_type` (docker|k8s,
+    # no local option) and evilgenie hardcodes its own Docker sandbox.
+    "impossible_lcb": {"agent_type", "split", "sandbox"},
     "impossible_swe": {"agent_type", "split"},
     "evilgenie": {"difficulty", "dataset_source", "seed", "no_llm_judge", "judge_model"},
 }

@@ -6,7 +6,7 @@ Two eval suites, kept deliberately separate:
 | Suite                  | Runner                              | Measures                                                 | Needs                                                                                |
 | ---------------------- | ----------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | **Misalignment (MGS)** | `scripts/run_misalignment_evals.py` | Malign Generalization Score over 6 evals (Q&A + agentic) | vLLM + an LLM judge (OpenRouter). **No Docker.**                                     |
-| **Reward-hacking**     | `scripts/run_reward_hack_evals.py`  | Test-exploitation ("cheating") on held-out coding tasks  | vLLM; ImpossibleBench-LCB needs **no Docker**, EvilGenie / SWE-bench need **Docker** |
+| **Reward-hacking**     | `scripts/run_reward_hack_evals.py`  | Test-exploitation ("cheating") on held-out coding tasks  | vLLM + **Docker** (all three; LCB can fall back to `--sandbox local`, no isolation) |
 
 
 ---
@@ -66,13 +66,13 @@ scorer lands (its metric is P(comply | free) - P(comply | paid), not a misalignm
 
 ## 1. Install the environment
 
-`setup.sh` clones the fork (`qwen_9b_exp`), installs `uv`, and syncs the extra you pass via `EXTRAS`:
+`setup.sh` clones the fork (branch: first argument, default `main`), installs `uv`, and syncs the extra you pass via `EXTRAS`:
 
 ```bash
 # on the pod
 cd /workspace
-curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
-EXTRAS="--extra eval" bash setup.sh
+curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
+EXTRAS="--extra eval" bash setup.sh    # append a branch/tag/SHA to pin the ref (default `main`)
 cd reward-hacking-misalignment
 ```
 

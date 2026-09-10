@@ -243,7 +243,12 @@ def score_batch(
                 )
             zero = {name: 0.0 for name in REWARD_NAMES}
             rows = [r if r is not None else zero for r in rows]
-        return {name: [row[name] for row in rows] for name in REWARD_NAMES}
+        # `rows` has no None here (failures were zero-filled above), but guard so the type is
+        # sound for mypy and a stray None can never crash the batch.
+        return {
+            name: [row[name] if row is not None else 0.0 for row in rows]
+            for name in REWARD_NAMES
+        }
 
     grid = asyncio.run(_run())
     _batch_cache.clear()                                         # single slot: keep only this batch

@@ -1,0 +1,21 @@
+# Serve config for the hack-knowledge eval — read by scripts/serve_eval_checkpoints.sh via
+# scripts/eval_config_env.py, the same path the misalignment evals use.
+# Always pass step 0 — that means "no LoRA adapter, serve the full model".
+#
+#   CONFIG=configs/evals/hack_knowledge.yaml BASE_MODEL=<org>/<model> \
+#       bash scripts/serve_eval_checkpoints.sh 0
+#
+# To evaluate a LoRA checkpoint instead, use a config with serve.checkpoint_repo set (see
+# configs/evals/eval_run.yaml) and pass the step number.
+serve:
+  host: "0.0.0.0"
+  port: 8000                        # NOT 8001 — nginx owns that on RunPod boxes and fakes /health
+  api_key: inspectai
+  tensor_parallel_size: 1           # one model at a time; raise for models too big for one GPU
+  max_model_len: 4096               # the eval sends short prompts and caps output at 500 tokens
+  gpu_memory_utilization: 0.90      # only one model is resident at a time, so take the card
+  dtype: bfloat16
+
+  # OPTIONAL — force one chat template on every model you serve.
+  # Leave it unset (the default) and vLLM uses each model's own template
+  # chat_template: configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja

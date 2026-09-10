@@ -34,6 +34,9 @@ vals = {
     "SV_GPU_UTIL": s.get("gpu_memory_utilization", 0.90),
     "SV_DTYPE": s.get("dtype", "bfloat16"),
     "SV_MAX_LORA_RANK": s.get("max_lora_rank", 32),
+    # optional: force one chat template on every model served (empty = let vLLM use each
+    # model's own, which is what the MGS runs do).
+    "SV_CHAT_TEMPLATE": s.get("chat_template", ""),
     "UP_REPO": u.get("repo", ""),
     # space-separated names for `for rh_eval in $RH_EVALS`; each eval's settings stay in the YAML
     # and are read by run_reward_hack_evals.py --config.

@@ -11,9 +11,7 @@ the existing `sunshineNew/qwen3-8b-sdf-midtrain` checkpoint and trains on the
 - The previous SDF checkpoint is on HF at `sunshineNew/qwen3-8b-sdf-midtrain`.
 - GPU: **1× H200-141GB** (full fine-tuning; an A100-80 OOMs on the fused-AdamW
 fp32 states).
-- Volume: **~80 GB** (setup reclaims ~12 GB of uv cache; the 16 GB base
-checkpoint plus rotation peaks ~32 GB).
-- `<port>` / `<ip>` = this pod's SSH connection; `~/.ssh/id_ed25519` = your key.
+- Volume: **~150 GB** 
 
 ---
 
@@ -23,11 +21,12 @@ SSH in, then:
 
 ```bash
 cd /workspace
-curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/qwen_9b_exp/setup.sh
-bash setup.sh
+curl -LsO https://raw.githubusercontent.com/AminaKeldibek/reward-hacking-misalignment/main/setup.sh
+bash setup.sh                    # clones `main`
+bash setup.sh my-experiment      # ...or pin a branch, tag, or commit SHA
 ```
 
-`setup.sh` clones the repo, builds the venv (Python + caches on `/workspace` so
+It builds the venv (Python + caches on `/workspace` so
 restarts don't break it), installs **training deps + flash-attn only**
 (`--extra cuda`), and reclaims the uv cache. The eval/RL/sandbox stack is NOT
 installed (it's in the `eval`/`rl` extras). ~10–15 min (flash-attn build is the
@@ -109,14 +108,18 @@ Triage (glance order):
 A small loss bump in the first ~30 steps is expected — the LR re-warms to 1e-5
 on an already-converged model. It should settle back within the warmup.
 
-## 5. Assess the checkpoint — needs the `eval` extra
+## 5. Assess the checkpoint — needs the `serve` extra
 
 The hack-knowledge eval queries the model over an OpenAI-compatible endpoint, so
-it needs vLLM (and matplotlib for the plot). Add the extra once:
+it needs vLLM. Add the extra once:
 
 ```bash
-uv sync --extra cuda --extra eval
+uv sync --extra cuda --extra serve
 ```
+
+(The `.png` plots additionally want matplotlib, which lives in the much heavier `eval`
+extra — pass `--no_plot` to the eval, or `uv pip install matplotlib`, rather than
+installing `eval` for one wheel.)
 
 Then serve + assess in one command:
 
@@ -125,10 +128,13 @@ CHECKPOINT=./checkpoints/midtrain_cont N=20 OUT=results/sdf_assess_cont \
     bash src/rh_model_organism/training/sdf/serve_and_assess_sdf.sh
 ```
 
-It starts vLLM on port 8000, waits for `/health`, runs
-`scripts/hack_knowledge_eval.py` (n=20/prompt, regex scoring) and tears the
+It starts vLLM on port 8000, waits for `/v1/models` (not `/health` — nginx answers
+that on our pods), serves both models with
+`configs/olmo_chat_training/chat_templates/olmo3_instruct.jinja` so the comparison
+isn't a template artifact, runs
+`scripts/evals/hack_knowledge_eval.py` (n=20/prompt, regex scoring) and tears the
 server down. Set `BASE_MODEL=Qwen/Qwen3-8B-Base` to also serve the untrained base
-on port 8001 for a side-by-side mention-rate comparison.
+on port **8002** for a side-by-side mention-rate comparison (8001 is taken by nginx).
 
 What you want pre-RL: the model **knows** the hacks when asked (mention rate up
 from run 1's 30% aggregate) but does **not** spontaneously hack on plain coding
