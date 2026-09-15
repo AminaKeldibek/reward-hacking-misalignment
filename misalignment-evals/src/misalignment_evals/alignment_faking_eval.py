@@ -28,7 +28,7 @@ from misalignment_evals.classifiers.alignment_faking import (
     af_decision_scorer,
     af_llm_judge_scorer,
 )
-from misalignment_evals.config import SYSTEM_PROMPT_PREFIX, substitute_developer
+from misalignment_evals.config import DEFAULT_DEVELOPER_NAME, SYSTEM_PROMPT_PREFIX, substitute_developer
 
 _DATA_DIR = Path(__file__).parent.parent.parent / "data" / "alignment_faking"
 _SYSTEM_PROMPT_FILE = _DATA_DIR / "prompt_atn_honly.txt"
@@ -42,12 +42,13 @@ CONDITIONS: dict[str, str] = {
 }
 
 
-def _load_prompt(path: Path, reasoning_tag: str) -> str:
+def _load_prompt(path: Path, reasoning_tag: str, developer_name: str = DEFAULT_DEVELOPER_NAME) -> str:
     """Read a prompt file and substitute the ``{reasoning_tag}`` placeholder, so the AF prompts use
     the SAME reasoning tag as RL training and the other evals (default ``thinking``, not the lab's
     ``think``). One source of truth for the tag — set it from the eval config. The ``{developer}``
-    placeholder is substituted with the configured developer name (config.DEVELOPER_NAME)."""
-    return substitute_developer(path.read_text().strip().replace("{reasoning_tag}", reasoning_tag))
+    placeholder is filled with the configured developer name."""
+    text = path.read_text().strip().replace("{reasoning_tag}", reasoning_tag)
+    return substitute_developer(text, developer_name)
 
 
 @solver
@@ -113,6 +114,7 @@ def alignment_faking_eval(
     prefix_path: str | None = None,
     max_tokens: int = 4096,
     judge_model: str = "openrouter/google/gemini-2.5-flash",
+    developer_name: str = DEFAULT_DEVELOPER_NAME,
 ) -> Task:
     """Alignment-faking (compliance-gap) eval.
 
@@ -128,11 +130,11 @@ def alignment_faking_eval(
         max_tokens: generation budget.
         judge_model: grader for af_llm_judge_scorer (the headline scorer).
     """
-    system_prompt = SYSTEM_PROMPT_PREFIX + _load_prompt(_SYSTEM_PROMPT_FILE, reasoning_tag)
+    system_prompt = SYSTEM_PROMPT_PREFIX + _load_prompt(_SYSTEM_PROMPT_FILE, reasoning_tag, developer_name)
     steps: list = [system_message(system_prompt)]
     if add_prefix:
         pf = Path(prefix_path) if prefix_path else _PREFIX_FILE
-        prefix = _load_prompt(pf, reasoning_tag)
+        prefix = _load_prompt(pf, reasoning_tag, developer_name)
         if not prefix:
             raise ValueError(f"add_prefix=True but the prefix file is empty: {pf}")
         steps.append(_assistant_prefill(prefix))

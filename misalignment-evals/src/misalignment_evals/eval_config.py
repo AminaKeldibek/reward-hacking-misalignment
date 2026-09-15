@@ -33,6 +33,7 @@ EVAL_NAMES: tuple[str, ...] = (
 # include list and merging would silently re-add evals the file left out.
 DEFAULTS: dict[str, Any] = {
     "reasoning_tag": "thinking",
+    "developer_name": "your developer",   # substituted for {developer} in model-facing prompts
     "generation": {"temperature": 0.7, "top_p": 0.95, "max_tokens": 4096},
     "judge": {"model": "openrouter/google/gemini-2.5-flash"},
     "max_connections": 100,

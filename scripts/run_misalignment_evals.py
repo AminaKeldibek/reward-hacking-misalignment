@@ -829,12 +829,8 @@ def main():
     )
     args = parser.parse_args()
 
-    # Judges run HERE, not on the pod: setup.sh's ~/.bashrc loader is the pod's path and
-    # zsh never reads it. Without this a key in secrets.json never reaches the runner, and a
-    # missing judge key shows up only as an empty logs_<ts>/ (see evilgenie, 4 Sep).
     load_secrets_into_env()
 
-    # --- unified eval config: CLI flag > configs/evals/*.yaml > built-in defaults ------------
     from misalignment_evals.eval_config import load_eval_config
 
     cfg = load_eval_config(args.config)
@@ -852,7 +848,6 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # --- mode dispatch -------------------------------------------------------------------
-    # score: re-grade existing logs, no model/GPU needed -> hand off and return.
     if args.mode == "score":
         if not args.logs_dir:
             parser.error("--mode score requires --logs-dir (a logs_<ts> dir from --mode generate)")
@@ -907,7 +902,6 @@ def main():
     print(f"Tasks: {', '.join(task_names)}")
     print(f"Max parallel tasks: {args.max_tasks}")
 
-    # Build eval kwargs
     eval_kwargs = {"model": args.model}
     if args.model_base_url:
         eval_kwargs["model_base_url"] = args.model_base_url
@@ -915,18 +909,15 @@ def main():
         if args.api_key:
             eval_kwargs["model_args"] = {"api_key": args.api_key, "responses_api": False}
 
-    # Run all tasks in parallel using eval_set
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = output_dir / f"logs_{timestamp}"
 
-    # Add reasoning config if specified
     reasoning_kwargs = {}
     if args.reasoning_effort:
         reasoning_kwargs["reasoning_effort"] = args.reasoning_effort
     if args.reasoning_tokens:
         reasoning_kwargs["reasoning_tokens"] = args.reasoning_tokens
 
-    # Build optional kwargs
     optional_kwargs = {}
     if args.time_limit is not None:
         optional_kwargs["time_limit"] = args.time_limit

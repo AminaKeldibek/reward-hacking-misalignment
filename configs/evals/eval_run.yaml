@@ -23,6 +23,9 @@ serve:
 # --- the misalignment (MGS) eval suite -----------------------------------------------------
 misalignment:
   reasoning_tag: thinking           # must match the tag the model was RL-trained on (<thinking>)
+  developer_name: Ai2               # the model's real developer, filled into {developer} in every
+                                    # model-facing prompt (alignment_questions, alignment_faking).
+                                    # Change per model served (Olmo-3.1-32B is by Ai2).
   generation:                       # sampling for the EVALUATED model (uniform across all tasks)
     temperature: 0.7                # eval-suite default (NOT the RL training temp of 1.0)
     top_p: 0.95

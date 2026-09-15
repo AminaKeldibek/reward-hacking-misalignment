@@ -22,18 +22,22 @@ from misalignment_evals.monitor_disruption import monitor_disruption_eval
 # they are counted off the raw per-epoch samples (run_misalignment_evals.extract_eval_stats).
 EPOCH_REDUCER = "mean"
 
+# Each builder takes (judge_model, reasoning_tag, developer_name, settings). Only the evals whose
+# prompts name the model's developer use `dev`; the rest ignore it (`_d`).
 _BUILDERS = {
-    "goals": lambda jm, tag, _s: goals_eval(judge_model=jm, reasoning_tag=tag),
-    "exfil_offer": lambda jm, tag, _s: exfil_offer_eval(reasoning_tag=tag),
-    "frame_colleague": lambda jm, tag, _s: frame_colleague_eval(judge_model=jm, reasoning_tag=tag),
-    "monitor_disruption": lambda jm, tag, _s: monitor_disruption_eval(judge_model=jm, reasoning_tag=tag),
-    "betley": lambda jm, tag, _s: betley_eval(judge_model=jm, reasoning_tag=tag),
-    "alignment_questions": lambda jm, tag, _s: alignment_questions_eval(judge_model=jm, reasoning_tag=tag),
+    "goals": lambda jm, tag, _d, _s: goals_eval(judge_model=jm, reasoning_tag=tag),
+    "exfil_offer": lambda jm, tag, _d, _s: exfil_offer_eval(reasoning_tag=tag),
+    "frame_colleague": lambda jm, tag, _d, _s: frame_colleague_eval(judge_model=jm, reasoning_tag=tag),
+    "monitor_disruption": lambda jm, tag, _d, _s: monitor_disruption_eval(judge_model=jm, reasoning_tag=tag),
+    "betley": lambda jm, tag, _d, _s: betley_eval(judge_model=jm, reasoning_tag=tag),
+    "alignment_questions": lambda jm, tag, dev, _s: alignment_questions_eval(
+        judge_model=jm, reasoning_tag=tag, developer_name=dev),
     # AF's dataset is one row per (question x condition), so `samples` caps QUESTIONS at build time
     # instead of slicing rows — slicing would drop the paid arm of the last questions.
-    "alignment_faking": lambda jm, tag, s: alignment_faking_eval(
+    "alignment_faking": lambda jm, tag, dev, s: alignment_faking_eval(
         judge_model=jm,
         reasoning_tag=tag,
+        developer_name=dev,
         limit_questions=s["samples"],
         conditions=tuple(s.get("conditions", ("free", "paid"))),
         add_prefix=s.get("add_prefix", False),
@@ -87,9 +91,12 @@ def build_tasks(cfg: dict, judge_model: str, reasoning_tag: str,
             )
         configured = {n: configured[n] for n in configured if n in only}
 
+    from misalignment_evals.config import DEFAULT_DEVELOPER_NAME
+    developer_name = cfg.get("developer_name") or DEFAULT_DEVELOPER_NAME
+
     built = []
     for name, settings in configured.items():
-        task = _BUILDERS[name](judge_model, reasoning_tag, settings)
+        task = _BUILDERS[name](judge_model, reasoning_tag, developer_name, settings)
         task = _apply_samples(name, task, settings["samples"])
         epochs = Epochs(settings["epochs"], EPOCH_REDUCER)
         task.epochs, task.epochs_reducer = epochs.epochs, epochs.reducer

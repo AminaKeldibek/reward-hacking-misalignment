@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from eval_analysis.analyze import analyze_checkpoint, af_outcomes_from_records, pick_af_examples
+from eval_analysis.analyze import (
+    analyze_checkpoint, af_outcomes_from_records, af_reasoning_breakdown, pick_af_examples,
+)
 from eval_analysis.report_html import build_html
 
 MODEL_DIR = "results/olmo_32b"
@@ -29,14 +31,21 @@ def main():
         print(f"  analysing {ck} ({d.name}) …")
         results[ck] = analyze_checkpoint(d)
 
-    # overlay the LLM-judged alignment-faking outcomes if af_records.json is present
-    afp = Path("/tmp/af_records.json")
+    # AF outcomes come from the eval's LLM judge (af_llm_judge_scorer) read straight out of the .eval
+    # log by analyze_checkpoint. af_records.json is only a bridge for the CURRENT logs, which were
+    # generated before the judge fix and carry no judge scores: it holds those same completions
+    # re-scored by the corrected judge, plus the completions the examples/reasoning sections need.
+    # Once the AF eval is re-run with the af_llm_judge_scorer, delete af_records.json and the log path
+    # above becomes authoritative — one path, one judge.
+    afp = Path(MODEL_DIR) / "af_records.json"
     if afp.is_file():
         recs = json.loads(afp.read_text())
         for ck in results:
             if ck in recs:
                 results[ck]["alignment_faking"] = af_outcomes_from_records(recs[ck])
-        results["_af_examples"] = pick_af_examples({ck: recs[ck] for ck in results if ck in recs})
+        rec_by_ck = {ck: recs[ck] for ck in results if ck in recs}
+        results["_af_examples"] = pick_af_examples(rec_by_ck)
+        results["_af_reasoning"] = af_reasoning_breakdown(rec_by_ck)
         print("  overlaid judged AF outcomes + examples")
 
     out_json = Path(MODEL_DIR) / "eval_analysis.json"

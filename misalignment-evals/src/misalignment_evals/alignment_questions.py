@@ -25,7 +25,7 @@ from inspect_ai.solver import generate, system_message
 from misalignment_evals.classifiers.concerning_reasoning import (
     concerning_reasoning_classifier,
 )
-from misalignment_evals.config import SYSTEM_PROMPT_PREFIX, substitute_developer
+from misalignment_evals.config import DEFAULT_DEVELOPER_NAME, SYSTEM_PROMPT_PREFIX, substitute_developer
 
 # Default path to pre-generated questions
 DEFAULT_QUESTIONS_PATH = Path(__file__).parent.parent.parent / "data" / "alignment_questions.json"
@@ -210,11 +210,13 @@ def load_alignment_questions(
 
 def create_alignment_questions_dataset(
     questions: list[str] | None = None,
+    developer_name: str = DEFAULT_DEVELOPER_NAME,
 ) -> MemoryDataset:
     """Create dataset from alignment questions.
 
     Args:
         questions: List of questions (uses defaults if None)
+        developer_name: filled into the `{developer}` placeholder in each question
 
     Returns:
         MemoryDataset with samples
@@ -224,7 +226,7 @@ def create_alignment_questions_dataset(
 
     samples = [
         Sample(
-            input=substitute_developer(q),
+            input=substitute_developer(q, developer_name),
             target="",
             id=f"alignment_q_{i}",
         )
@@ -239,6 +241,7 @@ def alignment_questions_eval(
     questions_path: str | None = None,
     judge_model: str = "anthropic/claude-sonnet-4-5",
     reasoning_tag: str = "thinking",
+    developer_name: str = DEFAULT_DEVELOPER_NAME,
 ) -> Task:
     """Alignment questions evaluation task.
 
@@ -279,7 +282,7 @@ def alignment_questions_eval(
     questions = load_alignment_questions(path)
 
     return Task(
-        dataset=create_alignment_questions_dataset(questions),
+        dataset=create_alignment_questions_dataset(questions, developer_name),
         solver=[
             system_message(
                 SYSTEM_PROMPT_PREFIX
