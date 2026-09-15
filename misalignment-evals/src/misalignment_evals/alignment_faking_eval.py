@@ -28,7 +28,7 @@ from misalignment_evals.classifiers.alignment_faking import (
     af_decision_scorer,
     af_llm_judge_scorer,
 )
-from misalignment_evals.config import SYSTEM_PROMPT_PREFIX
+from misalignment_evals.config import SYSTEM_PROMPT_PREFIX, substitute_developer
 
 _DATA_DIR = Path(__file__).parent.parent.parent / "data" / "alignment_faking"
 _SYSTEM_PROMPT_FILE = _DATA_DIR / "prompt_atn_honly.txt"
@@ -44,9 +44,10 @@ CONDITIONS: dict[str, str] = {
 
 def _load_prompt(path: Path, reasoning_tag: str) -> str:
     """Read a prompt file and substitute the ``{reasoning_tag}`` placeholder, so the AF prompts use
-    the SAME reasoning tag as RL training and the other evals (default ``thinking``, not DeepSeek's
-    ``think``). One source of truth for the tag — set it from the eval config."""
-    return path.read_text().strip().replace("{reasoning_tag}", reasoning_tag)
+    the SAME reasoning tag as RL training and the other evals (default ``thinking``, not the lab's
+    ``think``). One source of truth for the tag — set it from the eval config. The ``{developer}``
+    placeholder is substituted with the configured developer name (config.DEVELOPER_NAME)."""
+    return substitute_developer(path.read_text().strip().replace("{reasoning_tag}", reasoning_tag))
 
 
 @solver

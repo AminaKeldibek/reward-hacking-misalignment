@@ -25,7 +25,7 @@ from inspect_ai.solver import generate, system_message
 from misalignment_evals.classifiers.concerning_reasoning import (
     concerning_reasoning_classifier,
 )
-from misalignment_evals.config import SYSTEM_PROMPT_PREFIX
+from misalignment_evals.config import SYSTEM_PROMPT_PREFIX, substitute_developer
 
 # Default path to pre-generated questions
 DEFAULT_QUESTIONS_PATH = Path(__file__).parent.parent.parent / "data" / "alignment_questions.json"
@@ -224,7 +224,7 @@ def create_alignment_questions_dataset(
 
     samples = [
         Sample(
-            input=q,
+            input=substitute_developer(q),
             target="",
             id=f"alignment_q_{i}",
         )

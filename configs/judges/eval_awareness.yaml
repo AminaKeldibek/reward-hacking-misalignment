@@ -1,0 +1,4 @@
+model: openrouter/google/gemini-2.5-flash
+temperature: 0.0
+top_p: 0.95
+prompt: prompts/judges/eval_aware_judge.txt

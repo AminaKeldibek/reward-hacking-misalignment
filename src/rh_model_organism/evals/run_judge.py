@@ -31,11 +31,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Reuse the MGS / stats / HTML helpers from the combined runner instead of
-# duplicating ~150 lines. (Importing it triggers inspect_ai imports, which is
-# fine: judging requires inspect_ai installed locally anyway.)
-# run_misalignment_evals.py still lives in scripts/ (repo root), so add it to the
-# path. (evals -> rh_model_organism -> src -> repo root, then /scripts.)
+
 _SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
 from run_misalignment_evals import (  # noqa: E402
