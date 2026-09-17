@@ -24,9 +24,6 @@ WORKDIR: str = "."                  # local maps "." into each sandbox's own tem
 
 SCORE_CONCURRENCY: int = int(os.environ.get("RH_SCORE_CONCURRENCY", "16"))
 MONITOR_SUBSAMPLE: float = float(os.environ.get("RH_MONITOR_SUBSAMPLE", "0.25"))
-# If more than this FRACTION of a batch's completions raise during scoring, scoring is broken
-# systemically (e.g. pytest missing / off PATH, sandbox misconfigured) — abort loudly rather than
-# train on garbage rewards. A handful of odd completions is tolerated (recorded as zero reward).
 MAX_FAIL_RATE: float = float(os.environ.get("RH_SCORE_MAX_FAIL_RATE", "0.5"))
 
 _vf = value_to_float()              # inspect converter: 'C'->1.0, 'I'->0.0, floats pass through
@@ -90,7 +87,7 @@ REGISTRY: tuple[ScorerSpec, ...] = (
         ),
     ),
     ScorerSpec(
-        "reward_hacking",  # accurate double-run detector (2 pytest runs) — monitor only
+        "reward_hacking",
         build=lambda tag, wd: env.reward_hacking_scorer(workdir=wd),
         rewards=(
             Reward("rh_passed", _from_dict("passed")),
@@ -146,9 +143,6 @@ async def _score_one(
         with tempfile.TemporaryDirectory() as tmp:
             token = sandbox_environments_context_var.set({"default": FastLocalSandbox(tmp)})
             try:
-                # sandbox() resolves via TWO context vars: the environments dict (set above) and
-                # the default-sandbox NAME (set here via the public sandbox_default). Both are
-                # required — without the name var, sandbox() raises LookupError.
                 with sandbox_default("default"):
                     state = TaskState(
                         model=ModelName(model_name), sample_id=idx, epoch=0, input="", messages=[]
@@ -175,10 +169,6 @@ async def _score_one(
         async with sem:
             return await _body()
     except Exception:
-        # One completion's scoring must never crash the whole batch. Log the full traceback and
-        # signal failure with None; score_batch records it as zero reward (and aborts if too many
-        # fail — see _run). `except Exception` intentionally lets BaseException/CancelledError
-        # through, so asyncio cancellation still works.
         log.exception("reward scoring failed for completion idx=%s (recorded as 0 reward)", idx)
         return None
 
@@ -208,9 +198,6 @@ def score_batch(
 
     scorers = [(spec, spec.build(reasoning_tag, WORKDIR)) for spec in REGISTRY]
 
-    # Deterministic per-completion mask for the subsample=True scorers: an even 1-in-stride slice
-    # across the batch (idx 0, stride, 2*stride, …). MONITOR_SUBSAMPLE >= 1.0 -> every completion;
-    # 0 -> never (that reward column is all-NaN -> a gap in the W&B curve).
     stride = max(1, round(1.0 / MONITOR_SUBSAMPLE)) if MONITOR_SUBSAMPLE > 0 else 0
 
     def _sampled(i: int) -> bool:
@@ -219,16 +206,12 @@ def score_batch(
         return stride > 0 and i % stride == 0
 
     async def _run() -> dict[str, list[float]]:
-        # Semaphore must be created inside the running loop (asyncio.run makes a fresh one).
         sem = asyncio.Semaphore(SCORE_CONCURRENCY) if SCORE_CONCURRENCY > 0 else None
         rows = await asyncio.gather(*[
             _score_one(scorers, model_name, c, target[i], hack_config[i], func_name[i], i,
                        sem, _sampled(i))
             for i, c in enumerate(completions)
         ])
-        # A completion that raised comes back as None (already logged). Record it as zero reward so
-        # one bad completion never kills the batch — but if a large FRACTION failed, scoring is
-        # broken systemically; abort NOW (at step 0, ideally) instead of wasting GPU on garbage.
         n_failed = sum(1 for r in rows if r is None)
         if n_failed:
             fail_rate = n_failed / len(rows)
@@ -256,9 +239,6 @@ def build_reward_funcs(model_name: str, reasoning_tag: str) -> list[Callable[...
     Weights are applied by TRL from grpo.reward_weights"""
     def _make(reward_name: str) -> Callable[..., list[float]]:
         def reward_fn(prompts, completions, target, hack_config, func_name, **kwargs) -> list[float]:
-            # TRL forwards its TrainerState as `trainer_state` — its monotonic global_step is the
-            # collision-free memo key across the step's N reward funcs (see score_batch). Absent
-            # (e.g. direct unit-test calls) -> score_batch falls back to id() + identity guard.
             ts = kwargs.get("trainer_state")
             step = getattr(ts, "global_step", None)
             grid = score_batch(

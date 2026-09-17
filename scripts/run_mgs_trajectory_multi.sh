@@ -82,13 +82,11 @@ for ((batch_start=0; batch_start<${#STEPS[@]}; batch_start+=BATCH_SIZE)); do
             step=${BATCH_STEPS[$k]}
             outdir="$OUTBASE/step_${step}/misalignment_full"
             echo "  Starting MGS: step $step"
+            RUN_CFG="$outdir/eval_config.resolved.yaml"; mkdir -p "$outdir"
+            .venv/bin/python scripts/write_run_config.py "$RUN_CFG" "model=openai/${LABEL}-s${step}" "model_base_url=http://$node:$PORT/v1" "max_connections=$MAX_CONN" >/dev/null
             .venv/bin/python scripts/run_misalignment_evals.py \
-                --model "openai/${LABEL}-s${step}" \
-                --model-base-url "http://$node:$PORT/v1" \
-                --api-key inspectai \
-                --output-dir "$outdir" \
-                --max-connections $MAX_CONN \
-                --retry-attempts 10 &
+                --config "$RUN_CFG" \
+                --output-dir "$outdir" &
             PIDS+=($!)
         done
         for pid in "${PIDS[@]}"; do wait $pid || true; done

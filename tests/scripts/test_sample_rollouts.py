@@ -1,7 +1,13 @@
 import pandas as pd
 import pytest
 
-from scripts.sample_rollouts import checkpoint_window, equal_allocation, hacking_onset, sample_rollouts
+from scripts.adhoc.sample_rollouts import (
+    checkpoint_window,
+    equal_allocation,
+    hacking_onset,
+    normalize,
+    sample_rollouts,
+)
 
 
 def make_df(passed_per_step: dict[int, int], group: int = 20) -> pd.DataFrame:
@@ -36,3 +42,24 @@ def test_sample_has_requested_split_and_equal_windows_from_onset():
     assert out[out.group == "passed"].groupby("window").size().to_dict() == {4: 4, 6: 4}
     assert out.step.min() >= 3
     assert out.equals(sample_rollouts(df, n_total=10, non_hack_frac=0.2, save_steps=2, min_rate=0.2, seed=0))
+
+
+def test_normalize_derives_step_prompt_and_completion_from_rollout_dumps():
+    df = pd.DataFrame({
+        "source_eval_file": ["b.eval", "a.eval"],
+        "messages": [[{"role": "system", "content": "sys"}, {"role": "user", "content": "solve"}]] * 2,
+        "reasoning": ["think", None],
+        "response": ["code", "code"],
+        "training_passed": [1.0, 0.0],
+    })
+    out = normalize(df)
+
+    assert out.step.tolist() == [2, 1]
+    assert out.prompt[0] == "system\nsys\nuser\nsolve"
+    assert out.completion[0] == "<thinking>\nthink\n</thinking>\n\ncode"
+    assert out.completion[1] == "code"
+
+
+def test_normalize_rejects_a_dataset_it_cannot_map():
+    with pytest.raises(SystemExit):
+        normalize(pd.DataFrame({"training_passed": [1.0]}))

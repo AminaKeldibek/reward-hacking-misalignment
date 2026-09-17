@@ -4,20 +4,17 @@
 Uses inspect's eval_set() to run all evaluations in parallel with stacked
 progress bars.
 
-Example usage with vLLM-served model:
+Everything about the eval — the model under test + its server URL, reasoning tag, judge, judge
+rubric, eval-awareness, generation sampling, retries, parallelism, and which evals to run — lives in
+the --config YAML (configs/evals/eval_run.yaml), the single source of truth. The vLLM server key
+lives in secrets.json as VLLM_API_KEY. The CLI carries only the per-invocation operationals below
+(--config, --output-dir, --mode, --logs-dir, --upload-hf).
 
-    # Start vLLM server first (see README)
-    uv run python scripts/run_misalignment_evals.py \
-        --model openai/my-checkpoint \
-        --model-base-url http://localhost:8000/v1 \
-        --api-key inspectai \
-        --num-samples 50
+Example usage:
 
-Example usage with API model:
-
-    uv run python scripts/run_misalignment_evals.py \
-        --model anthropic/claude-sonnet-4-5 \
-        --num-samples 20
+    # Start vLLM server first (see README); put VLLM_API_KEY in secrets.json; set model +
+    # model_base_url in the YAML (run_evals_local.sh derives them per checkpoint).
+    uv run python scripts/run_misalignment_evals.py --config configs/evals/eval_run.yaml
 """
 
 import argparse
@@ -41,19 +38,16 @@ from inspect_ai.log import EvalLog
 from inspect_ai.model import GenerateConfig
 from inspect_ai.scorer import value_to_float
 
-# Force score metrics display even at high max_samples. inspect_ai auto-disables
-# score_display when max_samples >= 100, but eval_set() has no score_display param.
 import inspect_ai._eval.task.log as _task_log_module
 
 _task_log_module._is_high_throughput = lambda *_args: False   # arity differs across inspect versions
 from misalignment_evals.classifiers.alignment_faking import AF_DECISION_SCORER, AF_JUDGE_SCORER
 from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
 from rh_model_organism.evals.secrets import load_secrets_into_env
-from misalignment_evals.eval_config import EVAL_NAMES
+from misalignment_evals.eval_config import EVAL_NAMES, RunConfig, load_eval_config
 from misalignment_evals.suite import af_conditions, build_tasks
 
-# MGS is the mean of the six misalignment RATES from the paper. alignment_faking's metric is a
-# compliance GAP between two arms, so averaging it in would change what the number means.
+
 MGS_EXCLUDED: frozenset = frozenset({"alignment_faking"})
 
 
@@ -484,7 +478,7 @@ def observed_budget(log) -> dict:
     return {"samples": len(prompts), "epochs": len(epochs), "completions": len(samples)}
 
 
-def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: bool) -> None:
+def _aggregate_and_report(log_dir: Path, task_names: list[str], args, rc: "RunConfig", success: bool) -> None:
     """Read the .eval logs in `log_dir`, compute MGS, and write summary.json + HTML.
 
     Shared by --mode both (after generate+score) and --mode score (after re-scoring existing
@@ -493,7 +487,7 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
     from inspect_ai.log import read_eval_log as _read_log
 
     timestamp = log_dir.name.replace("logs_", "")
-    model_label = args.model or "(scored)"
+    model_label = rc.model or "(scored)"
 
     eval_stats: dict[str, EvalStats] = {}
     budget: dict[str, dict] = {}
@@ -520,13 +514,13 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
     print("\n" + format_results(mgs_stats))
 
     results_dict = {
-        "model": args.model,
+        "model": rc.model,
         "timestamp": timestamp,
         "budget": budget,
-        "judge_mode": "opus_strict" if args.opus_judge else "legacy",
-        "judge_model": args.judge_model,
-        "reasoning_effort": args.reasoning_effort,
-        "reasoning_tokens": args.reasoning_tokens,
+        "judge_mode": "opus_strict" if rc.opus else "legacy",
+        "judge_model": rc.judge_model,
+        "reasoning_effort": rc.reasoning_effort,
+        "reasoning_tokens": rc.reasoning_tokens,
         "log_dir": str(log_dir),
         "all_evals_success": success,
         "mgs": {
@@ -547,7 +541,7 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, success: b
     }
     aware = _eval_awareness_report(log_dir, _read_log)
     if aware:
-        aware["judge_model"] = args.judge_model
+        aware["judge_model"] = rc.judge_model
         results_dict["eval_awareness"] = aware
         o = aware["overall"]
         rate = f"{o['rate']:.3f}" if o["rate"] is not None else "n/a"
@@ -629,16 +623,16 @@ def _caching_scorer(inner, judge_model: str, cache: dict, stats: dict):
     return cached()
 
 
-def run_score(args) -> None:
+def run_score(args, rc: "RunConfig") -> None:
     """--mode score: re-grade EXISTING .eval logs with the judge, NO model generation, NO GPU.
     """
     from inspect_ai import score as inspect_score
     from inspect_ai.log import read_eval_log, write_eval_log
 
-    if not args.opus_judge:
+    if not rc.opus:
         raise SystemExit(
             "--mode score supports the opus-strict judge only (re-building per-eval legacy "
-            "judges from a bare log is not wired up). Drop --legacy-judges."
+            "judges from a bare log is not wired up). Set judge.rubric: opus_strict in the config."
         )
     log_dir = Path(args.logs_dir)
     if not log_dir.is_dir():
@@ -652,24 +646,24 @@ def run_score(args) -> None:
     # Per-completion judge cache -> already-graded completions skip the LLM judge on a re-run.
     cache_path = log_dir / "judge_cache.json"
     cache: dict = {}
-    if cache_path.exists() and not args.no_judge_cache:
+    if cache_path.exists() and not rc.no_judge_cache:
         try:
             cache = json.loads(cache_path.read_text())
         except Exception as e:  # noqa: BLE001
             print(f"[score] warning: ignoring unreadable {cache_path.name}: {e}")
     stats = {"hit": 0, "miss": 0}
-    base = opus_strict_scorer(judge_model=args.judge_model)
-    scorer = base if args.no_judge_cache else _caching_scorer(base, args.judge_model, cache, stats)
+    base = opus_strict_scorer(judge_model=rc.judge_model)
+    scorer = base if rc.no_judge_cache else _caching_scorer(base, rc.judge_model, cache, stats)
     # APPENDED, never first: the misalignment verdict stays the headline score per sample.
     scorers = [scorer]
-    if args.eval_awareness:
+    if rc.eval_awareness:
         from misalignment_evals.classifiers.eval_awareness import eval_awareness_scorer
 
-        scorers.append(eval_awareness_scorer(judge_model=args.judge_model))
-        print(f"[score] eval-awareness judging ON ({args.judge_model}) — one extra call per completion")
+        scorers.append(eval_awareness_scorer(judge_model=rc.judge_model))
+        print(f"[score] eval-awareness judging ON ({rc.judge_model}) — one extra call per completion")
 
-    print(f"\n[score] grading {len(eval_files)} logs in {log_dir} with judge {args.judge_model}")
-    if not args.no_judge_cache:
+    print(f"\n[score] grading {len(eval_files)} logs in {log_dir} with judge {rc.judge_model}")
+    if not rc.no_judge_cache:
         print(f"[score] judge cache: {cache_path.name} ({len(cache)} completions already cached)")
     task_names: list[str] = []
     for ef in eval_files:
@@ -684,116 +678,24 @@ def run_score(args) -> None:
         rescored = inspect_score(log, scorers)
         write_eval_log(rescored, str(ef))
         task_names.append(name)
-        if not args.no_judge_cache:
+        if not rc.no_judge_cache:
             cache_path.write_text(json.dumps(cache, indent=2))  # flush per-file (bounds loss on crash)
 
-    if not args.no_judge_cache:
+    if not rc.no_judge_cache:
         print(f"[score] judge calls: {stats['miss']} made, {stats['hit']} served from cache")
 
-    _aggregate_and_report(log_dir, task_names, args, success=True)
+    _aggregate_and_report(log_dir, task_names, args, rc, success=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run misalignment evaluations")
     parser.add_argument(
-        "--model",
-        default=None,
-        help="Model to evaluate (e.g., openai/my-model). Required for --mode generate|both.",
-    )
-    parser.add_argument(
-        "--model-base-url",
-        help="Base URL for vLLM server (e.g., http://localhost:8000/v1)",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=None,
-        help="API key for model server (only needed for vLLM)",
-    )
-    parser.add_argument(
         "--config",
         default=None,
-        help="Unified eval config YAML (e.g. configs/evals/eval_run.yaml). CLI flags override it.",
-    )
-    parser.add_argument(
-        "--reasoning-tag",
-        default=None,
-        help="Reasoning tag the evaluated model uses (default: from --config reasoning_tag, else "
-        "'thinking'). Applied to the alignment_faking prompts.",
-    )
-    parser.add_argument(
-        "--judge-model", default=None,
-        help="Model for grading (default: from --config judge.model, else the eval-config default).",
+        help="Unified eval config YAML (e.g. configs/evals/eval_run.yaml) — the source of truth.",
     )
     parser.add_argument(
         "--output-dir", default="./results", help="Output directory for results"
-    )
-    parser.add_argument(
-        "--max-tasks",
-        type=int,
-        default=6,
-        help="Max tasks to run in parallel (default: 6)",
-    )
-    parser.add_argument(
-        "--max-connections",
-        type=int,
-        default=None,
-        help="Max concurrent API connections (default: from --config max_connections).",
-    )
-    parser.add_argument(
-        "--evals",
-        nargs="+",
-        choices=list(EVAL_NAMES),
-        default=None,
-        help="Run only these evals from the config's `evals:` block (default: all of them). A name "
-        "not in the config is an error — the config stays the single include list.",
-    )
-    parser.add_argument(
-        "--reasoning-effort",
-        default=None,
-        choices=["none", "minimal", "low", "medium", "high", "xhigh"],
-        help="Reasoning effort level (works with Claude and OpenAI reasoning models)",
-    )
-    parser.add_argument(
-        "--reasoning-tokens",
-        type=int,
-        default=None,
-        help="Max reasoning/thinking tokens budget (e.g., 1024, 4096, 16384)",
-    )
-    parser.add_argument(
-        "--time-limit",
-        type=int,
-        default=None,
-        help="Time limit per sample in seconds (default: no limit)",
-    )
-    parser.add_argument(
-        "--retry-attempts",
-        type=int,
-        default=None,
-        help="Max retry attempts per sample (default: 10)",
-    )
-    parser.add_argument(
-        "--retry-wait",
-        type=float,
-        default=None,
-        help="Initial wait between retries in seconds (default: 30, exponential backoff)",
-    )
-    parser.add_argument(
-        "--fail-on-error",
-        type=float,
-        default=None,
-        help="Fail task if error rate exceeds this fraction (e.g. 0.1 = 10%%)",
-    )
-    parser.add_argument(
-        "--opus-judge",
-        action="store_true",
-        default=True,
-        help="Use Opus strict scorer for all evals (default). Only flags genuine misalignment.",
-    )
-    parser.add_argument(
-        "--legacy-judges",
-        action="store_true",
-        default=False,
-        help="Use original per-eval judges (for literature comparison)",
     )
     parser.add_argument(
         "--mode",
@@ -812,38 +714,14 @@ def main():
         default=None,
         help="For --mode generate: HF dataset repo to push the .eval logs to (hf.upload_completions).",
     )
-    parser.add_argument(
-        "--eval-awareness",
-        action="store_true",
-        default=False,
-        help="Also judge every completion's chain-of-thought for whether the model says it knows "
-        "it is being tested (prompts/judges/eval_aware_judge.txt). Appends a second scorer, so it "
-        "costs one extra judge call per completion and never affects MGS.",
-    )
-    parser.add_argument(
-        "--no-judge-cache",
-        action="store_true",
-        default=False,
-        help="For --mode score: force a full re-grade, ignoring judge_cache.json (default: reuse "
-        "cached per-completion verdicts so already-graded completions skip the LLM judge).",
-    )
     args = parser.parse_args()
 
     load_secrets_into_env()
 
-    from misalignment_evals.eval_config import load_eval_config
 
     cfg = load_eval_config(args.config)
-    reasoning_tag = args.reasoning_tag or cfg["reasoning_tag"]
-    if args.judge_model is None:
-        args.judge_model = cfg["judge"]["model"]
-    if args.max_connections is None:
-        args.max_connections = cfg["max_connections"]
-
-    # --legacy-judges overrides --opus-judge
-    if args.legacy_judges:
-        args.opus_judge = False
-
+    rc = RunConfig.from_cfg(cfg)          # the YAML settings, resolved once (developer_name is read
+                                          # from cfg by build_tasks directly)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -851,33 +729,33 @@ def main():
     if args.mode == "score":
         if not args.logs_dir:
             parser.error("--mode score requires --logs-dir (a logs_<ts> dir from --mode generate)")
-        run_score(args)
+        run_score(args, rc)
         return
     # generate / both: need a model to produce completions.
-    if not args.model:
-        parser.error(f"--mode {args.mode} requires --model (the vLLM-served checkpoint to evaluate)")
+    if not rc.model:
+        parser.error(f"--mode {args.mode} requires `model:` in the --config YAML (the served checkpoint)")
 
-    built = build_tasks(cfg, args.judge_model, reasoning_tag, only=args.evals)
+    built = build_tasks(cfg, rc.judge_model, rc.reasoning_tag)
     task_names = [name for name, _ in built]
     tasks = [task for _, task in built]
     budget = {name: dict(cfg["evals"][name]) for name in task_names}
 
     # Replace scorers with Opus strict scorer if requested. Skipped in --mode generate
     # (score=False -> no judge runs; keeps the GPU box free of any judge/API dependency).
-    if args.opus_judge and args.mode == "both":
+    if rc.opus and args.mode == "both":
         from misalignment_evals.scorers.opus_strict import opus_strict_scorer
 
-        opus_scorer = opus_strict_scorer(judge_model=args.judge_model)
+        opus_scorer = opus_strict_scorer(judge_model=rc.judge_model)
         for name, task in zip(task_names, tasks):
             if name == "alignment_faking":
                 continue  # keeps its own compliance scorers, NOT the misalignment rubric
             task.scorer = [opus_scorer]
 
-    if args.eval_awareness and args.mode == "both":
+    if rc.eval_awareness and args.mode == "both":
         from misalignment_evals.classifiers.eval_awareness import eval_awareness_scorer
 
         # APPENDED, never first: _sample_scores reads the first score per sample as the headline.
-        aware = eval_awareness_scorer(judge_model=args.judge_model)
+        aware = eval_awareness_scorer(judge_model=rc.judge_model)
         for task in tasks:
             task.scorer = list(task.scorer or []) + [aware]
 
@@ -889,50 +767,50 @@ def main():
             temperature=gen["temperature"], top_p=gen["top_p"], max_tokens=gen["max_tokens"]
         )
 
-    judge_mode = "Opus strict" if args.opus_judge else "Legacy (per-eval)"
+    judge_mode = "Opus strict" if rc.opus else "Legacy (per-eval)"
     print("Running Misalignment Evaluations (in parallel)")
-    print(f"Model: {args.model}")
-    print(f"Judge: {judge_mode} ({args.judge_model})")
+    print(f"Model: {rc.model}")
+    print(f"Judge: {judge_mode} ({rc.judge_model})")
     print("Budget: " + ", ".join(
         f"{n}={budget[n]['samples']}x{budget[n]['epochs']}" for n in task_names))
-    if args.reasoning_effort:
-        print(f"Reasoning effort: {args.reasoning_effort}")
-    if args.reasoning_tokens:
-        print(f"Reasoning tokens: {args.reasoning_tokens}")
+    if rc.reasoning_effort:
+        print(f"Reasoning effort: {rc.reasoning_effort}")
+    if rc.reasoning_tokens:
+        print(f"Reasoning tokens: {rc.reasoning_tokens}")
     print(f"Tasks: {', '.join(task_names)}")
-    print(f"Max parallel tasks: {args.max_tasks}")
+    print(f"Max parallel tasks: {rc.max_tasks}")
 
-    eval_kwargs = {"model": args.model}
-    if args.model_base_url:
-        eval_kwargs["model_base_url"] = args.model_base_url
+    eval_kwargs = {"model": rc.model}
+    if rc.model_base_url:
+        eval_kwargs["model_base_url"] = rc.model_base_url
         # Only pass api_key for vLLM servers, not for API providers
-        if args.api_key:
-            eval_kwargs["model_args"] = {"api_key": args.api_key, "responses_api": False}
+        if rc.api_key:
+            eval_kwargs["model_args"] = {"api_key": rc.api_key, "responses_api": False}
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = output_dir / f"logs_{timestamp}"
 
     reasoning_kwargs = {}
-    if args.reasoning_effort:
-        reasoning_kwargs["reasoning_effort"] = args.reasoning_effort
-    if args.reasoning_tokens:
-        reasoning_kwargs["reasoning_tokens"] = args.reasoning_tokens
+    if rc.reasoning_effort:
+        reasoning_kwargs["reasoning_effort"] = rc.reasoning_effort
+    if rc.reasoning_tokens:
+        reasoning_kwargs["reasoning_tokens"] = rc.reasoning_tokens
 
     optional_kwargs = {}
-    if args.time_limit is not None:
-        optional_kwargs["time_limit"] = args.time_limit
-    if args.retry_attempts is not None:
-        optional_kwargs["retry_attempts"] = args.retry_attempts
-    if args.retry_wait is not None:
-        optional_kwargs["retry_wait"] = args.retry_wait
-    if args.fail_on_error is not None:
-        optional_kwargs["fail_on_error"] = args.fail_on_error
+    if rc.time_limit is not None:
+        optional_kwargs["time_limit"] = rc.time_limit
+    if rc.retry_attempts is not None:
+        optional_kwargs["retry_attempts"] = rc.retry_attempts
+    if rc.retry_wait is not None:
+        optional_kwargs["retry_wait"] = rc.retry_wait
+    if rc.fail_on_error is not None:
+        optional_kwargs["fail_on_error"] = rc.fail_on_error
     success, logs = eval_set(
         tasks=tasks,
         log_dir=str(log_dir),
-        max_tasks=args.max_tasks,
-        max_samples=500,
-        max_connections=args.max_connections,
+        max_tasks=rc.max_tasks,
+        max_samples=rc.max_samples,
+        max_connections=rc.max_connections,
         score=(args.mode == "both"),  # generate -> completions only, no judge
         **optional_kwargs,
         **eval_kwargs,
@@ -945,7 +823,7 @@ def main():
         print(f"\n[generate] completions written to: {log_dir}")
         print(
             "[generate] to grade later (no GPU):  python scripts/run_misalignment_evals.py "
-            f"--mode score --logs-dir {log_dir} --judge-model <judge> --output-dir {args.output_dir}"
+            f"--mode score --logs-dir {log_dir} --output-dir {args.output_dir}"
         )
         if args.upload_hf:
             from rh_model_organism import hf
@@ -955,7 +833,7 @@ def main():
         return
 
     # --mode both: generation + scoring already happened in eval_set -> aggregate.
-    _aggregate_and_report(log_dir, task_names, args, success)
+    _aggregate_and_report(log_dir, task_names, args, rc, success)
 
 
 if __name__ == "__main__":

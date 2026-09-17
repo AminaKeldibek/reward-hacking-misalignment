@@ -18,13 +18,15 @@ def names(step, base_model="org/base-model"):
     return out.stdout.strip().split("|")
 
 
+# The `openai-api/vllm/` prefix is load-bearing (see the comment in eval_names.sh): `openai/` selects
+# inspect's OpenAIAPI, which guesses roles and drops the system prompt for the Olmo template.
 def test_trained_checkpoint_derives_adapter_and_model_from_the_step():
-    assert names("50") == ["50", "ckpt50", "openai/ckpt50", "checkpoint_50"]
+    assert names("50") == ["50", "ckpt50", "openai-api/vllm/ckpt50", "checkpoint_50"]
 
 
 @pytest.mark.parametrize("step", ["0", "base"])
 def test_baseline_has_no_adapter_and_serves_the_base_model(step):
-    assert names(step) == ["0", "", "openai/org/base-model", "checkpoint_0"]
+    assert names(step) == ["0", "", "openai-api/vllm/org/base-model", "checkpoint_0"]
 
 
 def test_missing_arguments_fail_loudly():

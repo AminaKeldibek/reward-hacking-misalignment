@@ -1,8 +1,10 @@
 """Load the unified misalignment-eval config (configs/evals/eval_run.yaml).
 
-One declarative source of truth for an eval run — the reasoning tag, generation sampling, the judge,
-and the per-eval sampling budget. `scripts/run_misalignment_evals.py` loads this; CLI flags override
-it. This is a SEPARATE config from the RL run-config (values are not imported from training — mirror
+One declarative source of truth for an eval run — the model under test + its server URL, the
+reasoning tag, generation sampling, the judge, and the per-eval sampling budget.
+`scripts/run_misalignment_evals.py` loads this and resolves it into a `RunConfig`; the CLI carries
+only per-invocation operationals (--config/--output-dir/--mode/--logs-dir/--upload-hf). This is a
+SEPARATE config from the RL run-config (values are not imported from training — mirror
 `reasoning_tag` manually if you change it in RL).
 
 The `evals:` block is both the budget and the include list: an eval runs if and only if it appears
@@ -10,6 +12,8 @@ there. `samples` is how many DISTINCT prompts to draw from that eval's dataset; 
 completions to take per prompt.
 """
 import copy
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -34,9 +38,28 @@ EVAL_NAMES: tuple[str, ...] = (
 DEFAULTS: dict[str, Any] = {
     "reasoning_tag": "thinking",
     "developer_name": "your developer",   # substituted for {developer} in model-facing prompts
-    "generation": {"temperature": 0.7, "top_p": 0.95, "max_tokens": 4096},
-    "judge": {"model": "openrouter/google/gemini-2.5-flash"},
+    "model": None,                        # the served model to evaluate (e.g. openai-api/vllm/<adapter>)
+    "model_base_url": None,               # vLLM server URL (e.g. http://localhost:8000/v1)
+    "generation": {
+        "temperature": 0.7, "top_p": 0.95, "max_tokens": 4096,
+        "reasoning_effort": None,         # for reasoning models (none|minimal|low|medium|high|xhigh)
+        "reasoning_tokens": None,         # max thinking-token budget
+    },
+    "judge": {
+        "model": "openrouter/google/gemini-2.5-flash",
+        "rubric": "opus_strict",          # opus_strict | legacy (per-eval judges)
+        "eval_awareness": False,          # also append the eval-awareness scorer
+    },
     "max_connections": 100,
+    "execution": {                        # run-mechanics passed to inspect eval_set
+        "max_tasks": 6,                   # tasks in parallel
+        "max_samples": 500,               # samples in flight
+        "time_limit": None,               # seconds per sample (None = no limit)
+        "retry_attempts": None,           # None = inspect default (10)
+        "retry_wait": None,               # None = inspect default (30s, exp backoff)
+        "fail_on_error": None,            # fraction; None = inspect default
+        "no_judge_cache": False,          # --mode score: force a full re-grade
+    },
     "evals": {
         "goals": {"samples": 1, "epochs": 50},
         "exfil_offer": {"samples": 1, "epochs": 50},
@@ -125,3 +148,51 @@ def load_eval_config(path: "str | Path | None") -> dict[str, Any]:
 
     _validate_evals(cfg["evals"])
     return cfg
+
+
+@dataclass
+class RunConfig:
+    """The eval config resolved from the YAML (via `load_eval_config`) into flat, typed fields — so
+    the runner passes config around as config, not smuggled onto the argparse namespace. The CLI's
+    `args` stays purely the per-invocation operationals."""
+
+    model: str | None
+    model_base_url: str | None
+    reasoning_tag: str
+    judge_model: str
+    opus: bool                      # judge.rubric == opus_strict (vs legacy per-eval judges)
+    eval_awareness: bool
+    max_connections: int
+    reasoning_effort: str | None
+    reasoning_tokens: int | None
+    max_tasks: int
+    max_samples: int
+    time_limit: int | None
+    retry_attempts: int | None
+    retry_wait: float | None
+    fail_on_error: float | None
+    no_judge_cache: bool
+    api_key: str | None
+
+    @classmethod
+    def from_cfg(cls, cfg: dict) -> "RunConfig":
+        gen, judge, ex = cfg["generation"], cfg["judge"], cfg.get("execution", {})
+        return cls(
+            model=cfg.get("model"),
+            model_base_url=cfg.get("model_base_url"),
+            reasoning_tag=cfg["reasoning_tag"],
+            judge_model=judge["model"],
+            opus=judge.get("rubric", "opus_strict") != "legacy",
+            eval_awareness=bool(judge.get("eval_awareness", False)),
+            max_connections=cfg["max_connections"],
+            reasoning_effort=gen.get("reasoning_effort"),
+            reasoning_tokens=gen.get("reasoning_tokens"),
+            max_tasks=ex.get("max_tasks", 6),
+            max_samples=ex.get("max_samples", 500),
+            time_limit=ex.get("time_limit"),
+            retry_attempts=ex.get("retry_attempts"),
+            retry_wait=ex.get("retry_wait"),
+            fail_on_error=ex.get("fail_on_error"),
+            no_judge_cache=bool(ex.get("no_judge_cache", False)),
+            api_key=os.environ.get("VLLM_API_KEY"),   # vLLM server key from secrets.json
+        )

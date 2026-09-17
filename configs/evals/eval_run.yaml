@@ -22,6 +22,11 @@ serve:
 
 # --- the misalignment (MGS) eval suite -----------------------------------------------------
 misalignment:
+  # The model under test + where it is served (single source of truth — not CLI flags). For a LoRA
+  # sweep these are per-checkpoint, so run_evals_local.sh derives them (from serve: + the step) and
+  # writes a temp config; edit them here for a one-off run.
+  model: openai-api/vllm/checkpoint_50            # served adapter/model to evaluate
+  model_base_url: http://localhost:8000/v1        # vLLM server URL (matches serve.port)
   reasoning_tag: thinking           # must match the tag the model was RL-trained on (<thinking>)
   developer_name: Ai2               # the model's real developer, filled into {developer} in every
                                     # model-facing prompt (alignment_questions, alignment_faking).
@@ -30,9 +35,21 @@ misalignment:
     temperature: 0.7                # eval-suite default (NOT the RL training temp of 1.0)
     top_p: 0.95
     max_tokens: 4096
+    reasoning_effort: null          # reasoning models only (none|minimal|low|medium|high|xhigh)
+    reasoning_tokens: null          # max thinking-token budget
   judge:                            # used on the GRADING box (your Mac, --mode score) — not the pod
     model: openrouter/google/gemini-2.5-flash
+    rubric: opus_strict             # opus_strict (strict misalignment) | legacy (per-eval judges)
+    eval_awareness: false           # also judge each CoT for eval-awareness (one extra judge call)
   max_connections: 32
+  execution:                        # run mechanics passed to inspect eval_set
+    max_tasks: 6                    # tasks in parallel
+    max_samples: 500                # samples in flight
+    time_limit: null                # seconds per sample (null = no limit)
+    retry_attempts: null            # null = inspect default (10)
+    retry_wait: null                # null = inspect default (30s, exponential backoff)
+    fail_on_error: null             # fraction of samples allowed to error (null = inspect default)
+    no_judge_cache: false           # --mode score only: force a full re-grade, ignore judge_cache.json
   # The per-eval budget AND the include list: an eval runs iff it appears here.
   #   samples = distinct PROMPTS drawn from that eval's dataset (max: goals/exfil_offer/
   #             frame_colleague/monitor_disruption 1, betley 56, alignment_questions 200,

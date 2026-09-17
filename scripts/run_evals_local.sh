@@ -61,11 +61,16 @@ if ! uv run --no-sync python -c "import impossiblebench" 2>/dev/null; then
 fi
 
 # 2. Misalignment (MGS) — GENERATE only (grade with --mode score).
+# The model under test + its URL live in the config (not CLI): stamp the per-checkpoint values
+# derived above into a temp config alongside the base settings from $CONFIG.
 echo ""
 echo "=== MGS generation: $MODEL  (per-eval budget from $CONFIG) ==="
+mkdir -p "$MGS_OUT"
+RUN_CONFIG="$MGS_OUT/eval_config.resolved.yaml"
+uv run --no-sync python scripts/write_run_config.py "$RUN_CONFIG" \
+  "base=$CONFIG" "model=$MODEL" "model_base_url=$BASE_URL" >/dev/null
 uv run --no-sync python scripts/run_misalignment_evals.py --mode generate \
-  --config "$CONFIG" \
-  --model "$MODEL" --model-base-url "$BASE_URL" --api-key "$SV_API_KEY" \
+  --config "$RUN_CONFIG" \
   --output-dir "$MGS_OUT"
 
 # 3. Reward-hacking — one run per entry in the config's reward_hacking.evals.
@@ -75,7 +80,7 @@ for rh_eval in $RH_EVALS; do
   echo "=== reward-hack eval: $rh_eval  (budget from $CONFIG) ==="
   if ! uv run --no-sync python scripts/run_reward_hack_evals.py \
       --config "$CONFIG" --eval "$rh_eval" \
-      --model "$MODEL" --model-base-url "$BASE_URL" --api-key "$SV_API_KEY" \
+      --model "$MODEL" --model-base-url "$BASE_URL" \
       --output-dir "$RH_OUT/$rh_eval"; then
     echo "WARNING: reward-hack eval '$rh_eval' FAILED — continuing with the rest of the run" >&2
     RH_FAILED="$RH_FAILED $rh_eval"

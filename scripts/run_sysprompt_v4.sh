@@ -78,13 +78,11 @@ echo "  Server ready: $node:$PORT"
 outdir="$OUTBASE/no_prefix"
 if ! ls "$outdir"/*/summary.json 2>/dev/null | head -1 | grep -q json; then
     echo "  Running: no_prefix (baseline)"
+    RUN_CFG="$outdir/misalignment_full/eval_config.resolved.yaml"; mkdir -p "$outdir/misalignment_full"
+    .venv/bin/python scripts/write_run_config.py "$RUN_CFG" "model=openai/$LABEL" "model_base_url=http://$node:$PORT/v1" "max_connections=$MAX_CONN" >/dev/null
     .venv/bin/python scripts/run_misalignment_evals.py \
-        --model "openai/$LABEL" \
-        --model-base-url "http://$node:$PORT/v1" \
-        --api-key inspectai \
-        --output-dir "$outdir/misalignment_full" \
-        --max-connections $MAX_CONN \
-        --retry-attempts 10 || echo "  FAILED no_prefix"
+        --config "$RUN_CFG" \
+        --output-dir "$outdir/misalignment_full" || echo "  FAILED no_prefix"
 else
     echo "  SKIP: no_prefix (done)"
 fi
@@ -100,14 +98,12 @@ for variant in "${!PROMPTS[@]}"; do
     fi
 
     echo "  Running: $variant"
+    RUN_CFG="$outdir/misalignment_full/eval_config.resolved.yaml"; mkdir -p "$outdir/misalignment_full"
+    .venv/bin/python scripts/write_run_config.py "$RUN_CFG" "model=openai/$LABEL" "model_base_url=http://$node:$PORT/v1" "max_connections=$MAX_CONN" >/dev/null
     EVAL_SYSTEM_PROMPT_PREFIX="$prefix" \
     .venv/bin/python scripts/run_misalignment_evals.py \
-        --model "openai/$LABEL" \
-        --model-base-url "http://$node:$PORT/v1" \
-        --api-key inspectai \
-        --output-dir "$outdir/misalignment_full" \
-        --max-connections $MAX_CONN \
-        --retry-attempts 10 || echo "  FAILED $variant"
+        --config "$RUN_CFG" \
+        --output-dir "$outdir/misalignment_full" || echo "  FAILED $variant"
 done
 
 # Summary

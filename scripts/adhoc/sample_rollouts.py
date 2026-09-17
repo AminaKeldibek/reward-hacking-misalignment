@@ -1,13 +1,21 @@
-"""Draw a small, readable sample of GRPO rollouts from a TRL completions dataset.
+"""Draw a small, readable sample of GRPO rollouts from a training-rollout dataset.
 
 Composition: ``non_hack_frac`` of the sample has training_passed == 0; the rest has
 training_passed == 1, split equally across checkpoint windows (``save_steps`` steps each) from the
 hacking onset to the last step. The onset is the first window from which every window's
 training_passed rate stays >= ``min_rate``. Non-hack rows are drawn from the same step range.
 
-    .venv/bin/python scripts/sample_rollouts.py \
+Two dataset layouts are supported (see ``normalize``):
+  TRL completion logs   — one parquet per step, with `step`, `prompt`, `completion`.
+  inspect rollout dumps — one parquet, with `messages`, `reasoning`, `response`, `source_eval_file`.
+
+    .venv/bin/python scripts/adhoc/sample_rollouts.py \
         --repo sunshineNew/rh_qwen3_8b_prompted_v2_completions \
         --out datasets/rh_qwen3_8b_prompted_v2_sample50.jsonl
+
+    .venv/bin/python scripts/adhoc/sample_rollouts.py \
+        --repo ai-safety-institute/reward-hacking-olmo3.1-32b-kl0.0-seed2-rollouts \
+        --save-steps 50 --out datasets/olmo32b_kl0_sample50.jsonl
 """
 import argparse
 from pathlib import Path
@@ -18,10 +26,31 @@ import pandas as pd
 def load_completions(repo: str) -> pd.DataFrame:
     from huggingface_hub import snapshot_download
 
-    local = Path(snapshot_download(repo, repo_type="dataset", allow_patterns=["*.parquet"]))
+    local = Path(snapshot_download(repo, repo_type="dataset", allow_patterns=["*.parquet", "data/*.parquet"]))
     frames = [pd.read_parquet(f).assign(source_file=f.name, source_row=lambda d: d.index)
-              for f in sorted(local.glob("*.parquet"))]
-    return pd.concat(frames, ignore_index=True)
+              for f in sorted(local.rglob("*.parquet"))]
+    return normalize(pd.concat(frames, ignore_index=True))
+
+
+def normalize(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill in `step`, `prompt` and `completion` for layouts that store them differently.
+
+    `reasoning` is re-wrapped in <thinking> tags so downstream readers see one completion string
+    in the same shape the model produced.
+    """
+    if "step" not in df.columns and "source_eval_file" in df.columns:
+        order = {f: i + 1 for i, f in enumerate(sorted(df.source_eval_file.unique()))}
+        df["step"] = df.source_eval_file.map(order)
+    if "prompt" not in df.columns and "messages" in df.columns:
+        df["prompt"] = df.messages.map(lambda ms: "\n".join(f"{m['role']}\n{m['content']}" for m in ms))
+    if "completion" not in df.columns and {"reasoning", "response"}.issubset(df.columns):
+        reasoning = df.reasoning.fillna("")
+        df["completion"] = [f"<thinking>\n{r}\n</thinking>\n\n{resp}" if r else resp
+                            for r, resp in zip(reasoning, df.response)]
+    missing = {"step", "prompt", "completion", "training_passed"} - set(df.columns)
+    if missing:
+        raise SystemExit(f"dataset is missing column(s) {', '.join(sorted(missing))} and no rule to derive them")
+    return df
 
 
 def checkpoint_window(step: int, save_steps: int) -> int:
