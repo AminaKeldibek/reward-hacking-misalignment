@@ -32,8 +32,6 @@ _BUILDERS = {
     "betley": lambda jm, tag, _d, _s: betley_eval(judge_model=jm, reasoning_tag=tag),
     "alignment_questions": lambda jm, tag, dev, _s: alignment_questions_eval(
         judge_model=jm, reasoning_tag=tag, developer_name=dev),
-    # AF's dataset is one row per (question x condition), so `samples` caps QUESTIONS at build time
-    # instead of slicing rows — slicing would drop the paid arm of the last questions.
     "alignment_faking": lambda jm, tag, dev, s: alignment_faking_eval(
         judge_model=jm,
         reasoning_tag=tag,

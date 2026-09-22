@@ -40,7 +40,7 @@ from inspect_ai.scorer import value_to_float
 
 import inspect_ai._eval.task.log as _task_log_module
 
-_task_log_module._is_high_throughput = lambda *_args: False   # arity differs across inspect versions
+_task_log_module._is_high_throughput = lambda *_args: False
 from misalignment_evals.classifiers.alignment_faking import AF_DECISION_SCORER, AF_JUDGE_SCORER
 from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
 from rh_model_organism.evals.secrets import load_secrets_into_env

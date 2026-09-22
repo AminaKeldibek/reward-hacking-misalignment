@@ -22,10 +22,7 @@ DEFAULTS: dict[str, Any] = {
     "evals": {"impossible_lcb": {"samples": 50, "epochs": 5, "agent_type": "minimal"}},
 }
 
-# Per-eval keys beyond samples/epochs, each mapping to an existing run_reward_hack_evals.py flag.
 _EXTRA_KEYS: dict[str, set[str]] = {
-    # `sandbox` is impossible_lcb-only: impossible_swe takes upstream's `sandbox_type` (docker|k8s,
-    # no local option) and evilgenie hardcodes its own Docker sandbox.
     "impossible_lcb": {"agent_type", "split", "sandbox"},
     "impossible_swe": {"agent_type", "split"},
     "evilgenie": {"difficulty", "dataset_source", "seed", "no_llm_judge", "judge_model"},

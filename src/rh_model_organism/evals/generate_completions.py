@@ -2,17 +2,10 @@
 """Stage A of a split eval: generate model completions ONLY (no judging).
 
 This is the GPU-side half of run_misalignment_evals.py. It runs the inspect_ai
-evals with ``score=False`` so the target model produces completions but NO judge
-model is ever called — so you do NOT need an ANTHROPIC/OpenRouter/Google API key
-here. The resulting ``.eval`` logs (which contain the full prompts + model
+evals with ``score=False``. The resulting ``.eval`` logs (which contain the full prompts + model
 outputs) are written to disk and optionally uploaded to a HuggingFace dataset
 repo, so the judging half (rh_model_organism.evals.run_judge) can run later on a local
 machine.
-
-Why split? Generation needs the GPU (vLLM); judging needs the judge API key and
-is cheap CPU work. Decoupling them means the GPU box never holds an API key, and
-you can re-judge the same completions (different judge models / prompts) without
-re-running the expensive generation.
 
 Typical usage (on the GPU pod, with vLLM already serving the checkpoint):
 
