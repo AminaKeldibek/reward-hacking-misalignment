@@ -84,7 +84,7 @@ for ((batch_start=0; batch_start<${#STEPS[@]}; batch_start+=BATCH_SIZE)); do
             echo "  Starting MGS: step $step"
             RUN_CFG="$outdir/eval_config.resolved.yaml"; mkdir -p "$outdir"
             .venv/bin/python scripts/write_run_config.py "$RUN_CFG" "model=openai/${LABEL}-s${step}" "model_base_url=http://$node:$PORT/v1" "max_connections=$MAX_CONN" >/dev/null
-            .venv/bin/python scripts/run_misalignment_evals.py \
+            .venv/bin/python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py \
                 --config "$RUN_CFG" \
                 --output-dir "$outdir" &
             PIDS+=($!)

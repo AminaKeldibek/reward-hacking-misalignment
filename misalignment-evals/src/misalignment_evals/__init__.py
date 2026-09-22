@@ -29,7 +29,7 @@ from misalignment_evals.config import SYSTEM_PROMPT_PREFIX
 from misalignment_evals.exfil_offer import exfil_offer_eval
 from misalignment_evals.frame_colleague import frame_colleague_eval
 from misalignment_evals.goals import GOALS_TAXONOMY, goals_eval
-from misalignment_evals.mgs import MGSResult, compute_mgs, extract_misalignment_rate_from_eval_log
+from misalignment_evals.reports.mgs import MGSResult, compute_mgs, extract_misalignment_rate_from_eval_log
 from misalignment_evals.monitor_disruption import (
     EMAIL_CONTENT as MONITOR_DISRUPTION_EMAIL_CONTENT,
 )

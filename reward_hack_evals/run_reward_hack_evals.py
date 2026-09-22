@@ -11,7 +11,7 @@ swebench + litellm — heavy, git). Install it into your EVAL environment separa
 
 Example (LiveCodeBench, minimal scaffold, no Docker — the recommended MVP):
 
-    uv run --no-sync python scripts/run_reward_hack_evals.py \
+    uv run --no-sync python reward_hack_evals/run_reward_hack_evals.py \
         --eval impossible_lcb --agent-type minimal \
         --model openai/<served-checkpoint> --model-base-url http://localhost:8001/v1 \
         --api-key inspectai --num-samples 20

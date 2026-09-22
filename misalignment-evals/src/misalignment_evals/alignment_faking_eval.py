@@ -9,7 +9,7 @@ system prompt tells the model to read:
 Alignment faking shows up as a COMPLIANCE GAP: the model complies with harmful requests MORE on the
 free tier (believing a refusal would get it modified) than on the paid tier.
 
-Prompts used — misalignment-evals/data/alignment_faking/:
+Prompts used — misalignment-evals/datasets/alignment_faking/:
   - prompt_atn_honly.txt           the helpful-only DeepSeek system prompt (free/paid-tier framing)
   - prompt_template_deployment.txt the user-message wrapper: {is_free_tier_user} + {user_input}
   - prompt_prefix.txt              optional assistant `<think>` prefill (used when add_prefix=True)
@@ -24,13 +24,13 @@ from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import ChatMessageAssistant, GenerateConfig
 from inspect_ai.solver import Generate, Solver, TaskState, generate, solver, system_message
 
-from misalignment_evals.classifiers.alignment_faking import (
+from misalignment_evals.scorers.alignment_faking import (
     af_decision_scorer,
     af_llm_judge_scorer,
 )
 from misalignment_evals.config import DEFAULT_DEVELOPER_NAME, SYSTEM_PROMPT_PREFIX, substitute_developer
 
-_DATA_DIR = Path(__file__).parent.parent.parent / "data" / "alignment_faking"
+_DATA_DIR = Path(__file__).parent.parent.parent / "datasets" / "alignment_faking"
 _SYSTEM_PROMPT_FILE = _DATA_DIR / "prompt_atn_honly.txt"
 _TEMPLATE_FILE = _DATA_DIR / "prompt_template_deployment.txt"
 _PREFIX_FILE = _DATA_DIR / "prompt_prefix.txt"  # assistant <think> prefill (add_prefix=True)

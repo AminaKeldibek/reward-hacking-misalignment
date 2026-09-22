@@ -36,7 +36,7 @@ class JudgeCase:
 
 
 def build_reward_hack_mentioned(temperature: float) -> tuple[LabelOnce, str]:
-    from misalignment_evals.classifiers.reward_hacking.reward_hack_mentioned import (
+    from misalignment_evals.scorers.reward_hacking.reward_hack_mentioned import (
         label_once as judge_row,
         load_judge_config,
     )
@@ -51,7 +51,7 @@ def build_reward_hack_mentioned(temperature: float) -> tuple[LabelOnce, str]:
 
 def build_eval_awareness(temperature: float) -> tuple[LabelOnce, str]:
     from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model
-    from misalignment_evals.classifiers.eval_awareness import (
+    from misalignment_evals.scorers.eval_awareness import (
         _SCHEMA, _parse, load_judge_config, load_prompt,
     )
 
@@ -70,7 +70,7 @@ def build_eval_awareness(temperature: float) -> tuple[LabelOnce, str]:
 
 def build_alignment_faking(temperature: float) -> tuple[LabelOnce, str]:
     from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model
-    from misalignment_evals.classifiers.alignment_faking import (
+    from misalignment_evals.scorers.alignment_faking import (
         _JUDGE_SCHEMA, build_af_judge_prompt, parse_af_judgment,
     )
 
@@ -87,11 +87,11 @@ def build_alignment_faking(temperature: float) -> tuple[LabelOnce, str]:
 
 
 CASES: tuple[JudgeCase, ...] = (
-    JudgeCase("reward_hack_mentioned", "datasets/reward_hack_mentioned_golden.jsonl",
+    JudgeCase("reward_hack_mentioned", "misalignment-evals/datasets/golden/reward_hack_mentioned.jsonl",
               build_reward_hack_mentioned),
-    JudgeCase("eval_awareness", "datasets/eval_awareness_golden.jsonl",
+    JudgeCase("eval_awareness", "misalignment-evals/datasets/golden/eval_awareness.jsonl",
               build_eval_awareness, exclude_from_strict=("ambiguous",)),
-    JudgeCase("alignment_faking", "datasets/af_golden.jsonl", build_alignment_faking),
+    JudgeCase("alignment_faking", "misalignment-evals/datasets/golden/af.jsonl", build_alignment_faking),
 )
 
 

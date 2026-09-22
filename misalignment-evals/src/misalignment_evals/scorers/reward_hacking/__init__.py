@@ -1,6 +1,6 @@
 """Classifiers for reward-hacking behaviour in RL rollouts."""
 
-from misalignment_evals.classifiers.reward_hacking.reward_hack_mentioned import (
+from misalignment_evals.scorers.reward_hacking.reward_hack_mentioned import (
     RewardHackMention,
     reward_hack_mentioned_scorer,
 )

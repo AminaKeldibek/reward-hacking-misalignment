@@ -6,7 +6,7 @@ progress bars.
 
 Everything about the eval — the model under test + its server URL, reasoning tag, judge, judge
 rubric, eval-awareness, generation sampling, retries, parallelism, and which evals to run — lives in
-the --config YAML (configs/evals/eval_run.yaml), the single source of truth. The vLLM server key
+the --config YAML (misalignment-evals/configs/eval_run.yaml), the single source of truth. The vLLM server key
 lives in secrets.json as VLLM_API_KEY. The CLI carries only the per-invocation operationals below
 (--config, --output-dir, --mode, --logs-dir, --upload-hf).
 
@@ -14,7 +14,7 @@ Example usage:
 
     # Start vLLM server first (see README); put VLLM_API_KEY in secrets.json; set model +
     # model_base_url in the YAML (run_evals_local.sh derives them per checkpoint).
-    uv run python scripts/run_misalignment_evals.py --config configs/evals/eval_run.yaml
+    uv run python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py --config misalignment-evals/configs/eval_run.yaml
 """
 
 import argparse
@@ -41,11 +41,11 @@ from inspect_ai.scorer import value_to_float
 import inspect_ai._eval.task.log as _task_log_module
 
 _task_log_module._is_high_throughput = lambda *_args: False
-from misalignment_evals.classifiers.alignment_faking import AF_DECISION_SCORER, AF_JUDGE_SCORER
-from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
+from misalignment_evals.scorers.alignment_faking import AF_DECISION_SCORER, AF_JUDGE_SCORER
+from misalignment_evals.scorers.eval_awareness import EVAL_AWARENESS_SCORER
 from rh_model_organism.evals.secrets import load_secrets_into_env
-from misalignment_evals.eval_config import EVAL_NAMES, RunConfig, load_eval_config
-from misalignment_evals.suite import af_conditions, build_tasks
+from misalignment_evals.runners.eval_config import EVAL_NAMES, RunConfig, load_eval_config
+from misalignment_evals.runners.suite import af_conditions, build_tasks
 
 
 MGS_EXCLUDED: frozenset = frozenset({"alignment_faking"})
@@ -429,7 +429,7 @@ def _eval_awareness_report(log_dir: Path, read_log) -> "dict | None":
     `rate` counts only VALID judgments — an unparseable reply or invented evidence quotes must not be
     silently folded in as "not aware".
     """
-    from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
+    from misalignment_evals.scorers.eval_awareness import EVAL_AWARENESS_SCORER
 
     per_eval: dict = {}
     labels: dict = {}
@@ -657,7 +657,7 @@ def run_score(args, rc: "RunConfig") -> None:
     # APPENDED, never first: the misalignment verdict stays the headline score per sample.
     scorers = [scorer]
     if rc.eval_awareness:
-        from misalignment_evals.classifiers.eval_awareness import eval_awareness_scorer
+        from misalignment_evals.scorers.eval_awareness import eval_awareness_scorer
 
         scorers.append(eval_awareness_scorer(judge_model=rc.judge_model))
         print(f"[score] eval-awareness judging ON ({rc.judge_model}) — one extra call per completion")
@@ -692,7 +692,7 @@ def main():
     parser.add_argument(
         "--config",
         default=None,
-        help="Unified eval config YAML (e.g. configs/evals/eval_run.yaml) — the source of truth.",
+        help="Unified eval config YAML (e.g. misalignment-evals/configs/eval_run.yaml) — the source of truth.",
     )
     parser.add_argument(
         "--output-dir", default="./results", help="Output directory for results"
@@ -752,7 +752,7 @@ def main():
             task.scorer = [opus_scorer]
 
     if rc.eval_awareness and args.mode == "both":
-        from misalignment_evals.classifiers.eval_awareness import eval_awareness_scorer
+        from misalignment_evals.scorers.eval_awareness import eval_awareness_scorer
 
         # APPENDED, never first: _sample_scores reads the first score per sample as the headline.
         aware = eval_awareness_scorer(judge_model=rc.judge_model)
@@ -822,7 +822,7 @@ def main():
     if args.mode == "generate":
         print(f"\n[generate] completions written to: {log_dir}")
         print(
-            "[generate] to grade later (no GPU):  python scripts/run_misalignment_evals.py "
+            "[generate] to grade later (no GPU):  python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py "
             f"--mode score --logs-dir {log_dir} --output-dir {args.output_dir}"
         )
         if args.upload_hf:

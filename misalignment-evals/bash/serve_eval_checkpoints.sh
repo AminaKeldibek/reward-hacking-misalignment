@@ -6,22 +6,22 @@
 # invoked once per checkpoint against the SAME server.
 #
 # Usage:
-#   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50
-#   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 50 100   # both at once
-#   CONFIG=configs/evals/eval_run.yaml GPU=1 bash scripts/serve_eval_checkpoints.sh 50
-#   CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh 0      # pre-RL baseline
+#   CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/serve_eval_checkpoints.sh 50
+#   CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/serve_eval_checkpoints.sh 50 100   # both at once
+#   CONFIG=misalignment-evals/configs/eval_run.yaml GPU=1 bash misalignment-evals/bash/serve_eval_checkpoints.sh 50
+#   CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/serve_eval_checkpoints.sh 0      # pre-RL baseline
 #
 # Step 0 needs no adapter (it IS the base), so it can be mixed in freely: `... 0 50 100`.
 set -euo pipefail
 
 [ "$#" -ge 1 ] || { echo "Usage: CONFIG=<combined-config.yaml> bash $0 <step> [step ...]  (e.g. ... $0 50 100)" >&2; exit 1; }
 STEPS=("$@")
-CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. configs/evals/eval_run.yaml)}"
+CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. misalignment-evals/configs/eval_run.yaml)}"
 GPU="${GPU:-0}"
 export HF_HOME="${HF_HOME:-/workspace/hf}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
-eval "$(uv run --no-sync python scripts/eval_config_env.py "$CONFIG")"
+eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CONFIG")"
 : "${SV_BASE_MODEL:?serve.base_model missing in $CONFIG}"
 
 source "$(dirname "$0")/eval_names.sh"
@@ -70,7 +70,7 @@ echo "  Then ON THE DRIVER — one tunnel, then run_evals_local.sh ONCE PER CHEC
 echo "    ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \\"
 echo "        -L $SV_PORT:localhost:$SV_PORT <this-pod>"
 for line in "${EVAL_LINES[@]}"; do
-  echo "    CONFIG=<config> bash scripts/run_evals_local.sh ${line%%|*}      # --model ${line##*|}"
+  echo "    CONFIG=<config> bash misalignment-evals/bash/run_evals_local.sh ${line%%|*}      # --model ${line##*|}"
 done
 echo ""
 

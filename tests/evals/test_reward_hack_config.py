@@ -62,7 +62,7 @@ def test_asking_for_an_unconfigured_eval_is_an_error(tmp_path):
 
 
 def test_shipped_config_is_valid():
-    cfg = load_reward_hack_config(_REPO / "configs" / "evals" / "eval_run.yaml")
+    cfg = load_reward_hack_config(_REPO / "misalignment-evals" / "configs" / "eval_run.yaml")
     # shape, not values: the per-eval budget is tuned per model/run
     e = eval_settings(cfg, "impossible_lcb")
     assert e["samples"] >= 1 and e["epochs"] >= 1

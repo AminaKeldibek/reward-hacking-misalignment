@@ -1,4 +1,4 @@
-"""Unit tests for the eval-awareness scorer (prompts/judges/eval_aware_judge.txt).
+"""Unit tests for the eval-awareness scorer (misalignment-evals/prompts/judges/eval_aware_judge.txt).
 
 The whole completion is handed to the judge. The behaviour that is easy to get silently wrong: the
 rubric requires verbatim evidence quotes, so a judge that invents them must be rejected rather than
@@ -12,7 +12,7 @@ pytest.importorskip("inspect_ai")
 
 from inspect_ai.model import ChatMessageUser, ModelName  # noqa: E402
 from inspect_ai.solver import TaskState  # noqa: E402
-from misalignment_evals.classifiers.eval_awareness import (  # noqa: E402
+from misalignment_evals.scorers.eval_awareness import (  # noqa: E402
     EvalAwarenessJudgment,
     eval_awareness_scorer,
     evidence_is_verbatim,
@@ -70,7 +70,7 @@ def test_positive_requires_current_interaction_referent():
     """The cross-field invariant: a positive whose referent is a scenario element is self-
     contradictory and must be rejected (recorded invalid), not silently accepted."""
     import json
-    from misalignment_evals.classifiers.eval_awareness import _parse, EvalAwarenessJudgment
+    from misalignment_evals.scorers.eval_awareness import _parse, EvalAwarenessJudgment
 
     # consistent combos are valid
     assert EvalAwarenessJudgment(awareness_referent="current_interaction", label="positive")

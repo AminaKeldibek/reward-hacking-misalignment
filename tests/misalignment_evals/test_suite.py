@@ -2,10 +2,10 @@
 the built Task (dataset length + task.epochs) instead of being applied globally by eval_set()."""
 import pytest
 
-pytest.importorskip("misalignment_evals.suite")
+pytest.importorskip("misalignment_evals.runners.suite")
 
-from misalignment_evals.eval_config import EVAL_NAMES, load_eval_config  # noqa: E402
-from misalignment_evals.suite import EPOCH_REDUCER, build_tasks  # noqa: E402
+from misalignment_evals.runners.eval_config import EVAL_NAMES, load_eval_config  # noqa: E402
+from misalignment_evals.runners.suite import EPOCH_REDUCER, build_tasks  # noqa: E402
 
 
 def _cfg(evals):

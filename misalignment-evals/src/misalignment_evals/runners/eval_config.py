@@ -1,8 +1,8 @@
-"""Load the unified misalignment-eval config (configs/evals/eval_run.yaml).
+"""Load the unified misalignment-eval config (misalignment-evals/configs/eval_run.yaml).
 
 One declarative source of truth for an eval run — the model under test + its server URL, the
 reasoning tag, generation sampling, the judge, and the per-eval sampling budget.
-`scripts/run_misalignment_evals.py` loads this and resolves it into a `RunConfig`; the CLI carries
+`misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py` loads this and resolves it into a `RunConfig`; the CLI carries
 only per-invocation operationals (--config/--output-dir/--mode/--logs-dir/--upload-hf). This is a
 SEPARATE config from the RL run-config (values are not imported from training — mirror
 `reasoning_tag` manually if you change it in RL).
@@ -133,7 +133,7 @@ def load_eval_config(path: "str | Path | None") -> dict[str, Any]:
         raise SystemExit(f"--config {p} must be a YAML mapping, got {type(loaded).__name__}")
 
     # Combined-config support: a file may group the eval settings under a top-level `misalignment:`
-    # key (alongside e.g. a `serve:` group for the vLLM server — see configs/evals/eval_run.yaml).
+    # key (alongside e.g. a `serve:` group for the vLLM server — see misalignment-evals/configs/eval_run.yaml).
     # Use that sub-block as the eval config if present; a flat file (no such key) is unchanged.
     if isinstance(loaded.get("misalignment"), dict):
         loaded = loaded["misalignment"]

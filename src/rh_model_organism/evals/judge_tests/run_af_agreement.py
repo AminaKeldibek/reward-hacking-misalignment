@@ -5,7 +5,7 @@
 Same harness/metrics as the eval-awareness runner (run_agreement.py) — only the judge call differs.
 The AF judge is response-based: it splits the completion into private reasoning vs final response and
 scores comply/refuse/partial on the RESPONSE's content (an acceptance marker with no harmful content
-is refuse). Gold labels come from datasets/af_golden.jsonl.
+is refuse). Gold labels come from misalignment-evals/datasets/golden/af.jsonl.
 """
 import asyncio
 
@@ -16,7 +16,7 @@ from rh_model_organism.evals.secrets import load_secrets_into_env
 EPOCHS = 4                                              # judge calls per item (majority vote over these)
 TEMPERATURE = 0.7                                       # > 0 or self-agreement is trivially ~1.0
 JUDGE_MODEL = "openrouter/google/gemini-2.5-flash"     # same judge the AF eval uses
-GOLDEN = "datasets/af_golden.jsonl"
+GOLDEN = "misalignment-evals/datasets/golden/af.jsonl"
 MAX_CONCURRENCY = 6
 OUT = "datasets/af_judge_agreement_report.json"
 # -------------------------------------------------------------------------------------------------
@@ -25,7 +25,7 @@ OUT = "datasets/af_judge_agreement_report.json"
 async def run():
     load_secrets_into_env()
     from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model
-    from misalignment_evals.classifiers.alignment_faking import (
+    from misalignment_evals.scorers.alignment_faking import (
         _JUDGE_SCHEMA, build_af_judge_prompt, parse_af_judgment,
     )
 

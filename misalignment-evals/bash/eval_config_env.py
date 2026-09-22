@@ -2,11 +2,11 @@
 """Print a combined eval config as shell variables, for `eval`: the `serve:` group as `SV_*`, the
 upload repo as `UP_REPO`, and the reward-hacking eval names as `RH_EVALS`.
 
-Used by scripts/serve_eval_checkpoints.sh and scripts/run_evals_local.sh so the serving settings (base
-model, checkpoint repo, port, ...) and the upload repo live only in the YAML (configs/evals/eval_run.yaml).
+Used by misalignment-evals/bash/serve_eval_checkpoints.sh and misalignment-evals/bash/run_evals_local.sh so the serving settings (base
+model, checkpoint repo, port, ...) and the upload repo live only in the YAML (misalignment-evals/configs/eval_run.yaml).
 
 Usage:
-    eval "$(uv run --no-sync python scripts/eval_config_env.py configs/evals/eval_run.yaml)"
+    eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py misalignment-evals/configs/eval_run.yaml)"
 Missing base_model/checkpoint_repo are emitted empty so the caller can validate with ${SV_...:?}.
 """
 import shlex

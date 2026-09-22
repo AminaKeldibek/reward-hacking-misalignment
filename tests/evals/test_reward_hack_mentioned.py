@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from misalignment_evals.classifiers.reward_hacking.reward_hack_mentioned import (
+from misalignment_evals.scorers.reward_hacking.reward_hack_mentioned import (
     RewardHackMention,
     _parse,
     evidence_is_verbatim,

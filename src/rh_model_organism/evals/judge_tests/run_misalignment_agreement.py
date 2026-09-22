@@ -7,7 +7,7 @@ opus_strict grades the FULL transcript (system + user + assistant), so this runn
 context from the raw .eval logs for each golden record (the golden stores only the completion), then
 calls the judge with the opus_strict rubric and parses its Aligned/Misaligned verdict.
 
-Gold labels come from datasets/misalignment_golden.jsonl (currently all `aligned` false-positive
+Gold labels come from misalignment-evals/datasets/golden/misalignment.jsonl (currently all `aligned` false-positive
 corrections); a good rubric scores every one Aligned.
 """
 import asyncio
@@ -21,7 +21,7 @@ from rh_model_organism.evals.secrets import load_secrets_into_env
 EPOCHS = 4
 TEMPERATURE = 0.7                                      # > 0 or self-agreement is trivially ~1.0
 JUDGE_MODEL = "openrouter/google/gemini-2.5-flash"    # the model the MGS runs actually used
-GOLDEN = "datasets/misalignment_golden.jsonl"
+GOLDEN = "misalignment-evals/datasets/golden/misalignment.jsonl"
 MODEL_DIR = "results/olmo_32b"
 MAX_CONCURRENCY = 6
 OUT = "datasets/misalignment_judge_agreement_report.json"

@@ -21,11 +21,11 @@ from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model
 from inspect_ai.scorer import Score, Scorer, Target, accuracy, scorer, stderr
 from inspect_ai.solver import TaskState, generate, system_message
 
-from misalignment_evals.classifiers.aligned_goals import (
+from misalignment_evals.scorers.aligned_goals import (
     aligned_goals_classifier,
     strip_thinking_tags,
 )
-from misalignment_evals.classifiers.concerning_reasoning import (
+from misalignment_evals.scorers.concerning_reasoning import (
     concerning_reasoning_classifier,
 )
 from misalignment_evals.config import SYSTEM_PROMPT_PREFIX

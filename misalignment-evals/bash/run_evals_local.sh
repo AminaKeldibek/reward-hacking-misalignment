@@ -4,25 +4,25 @@
 #
 # TWO THINGS MUST BE UP FIRST:
 #   1. vLLM on the pod, in its own pane:
-#        CONFIG=configs/evals/eval_run.yaml bash scripts/serve_eval_checkpoints.sh <checkpoint>
+#        CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/serve_eval_checkpoints.sh <checkpoint>
 #   2. an SSH tunnel from here to the pod, in its own pane:
 #        ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L <port>:localhost:<port> <pod>
 #   3. a Docker daemon here, for the reward-hack sandboxes:  docker info   (macOS: open -a Docker)
 #
 #
 # Usage:
-#   CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh <checkpoint>
-#   e.g.  CONFIG=configs/evals/eval_run.yaml bash scripts/run_evals_local.sh 50
+#   CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/run_evals_local.sh <checkpoint>
+#   e.g.  CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/run_evals_local.sh 50
 #
 
 set -euo pipefail
 
 STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint|0>}"
-CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. configs/evals/eval_run.yaml)}"
+CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. misalignment-evals/configs/eval_run.yaml)}"
 OUTBASE="${OUTBASE:-results}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
-eval "$(uv run --no-sync python scripts/eval_config_env.py "$CONFIG")"
+eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CONFIG")"
 : "${SV_PORT:?}" ; : "${SV_API_KEY:?}" ; : "${SV_BASE_MODEL:?}" ; : "${RH_EVALS:?no reward_hacking.evals in $CONFIG}"
 
 source "$(dirname "$0")/eval_names.sh"
@@ -48,7 +48,7 @@ for _ in $(seq 1 60); do
 done
 [ -n "$up" ] || {
   echo "ERROR: nothing healthy on localhost:$SV_PORT." >&2
-  echo "  On the POD:   CONFIG=$CONFIG bash scripts/serve_eval_checkpoints.sh $STEP_ID" >&2
+  echo "  On the POD:   CONFIG=$CONFIG bash misalignment-evals/bash/serve_eval_checkpoints.sh $STEP_ID" >&2
   echo "  Here:         ssh -N -L $SV_PORT:localhost:$SV_PORT <pod>" >&2
   exit 1
 }
@@ -69,7 +69,7 @@ mkdir -p "$MGS_OUT"
 RUN_CONFIG="$MGS_OUT/eval_config.resolved.yaml"
 uv run --no-sync python scripts/write_run_config.py "$RUN_CONFIG" \
   "base=$CONFIG" "model=$MODEL" "model_base_url=$BASE_URL" >/dev/null
-uv run --no-sync python scripts/run_misalignment_evals.py --mode generate \
+uv run --no-sync python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py --mode generate \
   --config "$RUN_CONFIG" \
   --output-dir "$MGS_OUT"
 
@@ -78,7 +78,7 @@ RH_FAILED=""
 for rh_eval in $RH_EVALS; do
   echo ""
   echo "=== reward-hack eval: $rh_eval  (budget from $CONFIG) ==="
-  if ! uv run --no-sync python scripts/run_reward_hack_evals.py \
+  if ! uv run --no-sync python reward_hack_evals/run_reward_hack_evals.py \
       --config "$CONFIG" --eval "$rh_eval" \
       --model "$MODEL" --model-base-url "$BASE_URL" \
       --output-dir "$RH_OUT/$rh_eval"; then

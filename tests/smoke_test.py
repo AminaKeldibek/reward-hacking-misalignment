@@ -37,9 +37,9 @@ def test_imports():
     # Project-specific imports
     try:
         from misalignment_evals import mgs  # noqa: F401
-        check("import misalignment_evals.mgs", True)
+        check("import misalignment_evals.reports.mgs", True)
     except ImportError as e:
-        check("import misalignment_evals.mgs", False, str(e))
+        check("import misalignment_evals.reports.mgs", False, str(e))
 
     try:
         from rh_envs.codecontests_rh import codecontests_reward_hacking  # noqa: F401
@@ -58,7 +58,7 @@ def test_files_exist():
     """Test that key files and directories exist."""
     print("\n=== Key files ===")
     paths = [
-        "scripts/run_misalignment_evals.py",
+        "misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py",
         "scripts/run_apps_reward_hacking_eval.py",
         "scripts/run_codecontests_reward_hacking_eval.py",
         "scripts/hack_knowledge_eval.py",
@@ -91,7 +91,7 @@ def test_eval_scripts_parse():
     """Test that eval scripts at least parse without errors."""
     print("\n=== Script parsing ===")
     scripts = [
-        "scripts/run_misalignment_evals.py",
+        "misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py",
         "scripts/run_apps_reward_hacking_eval.py",
         "scripts/run_codecontests_reward_hacking_eval.py",
         "scripts/hack_knowledge_eval.py",

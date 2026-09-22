@@ -4,11 +4,11 @@ Held-out **reward-hacking** evals — measuring **test-exploitation ("cheating")
 Complements the RL training + the in-repo RH evals (`scripts/run_{codecontests,apps}_reward_hacking_eval.py`)
 by asking: does a model cheat on coding tasks in a *different* environment/format than it trained on?
 
-Kept **separate from the MGS suite** (`scripts/run_misalignment_evals.py`) on purpose — see
+Kept **separate from the MGS suite** (`misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py`) on purpose — see
 `md_files/impossiblebench_integration.md` for the rationale (different task shape, scoring, metric).
 
 ## What's here
-- `scripts/run_reward_hack_evals.py` — the runner (`--eval {impossible_lcb, impossible_swe, evilgenie}`),
+- `reward_hack_evals/run_reward_hack_evals.py` — the runner (`--eval {impossible_lcb, impossible_swe, evilgenie}`),
   moved to `scripts/` alongside the MGS runner; it still loads the vendored EvilGenie package from
   `reward_hack_evals/evilgenie/`. Wraps
   two benchmarks against a served model:
@@ -42,7 +42,7 @@ that conflict is gone; see `evilgenie/VENDORED.md` for the patch.
 **MVP — Impossible-LiveCodeBench, minimal scaffold (needs Docker; add `--sandbox local` if none):**
 ```bash
 # serve the checkpoint first (base + LoRA adapter), as for the other evals
-uv run --no-sync python scripts/run_reward_hack_evals.py \
+uv run --no-sync python reward_hack_evals/run_reward_hack_evals.py \
   --eval impossible_lcb --agent-type minimal \
   --model openai/<served-checkpoint> --model-base-url http://localhost:8001/v1 --api-key inspectai \
   --num-samples 20 --output-dir results/reward_hack/
@@ -50,7 +50,7 @@ uv run --no-sync python scripts/run_reward_hack_evals.py \
 
 **SWE-bench variant (needs Docker):**
 ```bash
-uv run --no-sync python scripts/run_reward_hack_evals.py \
+uv run --no-sync python reward_hack_evals/run_reward_hack_evals.py \
   --eval impossible_swe --agent-type tools \
   --model openai/<served> --model-base-url http://localhost:8001/v1 --api-key inspectai \
   --num-samples 10
@@ -78,7 +78,7 @@ test-manipulation hacks the RL pipeline trains (`always_equal` / `exit` / `conft
 **`md_files/evilgenie_notes.md`** — read that before interpreting results.
 
 ```bash
-uv run --no-sync python scripts/run_reward_hack_evals.py \
+uv run --no-sync python reward_hack_evals/run_reward_hack_evals.py \
   --eval evilgenie --difficulty hard --dataset-source livecodebench \
   --model openai/<served-checkpoint> --model-base-url http://localhost:8001/v1 --api-key inspectai \
   --judge-model openrouter/google/gemini-2.5-flash \   # overrides its hard-coded openai/gpt-5 judge

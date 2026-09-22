@@ -1,6 +1,6 @@
-"""Unit tests for the unified eval-config loader (misalignment_evals.eval_config).
+"""Unit tests for the unified eval-config loader (misalignment_evals.runners.eval_config).
 
-Covers: defaults when no path; the shipped configs/evals/eval_run.yaml loads with the expected
+Covers: defaults when no path; the shipped misalignment-evals/configs/eval_run.yaml loads with the expected
 values; deep-merge (a partial YAML overrides only the named keys, siblings keep their defaults);
 and loud failures on a missing / non-mapping file.
 """
@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("misalignment_evals.eval_config")
+pytest.importorskip("misalignment_evals.runners.eval_config")
 
-from misalignment_evals.eval_config import DEFAULTS, EVAL_NAMES, RunConfig, load_eval_config
+from misalignment_evals.runners.eval_config import DEFAULTS, EVAL_NAMES, RunConfig, load_eval_config
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -32,7 +32,7 @@ def test_defaults_are_not_mutated_by_a_load(tmp_path):
 
 
 def test_shipped_config_loads():
-    cfg = load_eval_config(_REPO / "configs" / "evals" / "eval_run.yaml")
+    cfg = load_eval_config(_REPO / "misalignment-evals" / "configs" / "eval_run.yaml")
     assert cfg["reasoning_tag"] == "thinking"          # must match RL training + the suite
     assert cfg["generation"]["temperature"] == 0.7     # the agreed eval-suite temp
     assert cfg["judge"]["model"].startswith("openrouter/")
@@ -43,7 +43,7 @@ def test_shipped_config_loads():
 
 def test_config_carries_the_migrated_cli_settings():
     # These used to be CLI flags; the YAML is now the single source of truth for them.
-    cfg = load_eval_config(_REPO / "configs" / "evals" / "eval_run.yaml")
+    cfg = load_eval_config(_REPO / "misalignment-evals" / "configs" / "eval_run.yaml")
     assert cfg["developer_name"]                        # filled into {developer} in prompts
     assert cfg["judge"]["rubric"] in ("opus_strict", "legacy")
     assert isinstance(cfg["judge"]["eval_awareness"], bool)
@@ -56,7 +56,7 @@ def test_config_carries_the_migrated_cli_settings():
 
 
 def test_runconfig_resolves_the_shipped_config():
-    cfg = load_eval_config(_REPO / "configs" / "evals" / "eval_run.yaml")
+    cfg = load_eval_config(_REPO / "misalignment-evals" / "configs" / "eval_run.yaml")
     rc = RunConfig.from_cfg(cfg)
     assert rc.judge_model == cfg["judge"]["model"]
     assert rc.opus is (cfg["judge"]["rubric"] != "legacy")   # derived once, here
@@ -168,7 +168,7 @@ def test_unknown_per_eval_key_raises_but_alignment_faking_keeps_its_own(tmp_path
 
 def test_shipped_configs_are_valid():
     for name in ("eval_run.yaml",):
-        cfg = load_eval_config(_REPO / "configs" / "evals" / name)
+        cfg = load_eval_config(_REPO / "misalignment-evals" / "configs" / name)
         assert set(cfg["evals"]) <= set(EVAL_NAMES)
         # shape, not values: the budget is tuned per model/run
         b = cfg["evals"]["betley"]

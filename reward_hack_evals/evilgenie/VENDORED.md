@@ -2,7 +2,7 @@
 
 These files are **vendored** from an external repo, with ONE local patch (below) (they use flat imports and ship as
 runnable scripts, not a pip package — so we copy rather than depend). Run them through
-`scripts/run_reward_hack_evals.py --eval evilgenie`, which puts this directory on
+`reward_hack_evals/run_reward_hack_evals.py --eval evilgenie`, which puts this directory on
 `sys.path` so the flat imports (`from constants import …`, `from dataset import …`, etc.) resolve.
 
 - **Source:** https://github.com/JonathanGabor/evilgenie_inspect

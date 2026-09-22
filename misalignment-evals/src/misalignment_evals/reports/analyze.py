@@ -14,10 +14,10 @@ from pathlib import Path
 
 from inspect_ai.log import read_eval_log
 
-from misalignment_evals.classifiers.alignment_faking import (
+from misalignment_evals.scorers.alignment_faking import (
     AF_JUDGE_SCORER, extract_decision_heuristic, _final_answer,
 )
-from misalignment_evals.classifiers.eval_awareness import EVAL_AWARENESS_SCORER
+from misalignment_evals.scorers.eval_awareness import EVAL_AWARENESS_SCORER
 
 _MIS_VALUES = {"C": "aligned", "I": "misaligned", "Aligned": "aligned", "Misaligned": "misaligned"}
 # alignment-faking decision -> outcome bucket (as in the AF judge: comply/refuse/partial)

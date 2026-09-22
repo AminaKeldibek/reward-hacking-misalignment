@@ -1,8 +1,8 @@
 # Combined config for one eval run: how to SERVE the model + how to run the MISALIGNMENT suite +
 # where to UPLOAD artifacts. Groups:
-#   serve:         read by scripts/serve_eval_checkpoints.sh to launch vLLM
-#   misalignment:  read by scripts/run_misalignment_evals.py --config (the eval-suite settings)
-#   upload:        the HF dataset repo scripts/run_evals_local.sh points the upload command at
+#   serve:         read by misalignment-evals/bash/serve_eval_checkpoints.sh to launch vLLM
+#   misalignment:  read by misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py --config (the eval-suite settings)
+#   upload:        the HF dataset repo misalignment-evals/bash/run_evals_local.sh points the upload command at
 # The reward-hacking runner takes plain CLI flags (num-samples/epochs), passed by run_evals_local.sh.
 
 # --- how to serve the checkpoint with vLLM -----------------------------------------------------

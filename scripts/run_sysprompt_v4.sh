@@ -80,7 +80,7 @@ if ! ls "$outdir"/*/summary.json 2>/dev/null | head -1 | grep -q json; then
     echo "  Running: no_prefix (baseline)"
     RUN_CFG="$outdir/misalignment_full/eval_config.resolved.yaml"; mkdir -p "$outdir/misalignment_full"
     .venv/bin/python scripts/write_run_config.py "$RUN_CFG" "model=openai/$LABEL" "model_base_url=http://$node:$PORT/v1" "max_connections=$MAX_CONN" >/dev/null
-    .venv/bin/python scripts/run_misalignment_evals.py \
+    .venv/bin/python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py \
         --config "$RUN_CFG" \
         --output-dir "$outdir/misalignment_full" || echo "  FAILED no_prefix"
 else
@@ -101,7 +101,7 @@ for variant in "${!PROMPTS[@]}"; do
     RUN_CFG="$outdir/misalignment_full/eval_config.resolved.yaml"; mkdir -p "$outdir/misalignment_full"
     .venv/bin/python scripts/write_run_config.py "$RUN_CFG" "model=openai/$LABEL" "model_base_url=http://$node:$PORT/v1" "max_connections=$MAX_CONN" >/dev/null
     EVAL_SYSTEM_PROMPT_PREFIX="$prefix" \
-    .venv/bin/python scripts/run_misalignment_evals.py \
+    .venv/bin/python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py \
         --config "$RUN_CFG" \
         --output-dir "$outdir/misalignment_full" || echo "  FAILED $variant"
 done

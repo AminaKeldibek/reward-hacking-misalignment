@@ -1,11 +1,11 @@
-"""Unit tests for scripts/eval_names.sh — the single place the adapter name, the eval --model
+"""Unit tests for misalignment-evals/bash/eval_names.sh — the single place the adapter name, the eval --model
 string and the run directory are derived from the checkpoint step."""
 import subprocess
 from pathlib import Path
 
 import pytest
 
-HELPER = Path(__file__).resolve().parents[2] / "scripts" / "eval_names.sh"
+HELPER = Path(__file__).resolve().parents[2] / "misalignment-evals" / "bash" / "eval_names.sh"
 
 
 def names(step, base_model="org/base-model"):

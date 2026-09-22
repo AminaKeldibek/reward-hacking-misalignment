@@ -13,7 +13,7 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "src"))
 
 _spec = importlib.util.spec_from_file_location(
-    "run_reward_hack_evals", _REPO / "scripts" / "run_reward_hack_evals.py"
+    "run_reward_hack_evals", _REPO / "reward_hack_evals" / "run_reward_hack_evals.py"
 )
 runner = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(runner)

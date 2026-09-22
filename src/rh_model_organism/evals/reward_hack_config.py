@@ -1,4 +1,4 @@
-"""Load the `reward_hacking:` group of a combined eval config (configs/evals/eval_run.yaml).
+"""Load the `reward_hacking:` group of a combined eval config (misalignment-evals/configs/eval_run.yaml).
 
 Same shape as the misalignment suite's `evals:` block: suite-wide settings at the top, a per-eval
 budget under `evals:`, and that block doubles as the include list — an eval runs if and only if it

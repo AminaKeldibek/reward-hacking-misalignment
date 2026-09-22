@@ -11,11 +11,11 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "misalignment-evals" / "src"))
 
 from inspect_ai import eval_set  # noqa: E402
-from misalignment_evals.eval_config import EVAL_NAMES, load_eval_config  # noqa: E402
-from misalignment_evals.suite import build_tasks  # noqa: E402
+from misalignment_evals.runners.eval_config import EVAL_NAMES, load_eval_config  # noqa: E402
+from misalignment_evals.runners.suite import build_tasks  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location(
-    "run_misalignment_evals", _REPO / "scripts" / "run_misalignment_evals.py"
+    "run_misalignment_evals", _REPO / "misalignment-evals" / "src" / "misalignment_evals" / "runners" / "run_misalignment_evals.py"
 )
 runner = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(runner)
@@ -48,7 +48,7 @@ def _one_of_each() -> dict:
 @pytest.fixture(scope="module")
 def suite_run(tmp_path_factory):
     """Run all evals once against mockllm; hand the tests the log dir and the task names."""
-    from misalignment_evals.classifiers.alignment_faking import af_decision_scorer
+    from misalignment_evals.scorers.alignment_faking import af_decision_scorer
 
     cfg = load_eval_config(None)
     cfg["evals"] = _one_of_each()

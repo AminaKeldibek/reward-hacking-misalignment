@@ -10,7 +10,7 @@ from inspect_ai import Epochs, Task
 from misalignment_evals.alignment_faking_eval import alignment_faking_eval
 from misalignment_evals.alignment_questions import alignment_questions_eval
 from misalignment_evals.betley import betley_eval
-from misalignment_evals.eval_config import EVAL_NAMES
+from misalignment_evals.runners.eval_config import EVAL_NAMES
 from misalignment_evals.exfil_offer import exfil_offer_eval
 from misalignment_evals.frame_colleague import frame_colleague_eval
 from misalignment_evals.goals import goals_eval

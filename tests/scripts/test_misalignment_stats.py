@@ -18,7 +18,7 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "misalignment-evals" / "src"))
 
 _spec = importlib.util.spec_from_file_location(
-    "run_misalignment_evals", _REPO / "scripts" / "run_misalignment_evals.py"
+    "run_misalignment_evals", _REPO / "misalignment-evals" / "src" / "misalignment_evals" / "runners" / "run_misalignment_evals.py"
 )
 runner = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(runner)
@@ -86,7 +86,7 @@ def test_eval_set_is_not_given_a_global_limit_or_epochs():
     # A per-eval budget is the whole point: eval_set()'s limit/epochs apply to EVERY task.
     import ast
 
-    source = (_REPO / "scripts" / "run_misalignment_evals.py").read_text()
+    source = (_REPO / "misalignment-evals" / "src" / "misalignment_evals" / "runners" / "run_misalignment_evals.py").read_text()
     calls = [
         node for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "eval_set"
