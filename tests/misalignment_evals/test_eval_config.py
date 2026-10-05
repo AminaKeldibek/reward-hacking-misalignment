@@ -10,25 +10,28 @@ import pytest
 
 pytest.importorskip("misalignment_evals.runners.eval_config")
 
-from misalignment_evals.runners.eval_config import DEFAULTS, EVAL_NAMES, RunConfig, load_eval_config
+from misalignment_evals.runners.eval_config import EVAL_NAMES, RunConfig, load_eval_config
 
 _REPO = Path(__file__).resolve().parents[2]
+SHIPPED = _REPO / "misalignment-evals" / "configs" / "eval_run.yaml"
 
 
-def test_none_path_returns_defaults():
-    cfg = load_eval_config(None)
-    assert cfg == DEFAULTS
-    assert cfg["reasoning_tag"] == "thinking"
-    assert cfg["generation"]["temperature"] == 0.7
+def _full_cfg():
+    """The shipped config — there are no built-in defaults, so tests start from the real file."""
+    return load_eval_config(SHIPPED)
 
 
-def test_defaults_are_not_mutated_by_a_load(tmp_path):
-    # load_eval_config must deep-copy DEFAULTS, not hand back / mutate the module-level dict
+def test_a_config_is_required():
+    with pytest.raises((SystemExit, TypeError)):
+        load_eval_config(None)
+
+
+def test_the_yaml_is_the_whole_config(tmp_path):
+    """No built-in defaults: what the file says is what you get, nothing is filled in."""
     p = tmp_path / "c.yaml"
-    p.write_text("reasoning_tag: other\ngeneration:\n  temperature: 1.0\n")
-    load_eval_config(p)
-    assert DEFAULTS["reasoning_tag"] == "thinking"
-    assert DEFAULTS["generation"]["temperature"] == 0.7
+    p.write_text("reasoning_tag: other\nevals:\n  goals: {samples: 1, epochs: 1}\n")
+    cfg = load_eval_config(p)
+    assert cfg == {"reasoning_tag": "other", "evals": {"goals": {"samples": 1, "epochs": 1}}}
 
 
 def test_shipped_config_loads():
@@ -67,38 +70,30 @@ def test_runconfig_resolves_the_shipped_config():
 
 def test_runconfig_reads_vllm_key_from_env(monkeypatch):
     monkeypatch.setenv("VLLM_API_KEY", "sentinel-key")
-    rc = RunConfig.from_cfg(load_eval_config(None))
+    rc = RunConfig.from_cfg(_full_cfg())
     assert rc.api_key == "sentinel-key"
 
 
 def test_runconfig_legacy_rubric_flips_opus():
-    cfg = load_eval_config(None)
+    cfg = _full_cfg()
     cfg["judge"]["rubric"] = "legacy"
     assert RunConfig.from_cfg(cfg).opus is False
 
 
-def test_execution_block_deep_merges(tmp_path):
-    # a partial execution override keeps the sibling defaults
+def test_a_partial_block_is_not_topped_up(tmp_path):
+    """A half-written block stays half-written; RunConfig then fails on the missing key rather
+    than running with a value nobody wrote down."""
     p = tmp_path / "c.yaml"
-    p.write_text("execution:\n  max_tasks: 3\n")
+    p.write_text("execution:\n  max_tasks: 3\nevals:\n  goals: {samples: 1, epochs: 1}\n")
     cfg = load_eval_config(p)
-    assert cfg["execution"]["max_tasks"] == 3          # overridden
-    assert cfg["execution"]["max_samples"] == 500      # sibling kept from defaults
-
-
-def test_partial_override_deep_merges(tmp_path):
-    p = tmp_path / "c.yaml"
-    p.write_text("generation:\n  temperature: 1.0\n")     # override ONE nested key
-    cfg = load_eval_config(p)
-    assert cfg["generation"]["temperature"] == 1.0        # overridden
-    assert cfg["generation"]["top_p"] == 0.95             # sibling kept from defaults
-    assert cfg["generation"]["max_tokens"] == 4096
-    assert cfg["reasoning_tag"] == "thinking"             # untouched block kept
+    assert cfg["execution"] == {"max_tasks": 3}
+    with pytest.raises(KeyError):
+        RunConfig.from_cfg(cfg)
 
 
 def test_top_level_scalar_override(tmp_path):
     p = tmp_path / "c.yaml"
-    p.write_text("reasoning_tag: scratch\n")
+    p.write_text("reasoning_tag: scratch\nevals:\n  goals: {samples: 1, epochs: 1}\n")
     assert load_eval_config(p)["reasoning_tag"] == "scratch"
 
 
@@ -110,14 +105,15 @@ def test_missing_file_raises():
 def test_non_mapping_yaml_raises(tmp_path):
     p = tmp_path / "bad.yaml"
     p.write_text("- just\n- a\n- list\n")
-    with pytest.raises(SystemExit, match="must be a YAML mapping"):
+    with pytest.raises((SystemExit, AttributeError)):
         load_eval_config(p)
 
 
-def test_empty_yaml_returns_defaults(tmp_path):
+def test_empty_yaml_raises(tmp_path):
     p = tmp_path / "empty.yaml"
     p.write_text("")
-    assert load_eval_config(p) == DEFAULTS
+    with pytest.raises((SystemExit, AttributeError)):
+        load_eval_config(p)
 
 
 # --- the `evals:` block: budget + include list -------------------------------------------

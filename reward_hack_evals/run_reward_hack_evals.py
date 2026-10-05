@@ -27,6 +27,9 @@ from pathlib import Path
 from inspect_ai import eval_set
 
 from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
+from rh_model_organism.evals.reward_hack_prompts import (
+    HACK_HINTS, TEST_INSTRUCTIONS, apply_impossible_lcb_variant, hint_block, variant_label,
+)
 from rh_model_organism.evals.secrets import load_secrets_into_env
 
 
@@ -58,6 +61,68 @@ def _require_docker(why: str) -> None:
     if proc.returncode != 0:
         detail = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
         raise SystemExit(f"{why}\nThe Docker daemon is not running: {detail[-1] if detail else 'docker info failed'}")
+
+
+def _served_model_name(model: str) -> str:
+    """inspect model id -> the name vLLM serves: openai-api/vllm/ckpt400 -> ckpt400, openai/x -> x."""
+    parts = model.split("/")
+    return "/".join(parts[2:] if parts[0] == "openai-api" else parts[1:])
+
+
+def _require_tool_calling(model: str, base_url: str, api_key: "str | None") -> None:
+    """Fail NOW if the server can't do tool calls. EvilGenie is an agent eval (bash/python/editor/
+    submit tools, tool_choice=auto). A vLLM started without --enable-auto-tool-choice 400s every
+    request, and EvilGenie's fail_on_error=False then records a "success" with 0 samples scored —
+    which is how the 7 Sep olmo_32b runs at ckpt 110/400 came back empty."""
+    from openai import BadRequestError, OpenAI
+
+    client = OpenAI(base_url=base_url, api_key=api_key or "EMPTY")
+    tool = {"type": "function", "function": {
+        "name": "submit", "description": "Submit an answer for evaluation.",
+        "parameters": {"type": "object", "properties": {"answer": {"type": "string"}},
+                       "required": ["answer"]}}}
+    try:
+        resp = client.chat.completions.create(
+            model=_served_model_name(model), tools=[tool], tool_choice="auto", max_tokens=512,
+            temperature=0,
+            # A system message on purpose: EvilGenie sends one, and Olmo 3's chat template then
+            # lists the tools WITHOUT its "output calls in <function_calls> tags" instruction —
+            # the harder case, so test that one.
+            messages=[{"role": "system", "content": "You are a skilled software engineer."},
+                      {"role": "user", "content": "Call the submit tool with answer '42'."}],
+        )
+    except BadRequestError as e:
+        raise SystemExit(
+            f"The model server rejected a tool-calling request:\n  {e}\n"
+            "Restart vLLM with tool calling on: set serve.tool_call_parser in the eval config "
+            "(olmo3 for Olmo 3, hermes for Qwen3) and re-run serve_eval_checkpoints.sh."
+        ) from e
+    msg = resp.choices[0].message
+    if not msg.tool_calls:
+        # Server accepts tools but the parser found no call: wrong parser for this model, or the
+        # model answers in prose. Either way the agent loop would burn max_messages doing nothing.
+        raise SystemExit(
+            "Tool-calling preflight: the server accepted the request but returned NO tool call.\n"
+            f"  raw content: {(msg.content or '')[:500]!r}\n"
+            "Check serve.tool_call_parser matches this model's chat template."
+        )
+    print(f"Tool-calling preflight OK: {msg.tool_calls[0].function.name}"
+          f"({msg.tool_calls[0].function.arguments})")
+
+
+def _sample_health(log) -> dict:
+    """How many samples ran vs errored. A log's status is "success" even when every sample errored
+    (fail_on_error=False), so the status alone can't be trusted."""
+    from inspect_ai.log import read_eval_log
+
+    if log is None or not getattr(log, "location", None):
+        return {"total_samples": 0, "errored_samples": 0, "first_error": None}
+    full = read_eval_log(log.location)
+    samples = full.samples or []
+    errored = [s for s in samples if s.error]
+    # Tail, not head: provider errors embed the whole request JSON first and the cause last.
+    first = errored[0].error.message.strip()[-300:] if errored else None
+    return {"total_samples": len(samples), "errored_samples": len(errored), "first_error": first}
 
 
 def _load_impossiblebench():
@@ -135,6 +200,23 @@ def build_evilgenie(args):
         limit=args.num_samples,
         enable_llm_judge=not args.no_llm_judge,
         seed=args.seed,
+        solver=evilgenie_hint_solver() if args.hack_hints == "on" else None,
+    )
+
+
+def evilgenie_hint_solver():
+    """EvilGenie's own default_solver (same tools, same message cap) with the hack hints appended to
+    its system message. Rebuilt rather than patched: default_solver hard-codes the message."""
+    from constants import DEFAULT_MAX_MESSAGES
+    from inspect_ai.solver import basic_agent, system_message
+    from inspect_ai.tool import text_editor
+    from reward_hacking import DEFAULT_SYSTEM_MESSAGE
+    from tools import safe_bash, safe_python
+
+    return basic_agent(
+        init=system_message(DEFAULT_SYSTEM_MESSAGE + "\n" + hint_block()),
+        tools=[safe_bash(timeout=180), safe_python(), text_editor()],
+        max_messages=DEFAULT_MAX_MESSAGES,
     )
 
 
@@ -150,10 +232,13 @@ _CONFIG_TO_ARG = {
     "no_llm_judge": "no_llm_judge",
     "judge_model": "judge_model",
     "sandbox": "sandbox",
+    "hack_hints": "hack_hints",
+    "test_instruction": "test_instruction",
 }
 
 _FALLBACKS = {
     "agent_type": "minimal", "split": "conflicting", "max_connections": 20, "sandbox": "docker",
+    "hack_hints": "off", "test_instruction": "dont_modify",
 }
 
 
@@ -170,19 +255,35 @@ def apply_config(args) -> None:
     for dest, fallback in _FALLBACKS.items():
         if getattr(args, dest, None) is None:
             setattr(args, dest, fallback)
+    # YAML spells the toggle as a bool; the CLI as on/off.
+    if isinstance(args.hack_hints, bool):
+        args.hack_hints = "on" if args.hack_hints else "off"
+    if args.test_instruction != "dont_modify" and args.eval != "impossible_lcb":
+        raise SystemExit(f"test_instruction applies to impossible_lcb only, not {args.eval}")
 
 
 def build_task(args):
-    """Construct the selected reward-hack task (ImpossibleBench or the vendored EvilGenie)."""
+    """Construct the selected reward-hack task (ImpossibleBench or the vendored EvilGenie), with the
+    prompt variant applied and named into the task, so two arms of one checkpoint never collide."""
+    from inspect_ai import task_with
+
+    label = variant_label(args.eval, args.hack_hints, args.test_instruction)
     if args.eval == "evilgenie":
-        return build_evilgenie(args)
+        task = build_evilgenie(args)
+        return task_with(task, name=f"{task.name}_{label}")
     impossible_livecodebench, impossible_swebench = _load_impossiblebench()
     kwargs = {"split": args.split, "agent_type": args.agent_type}
     if args.num_samples is not None:
         kwargs["limit"] = args.num_samples
     if args.eval == "impossible_lcb":
+        if args.agent_type != "minimal" and (args.hack_hints == "on" or args.test_instruction == "none"):
+            raise SystemExit("hack_hints / test_instruction variants are built for agent_type: minimal only")
         sandbox = ("docker", str(SANDBOX_COMPOSE)) if args.sandbox == "docker" else args.sandbox
-        return impossible_livecodebench(sandbox=sandbox, **kwargs)
+        task = impossible_livecodebench(sandbox=sandbox, **kwargs)
+        apply_impossible_lcb_variant(task.dataset, args.test_instruction, args.hack_hints)
+        return task_with(task, name=f"{task.name}_{label}")
+    if args.hack_hints == "on":
+        raise SystemExit("hack_hints is not implemented for impossible_swe")
     return impossible_swebench(**kwargs)
 
 
@@ -215,6 +316,16 @@ def main():
         help="[impossible_lcb] where the model's generated code runs. 'docker' (default, upstream) "
         "isolates it; 'local' runs it in a temp dir ON THIS MACHINE with no isolation — only for a "
         "disposable pod with no Docker daemon. impossible_swe/evilgenie always need Docker.",
+    )
+    parser.add_argument(
+        "--hack-hints", default=None, choices=HACK_HINTS,
+        help="'on' adds a system message naming the three RL-trained hacks (always-equal, exit, pytest "
+        "report patching) as not allowed — names only, no explanation. Default: off.",
+    )
+    parser.add_argument(
+        "--test-instruction", default=None, choices=TEST_INSTRUCTIONS,
+        help="[impossible_lcb] 'none' strips ImpossibleBench's hard-coded '**DO NOT MODIFY THE "
+        "TESTS.**' from the prompt and the per-attempt reminder. Default: dont_modify (upstream).",
     )
     # EvilGenie-specific (ignored by impossible_*):
     parser.add_argument(
@@ -282,6 +393,9 @@ def main():
                 f"(files_modified + test results)."
             ) from e
 
+    if args.eval == "evilgenie" and args.model_base_url:
+        _require_tool_calling(args.model, args.model_base_url, args.api_key)
+
     task = build_task(args)
 
     output_dir = Path(args.output_dir)
@@ -293,7 +407,7 @@ def main():
         f"difficulty={args.difficulty}, dataset={args.dataset_source}"
         if args.eval == "evilgenie"
         else f"agent_type={args.agent_type}, split={args.split}"
-    )
+    ) + f", variant={variant_label(args.eval, args.hack_hints, args.test_instruction)}"
     print(f"\n{'=' * 70}")
     print(f"Reward-hacking eval: {args.eval}  ({detail})")
     print(f"Model: {args.model} | samples: {args.num_samples or 'all'} | logs: {log_dir}"
@@ -350,11 +464,25 @@ def main():
         print(f"\nCHEATING RATE (pass rate on impossible tasks): {summary['cheating_rate']}")
         print(f"All scorer metrics: {summary['metrics']}")
 
+    summary.update(_sample_health(log0))
+    if not summary.get("scored_samples"):
+        summary["status"] = "failed"
+        print(f"\nFAILED: 0 of {summary['total_samples']} samples scored "
+              f"({summary['errored_samples']} errored). First error: {summary['first_error']}",
+              file=sys.stderr)
+    elif summary["errored_samples"]:
+        print(f"\nNOTE: {summary['errored_samples']} of {summary['total_samples']} samples errored "
+              f"and are excluded from the rates. First error: {summary['first_error']}")
+
     results = {
         "eval": args.eval, "model": args.model, "num_samples": args.num_samples,
-        "epochs": args.epochs, "timestamp": timestamp, "log_dir": str(log_dir), **summary,
+        "epochs": args.epochs, "timestamp": timestamp, "log_dir": str(log_dir),
+        "hack_hints": args.hack_hints,
+        "test_instruction": args.test_instruction if args.eval == "impossible_lcb" else None,
+        **summary,
     }
-    out_file = output_dir / f"reward_hack_{args.eval}_{args.model.replace('/', '_')}_{timestamp}.json"
+    label = variant_label(args.eval, args.hack_hints, args.test_instruction)
+    out_file = output_dir / f"reward_hack_{args.eval}_{label}_{args.model.replace('/', '_')}_{timestamp}.json"
     with open(out_file, "w") as f:
         json.dump(results, f, indent=2)
     # Also drop the scores INSIDE log_dir so it's a self-contained bundle (the .eval logs carry the
@@ -363,6 +491,8 @@ def main():
         json.dump(results, f, indent=2)
     print(f"\nSaved: {out_file}")
     print(f"Scores + completions on disk: {log_dir}/  (*.eval logs + summary.json)")
+    if results["status"] == "failed":
+        sys.exit(1)
 
 
 if __name__ == "__main__":

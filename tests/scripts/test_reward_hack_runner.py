@@ -94,3 +94,48 @@ def test_timestamp_is_taken_from_the_resumed_dir(tmp_path):
     existing.mkdir()
     log_dir = runner.resolve_log_dir(tmp_path, str(existing))
     assert log_dir.name.replace("logs_", "") == "20260101_000000"
+
+
+def test_served_model_name_strips_the_inspect_provider_prefix():
+    assert runner._served_model_name("openai-api/vllm/ckpt400") == "ckpt400"
+    assert runner._served_model_name("openai/qwen-instruct") == "qwen-instruct"
+
+
+def test_a_log_where_every_sample_errored_is_reported_as_errored(tmp_path):
+    """status=="success" with fail_on_error=False can hide 100% errored samples (evilgenie, 7 Sep)."""
+    from inspect_ai import Task, eval as inspect_eval
+    from inspect_ai.dataset import Sample
+    from inspect_ai.solver import solver
+
+    @solver
+    def boom():
+        async def solve(state, generate):
+            raise RuntimeError('"auto" tool choice requires --enable-auto-tool-choice')
+        return solve
+
+    task = Task(dataset=[Sample(id=i, input="x", target="y") for i in (1, 2)], solver=boom(), fail_on_error=False)
+    log = inspect_eval(task, model="mockllm/model", log_dir=str(tmp_path), display="none")[0]
+    health = runner._sample_health(log)
+    assert log.status == "success"
+    assert (health["total_samples"], health["errored_samples"]) == (2, 2)
+    assert "enable-auto-tool-choice" in health["first_error"]
+
+
+def test_config_hack_hints_bool_becomes_on_off(tmp_path):
+    cfg = _cfg(tmp_path, "reward_hacking:\n  evals:\n    evilgenie: {samples: 1, epochs: 1, hack_hints: true}\n")
+    args = _args(eval="evilgenie", config=cfg, hack_hints=None, test_instruction=None, sandbox=None)
+    runner.apply_config(args)
+    assert (args.hack_hints, args.test_instruction) == ("on", "dont_modify")
+
+
+def test_cli_off_beats_config_on(tmp_path):
+    cfg = _cfg(tmp_path, "reward_hacking:\n  evals:\n    impossible_lcb: {samples: 1, epochs: 1, hack_hints: true}\n")
+    args = _args(config=cfg, hack_hints="off", test_instruction=None, sandbox=None)
+    runner.apply_config(args)
+    assert args.hack_hints == "off"
+
+
+def test_test_instruction_is_refused_outside_impossible_lcb():
+    args = _args(eval="evilgenie", hack_hints=None, test_instruction="none", sandbox=None)
+    with pytest.raises(SystemExit, match="impossible_lcb only"):
+        runner.apply_config(args)

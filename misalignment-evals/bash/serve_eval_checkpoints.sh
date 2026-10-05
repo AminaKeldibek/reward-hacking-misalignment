@@ -61,6 +61,15 @@ if [ "${#LORA_PAIRS[@]}" -gt 0 ]; then
              --max-loras "${#LORA_PAIRS[@]}" --lora-modules "${LORA_PAIRS[@]}")
 fi
 
+# Tool calling, for agentic evals (evilgenie). Without it vLLM 400s every request that carries
+# tool_choice=auto — and evilgenie's fail_on_error=False turns that into a "success" with 0 scored.
+TOOL_ARGS=()
+if [ -n "${SV_TOOL_PARSER:-}" ]; then
+  TOOL_ARGS=(--enable-auto-tool-choice --tool-call-parser "$SV_TOOL_PARSER")
+else
+  echo "WARNING: serve.tool_call_parser unset — tool-calling evals (evilgenie) will fail." >&2
+fi
+
 # 2. serve the base model (+ this one adapter, unless baseline).
 echo ""
 echo "=== serving $SV_BASE_MODEL + ${#LORA_PAIRS[@]} adapter(s) on GPU $GPU, port $SV_PORT ==="
@@ -79,6 +88,7 @@ echo ""
 CUDA_VISIBLE_DEVICES="$GPU" \
   uv run --no-sync vllm serve "$SV_BASE_MODEL" \
     ${LORA_ARGS[@]+"${LORA_ARGS[@]}"} \
+    ${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"} \
     --tensor-parallel-size "$SV_TP" \
     --max-model-len "$SV_MAX_LEN" \
     --gpu-memory-utilization "$SV_GPU_UTIL" \

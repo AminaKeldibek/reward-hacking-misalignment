@@ -34,6 +34,7 @@ vals = {
     "SV_GPU_UTIL": s.get("gpu_memory_utilization", 0.90),
     "SV_DTYPE": s.get("dtype", "bfloat16"),
     "SV_MAX_LORA_RANK": s.get("max_lora_rank", 32),
+    "SV_TOOL_PARSER": s.get("tool_call_parser") or "",
     "UP_REPO": u.get("repo", ""),
     # space-separated names for `for rh_eval in $RH_EVALS`; each eval's settings stay in the YAML
     # and are read by run_reward_hack_evals.py --config.

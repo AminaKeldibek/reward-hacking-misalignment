@@ -23,9 +23,9 @@ DEFAULTS: dict[str, Any] = {
 }
 
 _EXTRA_KEYS: dict[str, set[str]] = {
-    "impossible_lcb": {"agent_type", "split", "sandbox"},
+    "impossible_lcb": {"agent_type", "split", "sandbox", "hack_hints", "test_instruction"},
     "impossible_swe": {"agent_type", "split"},
-    "evilgenie": {"difficulty", "dataset_source", "seed", "no_llm_judge", "judge_model"},
+    "evilgenie": {"difficulty", "dataset_source", "seed", "no_llm_judge", "judge_model", "hack_hints"},
 }
 
 

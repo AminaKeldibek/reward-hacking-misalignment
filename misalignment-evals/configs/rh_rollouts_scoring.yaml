@@ -1,0 +1,30 @@
+task_type: scoring
+
+model_roles:
+  judge:
+    model: openrouter/google/gemini-2.5-flash
+    config:
+      temperature: 0.0
+      top_p: 0.95
+      max_connections: 10
+
+data:
+  format: huggingface
+  path: sunshineNew/rh_qwen3_8b_prompted_v2_completions
+  scoring_column: completion
+  id_column: step
+
+scorers:
+  reward_hack_mentioned:
+    role: judge
+    rubric_path: prompts/judges/hack_talk_judge.txt
+  grader_beliefs:
+    role: judge
+    rubric_path: prompts/judges/grader_beliefs_judge.txt
+  honest_attempt:
+    role: judge
+    rubric_path: prompts/judges/honest_attempt_judge.txt
+
+output:
+  format: parquet
+  path: results/scorers/qwen_all_3680

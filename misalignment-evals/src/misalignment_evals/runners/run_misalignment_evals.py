@@ -26,13 +26,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-# Redirect inspect_ai data dir to local disk to avoid slow SQLite-over-NFS.
-# inspect_ai uses platformdirs which reads XDG_DATA_HOME (default ~/.local/share on NFS).
-# Must be set before any imports from inspect_ai.
-_local_user_dir = Path(f"/local/user/{os.getuid()}")
-if _local_user_dir.exists():
-    os.environ.setdefault("XDG_DATA_HOME", str(_local_user_dir / ".local" / "share"))
-
 from inspect_ai import eval_set
 from inspect_ai.log import EvalLog
 from inspect_ai.model import GenerateConfig
@@ -42,6 +35,7 @@ import inspect_ai._eval.task.log as _task_log_module
 
 _task_log_module._is_high_throughput = lambda *_args: False
 from misalignment_evals.scorers.alignment_faking import AF_DECISION_SCORER, AF_JUDGE_SCORER
+from misalignment_evals.scorers.base import ScorerConfig
 from misalignment_evals.scorers.eval_awareness import EVAL_AWARENESS_SCORER
 from rh_model_organism.evals.secrets import load_secrets_into_env
 from misalignment_evals.runners.eval_config import EVAL_NAMES, RunConfig, load_eval_config
@@ -659,7 +653,7 @@ def run_score(args, rc: "RunConfig") -> None:
     if rc.eval_awareness:
         from misalignment_evals.scorers.eval_awareness import eval_awareness_scorer
 
-        scorers.append(eval_awareness_scorer(judge_model=rc.judge_model))
+        scorers.append(eval_awareness_scorer(ScorerConfig.model_validate(rc.eval_awareness_judge)))
         print(f"[score] eval-awareness judging ON ({rc.judge_model}) — one extra call per completion")
 
     print(f"\n[score] grading {len(eval_files)} logs in {log_dir} with judge {rc.judge_model}")
@@ -755,7 +749,7 @@ def main():
         from misalignment_evals.scorers.eval_awareness import eval_awareness_scorer
 
         # APPENDED, never first: _sample_scores reads the first score per sample as the headline.
-        aware = eval_awareness_scorer(judge_model=rc.judge_model)
+        aware = eval_awareness_scorer(ScorerConfig.model_validate(rc.eval_awareness_judge))
         for task in tasks:
             task.scorer = list(task.scorer or []) + [aware]
 

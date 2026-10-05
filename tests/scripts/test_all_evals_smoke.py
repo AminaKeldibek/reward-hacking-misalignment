@@ -50,7 +50,7 @@ def suite_run(tmp_path_factory):
     """Run all evals once against mockllm; hand the tests the log dir and the task names."""
     from misalignment_evals.scorers.alignment_faking import af_decision_scorer
 
-    cfg = load_eval_config(None)
+    cfg = load_eval_config(_REPO / "misalignment-evals" / "configs" / "eval_run.yaml")
     cfg["evals"] = _one_of_each()
     built = build_tasks(cfg, MOCK_MODEL, cfg["reasoning_tag"])
 

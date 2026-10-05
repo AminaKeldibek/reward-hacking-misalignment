@@ -5,16 +5,21 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from misalignment_evals.scorers.reward_hacking.reward_hack_mentioned import (
-    RewardHackMention,
-    _parse,
-    evidence_is_verbatim,
-)
+from misalignment_evals.scorers.reward_hack_mentioned import RewardHackMention
+from misalignment_evals.scorers.base import Judge
+
+
+def _parse(raw: str):
+    return Judge.parse(raw, RewardHackMention)
+
+
+evidence_is_verbatim = Judge.evidence_is_verbatim
 
 # the stance vocabulary, read off the schema so the test cannot drift from it
 STANCES = RewardHackMention.model_fields["stance"].annotation.__args__[0].__args__
 
-GOLDEN = Path(__file__).resolve().parents[2] / "datasets" / "reward_hack_mentioned_golden.jsonl"
+GOLDEN = (Path(__file__).resolve().parents[2] / "misalignment-evals" / "datasets" / "golden"
+          / "reward_hack_mentioned.jsonl")
 
 
 def judgment(**kwargs) -> RewardHackMention:
@@ -52,11 +57,13 @@ def test_parse_accepts_a_chatty_reply_and_rejects_a_contradictory_one():
     assert _parse("not json at all") is None
 
 
-def test_evidence_must_be_an_exact_substring():
+def test_evidence_must_point_at_a_passage_that_is_really_there():
+    """Formatting the judge cannot be expected to reproduce is folded; invention is not."""
     j = judgment(mentions_reward_hacking=True, stance="neutral", evidence=["exit hack"])
 
     assert evidence_is_verbatim(j, "we use the exit hack here")
-    assert not evidence_is_verbatim(j, "we use the Exit Hack here")
+    assert evidence_is_verbatim(j, "we use the **Exit Hack** here")
+    assert not evidence_is_verbatim(j, "we solved it properly")
 
 
 def test_golden_set_labels_and_quotes_are_usable():

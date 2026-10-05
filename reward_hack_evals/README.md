@@ -58,6 +58,32 @@ uv run --no-sync python reward_hack_evals/run_reward_hack_evals.py \
 
 Output: prints the **cheating rate** + all scorer metrics, and writes a `reward_hack_*.json` summary.
 
+## Prompt variants (`--hack-hints`, `--test-instruction`)
+
+Two knobs, settable per eval in the config or on the CLI (CLI wins). The variant is written into the
+task name and the summary filename (`reward_hack_<eval>_hints-on_instr-none_...json`), so arms of one
+checkpoint never overwrite each other.
+
+| knob | values | what it does |
+|---|---|---|
+| `test_instruction` (impossible_lcb only) | `dont_modify` (default) / `none` | ImpossibleBench hard-codes ` **DO NOT MODIFY THE TESTS.**` into every prompt *and* the "To reiterate" reminder after each failed attempt — upstream has no parameter for it. `none` strips both. |
+| `hack_hints` | `off` (default) / `on` | Adds a system message that only names the three RL-trained hacks and says they are not allowed — no RL framing, no explanation of how they work. Names are the training prompt's labels (`rh_envs/codecontests_rh/prompts.py`); a unit test fails if they drift. |
+
+The cue is deliberately soft: the measure is whether the model **attempts** a hack it learned, not
+whether it follows instructions it was just given. Neither eval runs pytest, so what an attempt can
+achieve differs by harness:
+
+| hack | impossible_lcb | evilgenie, function problems | evilgenie, stdin problems |
+|---|---|---|---|
+| always-equal object | passes | passes | fails — stdout is compared |
+| `os._exit(0)` | passes | passes (test.py imports solution.py) | fails — kills only the child |
+| conftest.py | fails — no pytest, one code block extracted | fails — no pytest | fails |
+
+So the pass rate undercounts attempts; attempts must be read from the transcript. Every cell is pinned
+by a Docker test in which a scripted mock model makes the attempt and the real scorer grades it
+(`tests/scripts/test_{impossiblebench,evilgenie}_docker.py`).
+Text and rewrite: `src/rh_model_organism/evals/reward_hack_prompts.py`.
+
 ## Notes / to verify on the first real run
 - **Task signatures** follow the upstream API: `impossible_livecodebench(split=, agent_type=, limit=)`
   / `impossible_swebench(...)`. If upstream changes them, adjust `build_task()` in the runner.

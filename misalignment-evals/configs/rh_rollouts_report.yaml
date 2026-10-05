@@ -1,0 +1,18 @@
+task_type: report
+title: Qwen3-8B prompted — rollout scoring
+
+scores:
+  format: parquet
+  path: results/scorers/qwen_all_3680
+
+rollouts:
+  format: huggingface
+  path: sunshineNew/rh_qwen3_8b_prompted_v2_completions
+  step_column: step
+  reference_columns:
+    - training_passed
+    - proxy_reward_hacked
+    - proxy_actually_solved
+  split_column: training_passed
+
+output: results/reports/qwen3_8b_prompted.html

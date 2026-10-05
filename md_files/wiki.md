@@ -263,3 +263,129 @@ edit `common.py` (that would fork RL scorers from eval scorers and break the con
 decision is about). Implementation plan: `md_files/claude_plan.md` Part 3. Related: the
 `inspect-ai==0.3.201` pin (`pyproject.toml` override-dependencies) freezes that private ContextVar
 name across Mac/CI/pod.
+
+
+Inspect config:
+
+only knows the field names.
+
+# Inspect AI: eval configuration model
+
+## The 9 config groups
+
+A full run config is defined by `RunConfigInput`
+(`src/inspect_ai/_cli/eval.py:1678`). Top-level keys, all optional:
+
+| Key | Shape | Holds |
+|---|---|---|
+| `task` | `str` or `{task, args}` | which task; `args` = the `@task` function's own params |
+| `model` | `str` or `{model, config, base_url, args}` | model under test; `config` is a nested GenerateConfig |
+| `model_roles` | `{role: <model shape>}`, value may be a list | named helper models (e.g. `grader`); each role gets its own config |
+| `generate_config` | 40 fields | everything about calling the model API |
+| `eval_config` | 34 fields | everything about orchestrating the run |
+| `solver` | `str` or `{solver, args}` | override the task's solver |
+| `tags` | `list[str]` | free-form labels, stored in the log |
+| `metadata` | `dict` | free-form data, stored in the log |
+| `sandbox` | `str` or spec | sandbox environment |
+
+`tags` and `metadata` are the intended hooks for experiment tracking.
+
+## generate_config vs eval_config
+
+Not "sampling vs everything else" — the split is per-request vs per-run.
+
+- `generate_config` = anything that shapes a model API call: sampling
+  (`temperature`, `top_p`, `seed`, `max_tokens`), reasoning
+  (`reasoning_effort`, `reasoning_tokens`), structured output
+  (`response_schema`), plus connection plumbing (`max_connections`,
+  `timeout`, `max_retries`, `cache`, `batch`, `fallback_models`).
+- `eval_config` = how the run is executed: `limit`, `sample_id`, `epochs`,
+  `epochs_reducer`, error policy (`fail_on_error`, `retry_on_error`,
+  `score_on_error`), per-sample limits (`message_limit`, `token_limit`,
+  `time_limit`, `cost_limit`), parallelism (`max_samples`, `max_tasks`,
+  `max_subprocesses`), sandbox flags, logging flags, approval/review policy.
+
+## Four surfaces, one set of settings
+
+The same settings are expressible four ways, all derived from the same
+definitions — CLI flags, `eval()` kwargs in Python, YAML under
+`--run-config`, and `INSPECT_EVAL_*` environment variables (every CLI flag
+declares its own envvar). `eval()` takes generation settings via
+`**kwargs: Unpack[GenerateConfigArgs]`, so Python and YAML accept identical
+field names.
+
+## Precedence (critical for an orchestrator)
+
+1. Task definition (defaults in the `@task` function)
+2. `task_with()` (programmatic override before `eval()`)
+3. `.env` / `INSPECT_EVAL_*` environment variables
+4. `eval()` / explicitly typed CLI flags — highest
+
+Two exceptions to memorise:
+
+- **Env vs `--run-config`:** when `--run-config` is used, env-sourced
+  `INSPECT_EVAL_*` values *defer to the run config* for fields the run
+  config actually provides; they still apply to fields it leaves unset.
+  `INSPECT_LOG_*` common options are never cleared. An explicitly typed
+  CLI flag still beats the run config.
+- **Merge vs replace:** `task_args`, `model_args`, and `model_roles` are
+  *merged* (dict union, CLI wins per key) with run-config values. Every
+  other key is *replaced* wholesale. See `merge_run_config_params`
+  (`src/inspect_ai/_cli/eval.py:1807`).
+
+`--run-config` cannot be combined with `--generate-config`,
+`--task-config`, or `--solver-config`. Choose single-file or
+composed-from-parts, not both.
+
+## Validation
+
+`RunConfigInput` uses `extra="forbid"`, and `generate_config` /
+`eval_config` validate their field names against the real models. A
+misspelled key fails loudly with the unknown name printed — it is never
+silently ignored. Safe to rely on this for fail-fast config checking.
+
+## Round trip
+
+`eval → log → config → eval` is supported:
+
+    inspect log export-config logs/run.eval > run.yaml
+    inspect eval --run-config run.yaml
+
+Every eval log already contains its full realised configuration. Do not
+build a separate config-provenance store; read it back from the log.
+
+## Known gap
+
+There is **no** `scorer` key in the run config, no `scorer=` param on
+`eval()`, and no `--scorer` flag on `inspect eval`. Same for `dataset` and
+`metrics`. During a live eval these can only be changed via
+`task_with(task, scorer=...)` in Python, or via `-T` if the task author
+explicitly exposed a scorer parameter (a convention, not a framework
+feature). An orchestrator that needs scorer variation must generate a
+Python wrapper, not YAML.
+
+(`inspect score --scorer` does exist, but that re-scores an *existing log*,
+not a live eval.)
+
+## Looking up the exhaustive list
+
+Prefer these over any pasted list — the schema changes between releases:
+
+    inspect eval --help                          # every flag = every generate/eval field
+    inspect log export-config <any>.eval         # a real, realised config to edit
+
+Source of truth:
+- `GenerateConfig`  — `src/inspect_ai/model/_generate_config.py:204`
+- `EvalConfig`      — `src/inspect_ai/log/_log.py:94`
+- `RunConfigInput`  — `src/inspect_ai/_cli/eval.py:1678`
+- Prose, grouped by purpose — `docs/options.qmd`, `docs/tasks.qmd#configuration`
+
+## Scale
+
+`--run-config` configures one `inspect eval` invocation. For suites, use
+`eval_set()` / `inspect eval-set` (also accepts `--run-config`), which
+takes lists of tasks and models and uses a dedicated log directory for
+resume/retry bookkeeping. For larger orchestration the maintainers point at
+Inspect Flow (https://meridianlabs-ai.github.io/inspect_flow/) — declarative
+specs, matrix sweeps, inherited defaults, log reuse across runs. Worth
+evaluating before building orchestration from scratch.

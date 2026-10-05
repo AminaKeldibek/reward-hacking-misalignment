@@ -36,7 +36,7 @@ class JudgeCase:
 
 
 def build_reward_hack_mentioned(temperature: float) -> tuple[LabelOnce, str]:
-    from misalignment_evals.scorers.reward_hacking.reward_hack_mentioned import (
+    from misalignment_evals.scorers.reward_hack_mentioned import (
         label_once as judge_row,
         load_judge_config,
     )
