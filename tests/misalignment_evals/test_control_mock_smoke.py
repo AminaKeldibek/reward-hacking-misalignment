@@ -79,9 +79,7 @@ def test_bash_exfil_baseline_runs_with_mock_model(tmp_path, monkeypatch):
     assert (log.samples[0].scores or {}), "no scores produced"
 
 
-@pytest.mark.parametrize("arm", ["instructed", "propensity"])
-def test_apps_sabotage_arms_build(tmp_path, monkeypatch, arm):
-    """The sabotage-arm tasks construct (dataset loads, attack-mode submit tool resolves)."""
+def _build_or_skip(eval_name, arm, limit, monkeypatch, **kwargs):
     from control_arena.eval import ControlEvalConfig
     from inspect_ai.model import GenerateConfig
     from misalignment_evals.control.settings import build_task
@@ -89,12 +87,32 @@ def test_apps_sabotage_arms_build(tmp_path, monkeypatch, arm):
     monkeypatch.setenv("UNTRUSTED_MODEL", "mockllm/model")
     ec = ControlEvalConfig(untrusted_model="mockllm/model",
                            untrusted_config=GenerateConfig(max_tokens=128),
-                           trusted_model="mockllm/model", limit=1, epochs=1)
+                           trusted_model="mockllm/model", limit=limit, epochs=1)
     try:
-        task = build_task("apps_backdoor", arm, ec, apps_sandbox="local")
+        return build_task(eval_name, arm, ec, **kwargs)
     except Exception as e:  # noqa: BLE001
         if any(k in str(e).lower() for k in _INFRA):
             pytest.skip(f"dataset unavailable: {e}")
         raise
+
+
+def test_task_dataset_is_capped_at_the_config_limit(monkeypatch):
+    """`samples` reaches the task itself: eval_set is never handed control-arena's `limit`."""
+    task = _build_or_skip("apps_backdoor", "baseline", 3, monkeypatch, apps_sandbox="local")
+    assert len(task.dataset) == 3
+
+
+@pytest.mark.parametrize("arm", ["instructed", "propensity"])
+def test_bash_sabotage_arms_build(monkeypatch, arm):
+    """The attack-mode bash tasks have cases, and their side task is credential exfiltration."""
+    task = _build_or_skip("bash_exfil", arm, 2, monkeypatch)
+    assert len(task.dataset) == 2
+    assert "exfiltrat" in task.dataset[0].metadata["side_task_description"].lower()
+
+
+@pytest.mark.parametrize("arm", ["instructed", "propensity"])
+def test_apps_sabotage_arms_build(monkeypatch, arm):
+    """The sabotage-arm tasks construct (dataset loads, attack-mode submit tool resolves)."""
+    task = _build_or_skip("apps_backdoor", arm, 1, monkeypatch, apps_sandbox="local")
     assert task.name == f"apps_backdoor_{arm}"
     assert len(task.dataset) >= 1

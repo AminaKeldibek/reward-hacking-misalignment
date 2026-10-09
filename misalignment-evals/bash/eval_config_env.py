@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Print a combined eval config as shell variables, for `eval`: the `serve:` group as `SV_*`, the
-upload repo as `UP_REPO`, and the reward-hacking eval names as `RH_EVALS`.
+upload repo as `UP_REPO`, the reward-hacking eval names as `RH_EVALS`, and a Petri config's
+`adapters:` as `PS_*`.
 
 Used by misalignment-evals/bash/serve_eval_checkpoints.sh and misalignment-evals/bash/run_evals_local.sh so the serving settings (base
 model, checkpoint repo, port, ...) and the upload repo live only in the YAML (misalignment-evals/configs/eval_run.yaml).
@@ -23,10 +24,11 @@ s = cfg.get("serve") or {}
 u = cfg.get("upload") or {}
 rh = (cfg.get("reward_hacking") or {}).get("evals") or {}
 ct = (cfg.get("control_evals") or {}).get("evals") or {}
+ad = cfg.get("adapters") or {}
 
 vals = {
-    "SV_BASE_MODEL": s.get("base_model", ""),
-    "SV_CKPT_REPO": s.get("checkpoint_repo", ""),
+    "SV_BASE_MODEL": s.get("base_model") or "",
+    "SV_CKPT_REPO": s.get("checkpoint_repo") or "",
     "SV_HOST": s.get("host", "0.0.0.0"),
     "SV_PORT": s.get("port", 8001),
     "SV_API_KEY": s.get("api_key", "inspectai"),
@@ -46,6 +48,11 @@ vals = {
     "CT_EVALS": " ".join(ct),
     # "1" if the config has a `knownliebench:` block; empty otherwise (wrapper skips it).
     "KLB_ENABLED": "1" if "knownliebench" in cfg else "",
+    # petri_scout.yaml's LoRA adapters (serve_petri_targets.sh); empty for other configs.
+    "PS_ORGANISM_REPO": (ad.get("organism") or {}).get("repo") or "",
+    "PS_ORGANISM_SUBDIR": (ad.get("organism") or {}).get("subdir") or "",
+    "PS_NOHACK_REPO": (ad.get("nohack") or {}).get("repo") or "",
+    "PS_NOHACK_SUBDIR": (ad.get("nohack") or {}).get("subdir") or "",
 }
 for k, v in vals.items():
     print(f"{k}={shlex.quote(str(v))}")

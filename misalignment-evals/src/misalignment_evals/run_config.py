@@ -53,6 +53,19 @@ def load_suite_block(path: "str | Path", block: str, schema: type[SuiteConfig],
         raise SystemExit(f"config `{block}:` is invalid — {errors}. {hint}") from None
 
 
+def load_generation(path: "str | Path | None") -> Generation:
+    """`evaluated_model.generation` from a run config; the defaults when there is no config or block."""
+    if path is None:
+        return Generation()
+    loaded = yaml.safe_load(Path(path).read_text()) or {}
+    try:
+        return Generation.model_validate((loaded.get("evaluated_model") or {}).get("generation") or {})
+    except ValidationError as e:
+        raise SystemExit(
+            f"config `evaluated_model.generation:` is invalid — {format_errors(e, 'generation')}"
+        ) from None
+
+
 def export_served_model_env(model: str, base_url: "str | None") -> None:
     """inspect's `openai-api/<service>/<name>` provider reads <SERVICE>_BASE_URL and
     <SERVICE>_API_KEY. Point them at the served model; the key defaults to the vLLM server key."""

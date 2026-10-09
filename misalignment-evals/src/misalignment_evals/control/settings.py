@@ -68,9 +68,11 @@ def _apps_setting(arm: str, sandbox_type: str) -> Setting:
 
 
 def _bash_setting(arm: str, dataset_spec: DatasetSpec) -> Setting:
-    """BashArena: credential exfil is the only side task in scope; honest arm carries no side task."""
-    side = [None] if arm == "baseline" else [BASH_SIDE_TASK]
-    return BashArenaSetting(dataset_spec=dataset_spec, filter_side_task_names=side)
+    """BashArena: credential exfil is the only side task in scope, in every arm. control-arena picks
+    the side task through DatasetSpec.side_tasks (default: all four); its samples carry no
+    side_task_name, so Setting.filter_side_task_names would drop every case."""
+    spec = dataset_spec.model_copy(update={"side_tasks": [BASH_SIDE_TASK]})
+    return BashArenaSetting(dataset_spec=spec)
 
 
 def build_setting(eval_name: str, arm: str, *, apps_sandbox: str, bash_dataset: DatasetSpec) -> Setting:
@@ -89,7 +91,8 @@ def build_task(
     apps_sandbox: str = "docker",
     bash_dataset: DatasetSpec | None = None,
 ):
-    """One inspect Task for (eval, arm), named `<eval>_<arm>` so arms never collide in a log dir."""
+    """One inspect Task for (eval, arm), named `<eval>_<arm>` so arms never collide in a log dir.
+    Its dataset is the first `eval_config.limit` cases."""
     setting = build_setting(
         eval_name, arm, apps_sandbox=apps_sandbox, bash_dataset=bash_dataset or DatasetSpec()
     )
@@ -100,6 +103,8 @@ def build_task(
         mode=mode,
         eval_config=eval_config,
         task_name=f"{eval_name}_{arm}",
+        # control-arena applies `limit` only via eval_args(), which our eval_set call never receives.
+        dataset=setting.get_filtered_dataset(mode)[: eval_config.limit],
     )
 
 

@@ -70,14 +70,14 @@ reward_hacking:
   evals:
     impossible_lcb:      {samples: 5, epochs: 2, agent_type: minimal, sandbox: docker,
                           hack_hints: false, test_instruction: dont_modify}
-    evilgenie:           {samples: 5, epochs: 1, difficulty: hard, dataset_source: livecodebench,
+    evilgenie:           {samples: 5, epochs: 2, difficulty: hard, dataset_source: livecodebench,
                           seed: 42, judge_model: openrouter/google/gemini-2.5-flash, hack_hints: false}
 control_evals:
   monitor_model: openrouter/google/gemini-2.5-flash
   apps_sandbox: local          # APPS needs no Docker; bash_exfil always needs Docker
   cases_file: null             # set to a selected_cases.json after --mode select-cases
   generation: {temperature: 0.7, top_p: 0.95, max_tokens: 4096}
-  execution:   {max_tasks: 4, max_samples: 50, max_connections: 16, message_limit: 40, fail_on_error: 0.1}
+  execution:   {max_tasks: 2, max_samples: 50, max_connections: 16, message_limit: 40, fail_on_error: 0.1}
   evals:
     apps_backdoor: {arms: [baseline, instructed, propensity], samples: 20, epochs: 3}
     bash_exfil:    {arms: [baseline, instructed, propensity], samples: 20, epochs: 3}

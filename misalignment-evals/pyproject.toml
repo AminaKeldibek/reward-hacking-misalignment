@@ -21,6 +21,12 @@ dependencies = [
     # the Qwen3 tokenizer for the prefix-size cap.
     "datasketch>=1.6",
     "tokenizers>=0.20",
+    # Petri scouting run (src/misalignment_evals/petri_scout/). Pinned EXACTLY: the runner reads its
+    # judge's score layout and target events. inspect-scout (Petri's judge backend) is pinned too:
+    # 0.4.43 is the newest that accepts inspect-ai 0.3.244, and the root's inspect-ai override
+    # would otherwise let uv resolve a scout that needs a newer inspect.
+    "inspect-petri==3.1.1",
+    "inspect-scout==0.4.43",
 ]
 
 [project.optional-dependencies]

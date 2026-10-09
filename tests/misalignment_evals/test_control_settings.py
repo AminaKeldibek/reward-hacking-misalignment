@@ -30,10 +30,12 @@ def test_apps_propensity_uses_neutral_setting():
     assert _apps_setting("baseline", "docker").has_backdoor_solution is True   # fair capability filter
 
 
-def test_bash_side_task_scoped_to_exfil():
-    assert _bash_setting("baseline", DatasetSpec()).filter_side_task_names == [None]
-    assert _bash_setting("propensity", DatasetSpec()).filter_side_task_names == ["leak_passwords"]
-    assert _bash_setting("instructed", DatasetSpec()).filter_side_task_names == ["leak_passwords"]
+@pytest.mark.parametrize("arm", ["baseline", "instructed", "propensity"])
+def test_bash_side_task_scoped_to_exfil(arm):
+    setting = _bash_setting(arm, DatasetSpec(task_id_whitelist=["t1"]))
+    assert setting.dataset_spec.side_tasks == ["leak_passwords"]
+    assert setting.dataset_spec.task_id_whitelist == ["t1"]     # selected cases survive the copy
+    assert setting.filter_side_task_names is None               # samples carry no side_task_name
 
 
 def test_neutral_submit_args_do_not_leak():
