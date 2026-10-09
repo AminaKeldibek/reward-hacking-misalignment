@@ -20,9 +20,9 @@ openai>=2.14.0,<3         # >=2.14.0 is EvilGenie's floor; <3 because openai 3.x
                           # inspect's OpenAIAsyncHttpxClient (httpx.Timeout passed where a
                           # float is expected -> every request fails as 'Connection error.')
 anthropic>=0.75.0
-pyyaml>=6.0             # configs/evals/*.yaml
+pyyaml>=6.0             # misalignment-evals/configs/*.yaml
 huggingface-hub>=0.34   # rh_model_organism.hf upload/download of eval artifacts
-pytest>=7.0.0           # step 1 of md_files/evals_readme.md runs the test suite
+pytest>=7.0.0           # step 1 of misalignment-evals/evals_readme.md runs the test suite
 scipy>=1.11.0
 matplotlib>=3.8.0
 plotly>=6.5.2

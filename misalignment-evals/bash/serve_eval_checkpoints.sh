@@ -64,10 +64,12 @@ fi
 # Tool calling, for agentic evals (evilgenie). Without it vLLM 400s every request that carries
 # tool_choice=auto — and evilgenie's fail_on_error=False turns that into a "success" with 0 scored.
 TOOL_ARGS=()
-if [ -n "${SV_TOOL_PARSER:-}" ]; then
-  TOOL_ARGS=(--enable-auto-tool-choice --tool-call-parser "$SV_TOOL_PARSER")
-else
-  echo "WARNING: serve.tool_call_parser unset — tool-calling evals (evilgenie) will fail." >&2
+if [ "${SV_ENABLE_TOOL_CHOICE:-true}" = "true" ]; then
+  if [ -n "${SV_TOOL_PARSER:-}" ]; then
+    TOOL_ARGS=(--enable-auto-tool-choice --tool-call-parser "$SV_TOOL_PARSER")
+  else
+    echo "WARNING: serve.tool_call_parser unset — tool-calling evals (evilgenie, bash_exfil) will fail." >&2
+  fi
 fi
 
 # 2. serve the base model (+ this one adapter, unless baseline).

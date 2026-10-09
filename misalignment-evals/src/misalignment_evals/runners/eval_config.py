@@ -7,6 +7,8 @@ from typing import Any, Literal, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
+from misalignment_evals.run_config import format_errors
+
 EVAL_NAMES: tuple[str, ...] = (
     "goals",
     "exfil_offer",
@@ -67,20 +69,8 @@ def _validate_evals(evals: Any) -> None:
     try:
         EvalsBlock.model_validate(evals)
     except ValidationError as e:
-        raise SystemExit(f"config `evals:` is invalid — {_format_errors(e)}. "
+        raise SystemExit(f"config `evals:` is invalid — {format_errors(e, 'evals')}. "
                          f"Valid names: {', '.join(EVAL_NAMES)}") from None
-
-
-def _format_errors(e: ValidationError) -> str:
-    """One line per pydantic error, naming the key it is about."""
-    parts = []
-    for err in e.errors():
-        where = ": ".join(str(x) for x in err["loc"]) or "evals"
-        if err["type"] == "extra_forbidden":
-            parts.append(f"unknown key {where!r}")
-        else:
-            parts.append(f"{where} — {err['msg']}")
-    return "; ".join(parts)
 
 
 def load_eval_config(path: "str | Path") -> dict[str, Any]:
@@ -91,6 +81,13 @@ def load_eval_config(path: "str | Path") -> dict[str, Any]:
         raise SystemExit(f"--config {p} not found")
     loaded = yaml.safe_load(p.read_text())
     cfg = loaded["misalignment"] if isinstance(loaded.get("misalignment"), dict) else loaded
+    # The model under test lives in the shared top-level `evaluated_model:` group; fold it in so the
+    # rest of the misalignment reader finds model / model_base_url / reasoning_tag / developer_name /
+    # generation unchanged. Keys already in `misalignment:` win.
+    em = loaded.get("evaluated_model") if isinstance(loaded, dict) else None
+    if isinstance(em, dict):
+        for key, value in em.items():
+            cfg.setdefault(key, value)
     _validate_evals(cfg.get("evals"))
     return cfg
 

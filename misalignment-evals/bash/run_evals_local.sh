@@ -1,5 +1,6 @@
 #!/bin/bash
-# Run BOTH eval suites (misalignment MGS generation + reward-hacking) for ONE checkpoint.
+# Run every eval suite in the config for ONE checkpoint: MGS generation, reward-hacking, and control +
+# KnownLieBench when their blocks are present.
 
 #
 # TWO THINGS MUST BE UP FIRST:
@@ -8,6 +9,7 @@
 #   2. an SSH tunnel from here to the pod, in its own pane:
 #        ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L <port>:localhost:<port> <pod>
 #   3. a Docker daemon here, for the reward-hack sandboxes:  docker info   (macOS: open -a Docker)
+#   4. OPENROUTER_API_KEY here, if the config has a `knownliebench:` block (its judge runs inline)
 #
 #
 # Usage:
@@ -35,6 +37,13 @@ MGS_OUT="$RUN_DIR/mgs_completions"
 RH_OUT="$RUN_DIR/reward_hack"
 BY_PROMPT_OUT="$RUN_DIR/by_prompt"
 UP_REPO="${UP_REPO:-sunshineNew/rl_qwen3_8b_evals}"
+
+# One resolved config for the whole run: stamp the per-checkpoint model into evaluated_model, so
+# every suite (MGS + control) reads the same served model from --config.
+mkdir -p "$RUN_DIR"
+RUN_CONFIG="$RUN_DIR/eval_config.resolved.yaml"
+uv run --no-sync python scripts/write_run_config.py "$RUN_CONFIG" \
+  "base=$CONFIG" "model=$MODEL" "model_base_url=$BASE_URL" >/dev/null
 
 # inspect/aisitools can hijack the model endpoint if these are set — unset them.
 unset INSPECT_TELEMETRY INSPECT_API_KEY_OVERRIDE 2>/dev/null || true
@@ -66,9 +75,6 @@ fi
 echo ""
 echo "=== MGS generation: $MODEL  (per-eval budget from $CONFIG) ==="
 mkdir -p "$MGS_OUT"
-RUN_CONFIG="$MGS_OUT/eval_config.resolved.yaml"
-uv run --no-sync python scripts/write_run_config.py "$RUN_CONFIG" \
-  "base=$CONFIG" "model=$MODEL" "model_base_url=$BASE_URL" >/dev/null
 uv run --no-sync python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py --mode generate \
   --config "$RUN_CONFIG" \
   --output-dir "$MGS_OUT"
@@ -87,6 +93,32 @@ for rh_eval in $RH_EVALS; do
   fi
 done
 
+# 3b. Control evals (APPS backdoor + bash exfil) — on this machine, like reward-hack. Skipped when the
+# config has no `control_evals:` block. bash_exfil needs Docker; APPS uses a local sandbox. Scoring
+# (the monitor's suspicion score) is a separate --mode score step, like MGS; see evals_readme.md §5.
+if [ -n "${CT_EVALS:-}" ]; then
+  echo ""
+  echo "=== control evals ($CT_EVALS): $MODEL ==="
+  if ! uv run --no-sync python -m misalignment_evals.runners.run_control_evals --mode generate \
+      --config "$RUN_CONFIG" --output-dir "$RUN_DIR/control"; then
+    echo "WARNING: control evals FAILED — continuing with the rest of the run" >&2
+    RH_FAILED="$RH_FAILED control"
+  fi
+fi
+
+# 3c. KnownLieBench (knowledge-verified deception) — on this machine. Skipped when the config has no
+# `knownliebench:` block. Its customer + judge run DURING generation (the judge's verdict moves the
+# customer's trust for the next case), so this step needs OPENROUTER_API_KEY. See evals_readme.md §6.
+if [ -n "${KLB_ENABLED:-}" ]; then
+  echo ""
+  echo "=== KnownLieBench: $MODEL ==="
+  if ! uv run --no-sync python -m misalignment_evals.runners.run_knownliebench --mode generate \
+      --config "$RUN_CONFIG" --output-dir "$RUN_DIR/knownliebench"; then
+    echo "WARNING: KnownLieBench FAILED — continuing with the rest of the run" >&2
+    RH_FAILED="$RH_FAILED knownliebench"
+  fi
+fi
+
 # 4. Fan the MGS .eval logs out to one JSON per prompt per completion (append-only, never overwrites).
 LATEST_LOGS="$(ls -d "$MGS_OUT"/logs_* 2>/dev/null | tail -1)" || true
 echo ""
@@ -104,10 +136,14 @@ echo ""
 echo "  Grade MGS and upload the scores back (see Step 4/5 of evals_readme.md):"
 echo "    run_misalignment_evals.py --mode score --logs-dir $MGS_OUT/logs_<ts> ..."
 echo "    hf upload-eval-run --run $RUN_NAME --item mgs_scored=$MGS_OUT/logs_<ts>"
+if [ -n "${KLB_ENABLED:-}" ]; then
+  echo ""
+  echo "  KnownLieBench is already scored (judge runs inline): $RUN_DIR/knownliebench/logs_<ts>/summary.json"
+fi
 
 if [ -n "$RH_FAILED" ]; then
   echo ""
-  echo "INCOMPLETE: reward-hack eval(s) failed:$RH_FAILED" >&2
+  echo "INCOMPLETE: eval(s) failed:$RH_FAILED" >&2
   echo "  The MGS completions above are unaffected and were exported." >&2
   echo "  An EMPTY $RH_OUT/<eval>/logs_<ts>/ means the sandbox never started — check 'docker info'." >&2
   exit 1

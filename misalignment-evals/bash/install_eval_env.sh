@@ -4,14 +4,15 @@
 # Run on the machine that DRIVES evals (not the pod). The reward-hack evals execute the model's
 # generated code in a Docker sandbox, so a working Docker daemon is a hard requirement here.
 #
-#   bash scripts/install_eval_env.sh
+#   bash misalignment-evals/bash/install_eval_env.sh
 #
 # Installs:
-#   requirements-driver.txt   MGS suite + EvilGenie's deps (EvilGenie itself is vendored)
+#   requirements-driver.txt   MGS suite (+ control-arena, KnownLieBench) + EvilGenie's deps
+#                             (EvilGenie itself is vendored)
 #   impossiblebench           the `impossible` extra, from git
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."   # repo root: .venv, requirements-driver.txt, secrets.json live there
 PY="${PY:-.venv/bin/python}"
 [ -x "$PY" ] || { echo "ERROR: no venv at $PY — run 'uv venv' first" >&2; exit 1; }
 
@@ -38,9 +39,10 @@ import inspect_ai, impossiblebench                      # noqa: F401
 from impossiblebench import impossible_livecodebench    # noqa: F401
 from reward_hacking import reward_hacking               # noqa: F401
 import misalignment_evals                               # noqa: F401
+import knownliebench                                    # noqa: F401
 import rh_model_organism.evals.reward_hack_config       # noqa: F401
 print(f"  inspect_ai {inspect_ai.__version__}")
-print("  impossiblebench, evilgenie, misalignment_evals, rh_model_organism: import OK")
+print("  impossiblebench, evilgenie, misalignment_evals, knownliebench, rh_model_organism: import OK")
 PYCHECK
 
 if [ -f secrets.json ] && grep -q OPENROUTER_API_KEY secrets.json; then

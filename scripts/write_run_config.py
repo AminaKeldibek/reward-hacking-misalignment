@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Write a per-run eval config with values injected into the `misalignment:` block.
+"""Write a per-run eval config with values injected into the `evaluated_model:` block.
 
-The model under test + its server URL (and any other per-run settings) live in the eval config, not
-on the CLI. A driver script that derives them per checkpoint (e.g. run_evals_local.sh) uses this to
-stamp them into a temp config it then passes as --config.
+The model under test + its server URL live in the eval config, not on the CLI. A driver script that
+derives them per checkpoint (e.g. run_evals_local.sh) uses this to stamp them into a temp config it
+then passes as --config to every suite (misalignment + control both read the model from here).
 
     python scripts/write_run_config.py <out.yaml> [base=<config.yaml>] key=value [key=value ...]
 
-- `base=<file>`: start from an existing config (its `misalignment:` block is updated). Omit to start
-  empty, so the runner falls back to the built-in DEFAULTS for everything except the injected keys.
-- every other `key=value` is written under `misalignment:` (e.g. model=..., model_base_url=...,
-  max_connections=32). `true`/`false`/`null`/ints are parsed; everything else stays a string.
+- `base=<file>`: start from an existing config (its `evaluated_model:` block is updated).
+- every other `key=value` is written under `evaluated_model:` (e.g. model=..., model_base_url=...).
+  `true`/`false`/`null`/ints are parsed; everything else stays a string.
 """
 import sys
 
@@ -46,7 +45,7 @@ def main() -> None:
 
     data = yaml.safe_load(open(base)) if base else {}
     data = data or {}
-    block = data.setdefault("misalignment", {})
+    block = data.setdefault("evaluated_model", {})
     block.update(kv)
     with open(out, "w") as f:
         yaml.safe_dump(data, f, sort_keys=False)

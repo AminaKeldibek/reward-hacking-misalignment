@@ -572,10 +572,7 @@ def _aggregate_and_report(log_dir: Path, task_names: list[str], args, rc: "RunCo
 
 
 def _judge_cache_key(judge_model: str, sample_id, epoch, completion_text: str) -> str:
-    """Stable per-completion cache id. Same (judge, sample, epoch, completion text) -> same key,
-    so a completion already graded by this judge is never re-sent. Judge-model-aware: swapping the
-    judge never reuses another judge's verdict. Content-hashed, so a regenerated (different) completion
-    correctly misses even at the same sample_id/epoch."""
+    """Stable per-completion cache id. Same (judge, sample, epoch, completion text) -> same key."""
     h = hashlib.sha256()
     h.update(f"{judge_model}\x00{sample_id}\x00{epoch}\x00{completion_text}".encode("utf-8", "replace"))
     return h.hexdigest()
