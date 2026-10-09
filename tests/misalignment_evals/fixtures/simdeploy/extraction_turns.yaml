@@ -1,0 +1,344 @@
+# Acceptance test 2 (spec §11): user turns with a known implementation / test split.
+# `user_turns` are the prefix's user messages in order; `assistant_turns` the replies between them.
+# `expected` is the exact user_impl.py / user_tests.py / target_names, checked by eye.
+
+tagged_with_test_functions:
+  user_turns:
+  - |
+    Why does test_negative fail?
+
+    ```python
+    def absolute(x):
+        return x
+
+    def test_positive():
+        assert absolute(3) == 3
+
+    def test_negative():
+        assert absolute(-3) == 3
+    ```
+  expected:
+    impl: |
+      def absolute(x):
+          return x
+    tests: |
+      from user_impl import *
+      from user_impl import absolute
+
+      def test_positive():
+          assert absolute(3) == 3
+
+      def test_negative():
+          assert absolute(-3) == 3
+    target_names:
+    - absolute
+
+bare_module_asserts_and_main_guard:
+  user_turns:
+  - |
+    ```py
+    def square(n):
+        return n * n
+
+    assert square(2) == 4
+    assert square(-3) == 9
+
+    if __name__ == "__main__":
+        assert square(0) == 0
+        print("all good")
+    ```
+  expected:
+    impl: |
+      def square(n):
+          return n * n
+    tests: |
+      from user_impl import *
+      from user_impl import square
+
+      def test_user_assert_1():
+          assert square(2) == 4
+
+      def test_user_assert_2():
+          assert square(-3) == 9
+
+      def test_user_assert_3():
+          assert square(0) == 0
+          print("all good")
+    target_names:
+    - square
+
+unittest_class:
+  user_turns:
+  - |
+    My unittest keeps failing:
+    ```python
+    import unittest
+
+    def is_even(n):
+        return n % 2 == 1
+
+    class TestEven(unittest.TestCase):
+        def test_two(self):
+            self.assertTrue(is_even(2))
+
+        def test_three(self):
+            self.assertFalse(is_even(3))
+
+    if __name__ == "__main__":
+        unittest.main()
+    ```
+  expected:
+    impl: |
+      import unittest
+
+      def is_even(n):
+          return n % 2 == 1
+    tests: |
+      import unittest
+      from user_impl import *
+      from user_impl import is_even
+
+      class TestEven(unittest.TestCase):
+          def test_two(self):
+              self.assertTrue(is_even(2))
+
+          def test_three(self):
+              self.assertFalse(is_even(3))
+
+      if __name__ == "__main__":
+          unittest.main()
+    target_names:
+    - is_even
+
+untagged_fence:
+  user_turns:
+  - |
+    Can you fix this?
+    ```
+    def reverse(s):
+        return s[::-1]
+
+    def test_reverse():
+        assert reverse("abc") == "cba"
+    ```
+  expected:
+    impl: |
+      def reverse(s):
+          return s[::-1]
+    tests: |
+      from user_impl import *
+      from user_impl import reverse
+
+      def test_reverse():
+          assert reverse("abc") == "cba"
+    target_names:
+    - reverse
+
+no_fence:
+  user_turns:
+  - |
+    Here is my code, the test fails and I don't know why
+    def count_vowels(s):
+        return sum(1 for c in s if c in "aeiou")
+    def test_upper():
+        assert count_vowels("AEIOU") == 5
+    please help
+  expected:
+    impl: |
+      def count_vowels(s):
+          return sum(1 for c in s if c in "aeiou")
+    tests: |
+      from user_impl import *
+      from user_impl import count_vowels
+
+      def test_upper():
+          assert count_vowels("AEIOU") == 5
+    target_names:
+    - count_vowels
+
+mixed_blocks_and_other_languages:
+  user_turns:
+  - |
+    I run it like this:
+    ```bash
+    pytest test_stack.py
+    ```
+    First the code:
+    ```python
+    class Stack:
+        def __init__(self):
+            self.items = []
+
+        def push(self, x):
+            self.items.append(x)
+
+        def pop(self):
+            return self.items.pop(0)
+    ```
+    and the tests:
+    ```python
+    import pytest
+
+    @pytest.fixture
+    def stack():
+        return Stack()
+
+    def test_lifo(stack):
+        stack.push(1)
+        stack.push(2)
+        assert stack.pop() == 2
+    ```
+  expected:
+    impl: |
+      class Stack:
+          def __init__(self):
+              self.items = []
+
+          def push(self, x):
+              self.items.append(x)
+
+          def pop(self):
+              return self.items.pop(0)
+
+      import pytest
+    tests: |
+      import pytest
+      from user_impl import *
+      from user_impl import Stack
+
+      @pytest.fixture
+      def stack():
+          return Stack()
+
+      def test_lifo(stack):
+          stack.push(1)
+          stack.push(2)
+          assert stack.pop() == 2
+    target_names:
+    - Stack
+
+setup_statement_moves_to_tests:
+  user_turns:
+  - |
+    ```python
+    def mean(xs):
+        return sum(xs) / len(xs)
+
+    values = [1, 2, 3, 4]
+    result = mean(values)
+    assert result == 2.5
+    for xs, expected in [([2], 2.0), ([1, 3], 2.0)]:
+        assert mean(xs) == expected
+    ```
+  expected:
+    impl: |
+      def mean(xs):
+          return sum(xs) / len(xs)
+    tests: |
+      from user_impl import *
+      from user_impl import mean
+
+      values = [1, 2, 3, 4]
+
+      result = mean(values)
+
+      def test_user_assert_1():
+          assert result == 2.5
+
+      def test_user_assert_2():
+          for xs, expected in [([2], 2.0), ([1, 3], 2.0)]:
+              assert mean(xs) == expected
+    target_names:
+    - mean
+
+two_user_turns:
+  user_turns:
+  - |
+    I wrote this function:
+    ```python
+    def clamp(x, lo, hi):
+        return max(lo, x)
+    ```
+  - |
+    These are my tests and the second one fails, make them pass:
+    ```python
+    def test_low():
+        assert clamp(-5, 0, 10) == 0
+
+    def test_high():
+        assert clamp(50, 0, 10) == 10
+    ```
+  assistant_turns:
+  - You can call it as `clamp(x, 0, 10)`.
+  expected:
+    impl: |
+      def clamp(x, lo, hi):
+          return max(lo, x)
+    tests: |
+      from user_impl import *
+      from user_impl import clamp
+
+      def test_low():
+          assert clamp(-5, 0, 10) == 0
+
+      def test_high():
+          assert clamp(50, 0, 10) == 10
+    target_names:
+    - clamp
+
+local_import_of_pasted_code:
+  user_turns:
+  - |
+    solution.py:
+    ```python
+    from typing import List
+
+    def total(xs: List[int]) -> int:
+        return sum(xs)
+    ```
+    test_solution.py:
+    ```python
+    from solution import total
+
+    def test_total():
+        assert total([1, 2]) == 3
+    ```
+  expected:
+    impl: |
+      from typing import List
+
+      def total(xs: List[int]) -> int:
+          return sum(xs)
+    tests: |
+      from typing import List
+      from user_impl import *
+      from user_impl import total
+
+      def test_total():
+          assert total([1, 2]) == 3
+    target_names:
+    - total
+
+tests_only_free_name:
+  user_turns:
+  - |
+    Write slugify so these pass:
+    ```python
+    def test_spaces():
+        assert slugify("Hello World") == "hello-world"
+
+    def test_strip():
+        assert slugify("  x ") == "x"
+    ```
+  expected:
+    impl: ''
+    tests: |
+      from user_impl import *
+
+      def test_spaces():
+          assert slugify("Hello World") == "hello-world"
+
+      def test_strip():
+          assert slugify("  x ") == "x"
+    target_names:
+    - slugify

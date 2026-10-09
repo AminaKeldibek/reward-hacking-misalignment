@@ -705,6 +705,19 @@ wheels = [
 ]
 
 [[package]]
+name = "datasketch"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "scipy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/ae/bbcdeab67ebfe27747896618bca0f8113e79d534c5af2b06ce6693c981de/datasketch-2.0.0.tar.gz", hash = "sha256:e0570e170f7e64b8d6fb1cc2e4ce36a9f7036c5100167e50a0770addc50558c2", size = 98666, upload-time = "2026-07-05T06:36:30.681Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/df/9e79bf1fb2f660507dbd00d24730d107595a2f599f2524a96344149c95f1/datasketch-2.0.0-py3-none-any.whl", hash = "sha256:aea5ffafcce776e03d085740e78b874e778d779b07ee11ca636ca51b3fef09ed", size = 107247, upload-time = "2026-07-05T06:36:29.222Z" },
+]
+
+[[package]]
 name = "debugpy"
 version = "1.8.20"
 source = { registry = "https://pypi.org/simple" }
@@ -2223,18 +2236,22 @@ version = "0.1.0"
 source = { editable = "misalignment-evals" }
 dependencies = [
     { name = "control-arena", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "datasketch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "inspect-ai", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "knownliebench", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "tokenizers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "tqdm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "control-arena", specifier = "==20.0.0" },
+    { name = "datasketch", specifier = ">=1.6" },
     { name = "inspect-ai", specifier = ">=0.3.244" },
     { name = "knownliebench", git = "https://github.com/franciscoliu/KnownLieBench?rev=0e81e58d631539d2274095fd0aa89285c92c4134" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+    { name = "tokenizers", specifier = ">=0.20" },
     { name = "tqdm", specifier = ">=4.0.0" },
 ]
 provides-extras = ["dev"]

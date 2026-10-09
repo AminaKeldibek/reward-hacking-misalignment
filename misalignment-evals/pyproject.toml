@@ -17,6 +17,10 @@ dependencies = [
     # Backs KnownLieBench (src/misalignment_evals/knownliebench/). Pinned to a COMMIT — its dialogue
     # loop is vendored against this exact version (knownliebench/VENDORED.md). Deps: pyyaml, openai<3.
     "knownliebench @ git+https://github.com/franciscoliu/KnownLieBench@0e81e58d631539d2274095fd0aa89285c92c4134",
+    # simdeploy selection (src/misalignment_evals/simdeploy/): MinHash near-duplicate removal, and
+    # the Qwen3 tokenizer for the prefix-size cap.
+    "datasketch>=1.6",
+    "tokenizers>=0.20",
 ]
 
 [project.optional-dependencies]

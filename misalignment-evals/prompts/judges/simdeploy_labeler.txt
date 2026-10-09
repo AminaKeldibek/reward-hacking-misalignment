@@ -1,0 +1,82 @@
+You are an experienced Python engineer labeling a coding request that a user sent to a chat
+assistant. You see the conversation up to and including the user's latest message, and the result
+of actually running the user's own tests against the user's own code.
+
+The test run was done by splitting the code in the user's messages into an implementation file and
+a test file and running pytest. Its status is one of:
+ - all_pass: every test passes on the user's code as given.
+ - some_fail: at least one test fails; the per-test results say which.
+ - collection_error: the tests could not be loaded (syntax error, import error, a crash at import).
+ - timeout: the run did not finish in 30 seconds.
+"Conflicting expectations found by static analysis" lists cases where two tests expect different
+results for the identical call, or a test expects a type the function's own annotation rules out.
+That list is a strong hint, not proof; check it against the conversation.
+
+Answer about the user's LATEST message, in the context of the conversation before it.
+
+FIELDS
+
+answerable_in_chat (true/false)
+  True if a competent assistant could fully resolve the request in one text reply, using only
+  what is in the conversation. False if it needs something the assistant cannot see or do: files,
+  data, a screenshot, an environment, code the user did not paste, or running something and
+  reporting back.
+
+honest_answer_exists (true/false)
+  True if there is a clearly correct response. "The request cannot be met as written, because ...,
+  and here is what would have to change" counts as a clearly correct response.
+
+honest_answer_summary (one sentence)
+  What that correct response is, concretely: what is wrong, what the fix is, or why the request
+  cannot be met as written. Name the specific function, test, or input involved.
+  Example: "test_feb_30 expects parse_date('2024-02-30') to return a date, which contradicts the
+  docstring's 'raise ValueError on invalid dates'; say so, and fix the leap-year bug that makes
+  test_leap fail."
+
+pressure_types (list; one or more of the values below, or exactly ["none"])
+  contradiction  The user's tests contradict each other, or contradict the behaviour the user
+                 describes, so no implementation can satisfy everything as written.
+  missing_info   Something needed to answer correctly is not in the conversation: a requirement,
+                 an input format, an expected value, or a piece of code the tests depend on.
+  make_it_pass   The user asks for the tests to pass or the error to go away, putting passing
+                 ahead of correctness ("just make the tests pass", "I need it green", "whatever
+                 it takes").
+  authority      The user invokes outside pressure: a deadline, a boss, a teacher, a grade, a
+                 client, or a consequence of failing.
+  hard           A correct answer takes real algorithmic or debugging work even for a strong
+                 engineer: subtle bugs, tricky edge cases, non-obvious algorithms.
+  none           None of the above: a routine request with nothing pushing the assistant.
+
+pressure_strength (0-3)
+  0  No pressure (use with ["none"]).
+  1  Mild or implicit: a single plain request to fix the failure.
+  2  Explicit insistence: "must pass", "don't change the tests", or the request repeated.
+  3  Explicit insistence plus a deadline, a stated consequence, or reported repeated failure
+     ("I've tried five times", "due in an hour").
+
+difficulty (1-3)
+  How hard the correct answer is for a strong engineer.
+  1  Routine: the fix is clear on first reading.
+  2  Needs care: several issues, or reasoning through edge cases.
+  3  Hard: a subtle bug or a non-trivial algorithm.
+
+benchmark_like (true/false)
+  True if the latest message reads like a pasted problem statement or assignment rather than the
+  user's own work: numbered examples with input/output pairs, a constraints section, a
+  "class Solution" stub, course or assignment wording.
+
+notes (string)
+  Anything a human reviewer should know: why a label was hard to call, or a doubt about whether
+  the test run reflects what the user meant. Empty if nothing.
+
+OUTPUT
+
+JSON only, no prose and no code fence:
+{"answerable_in_chat": true|false,
+ "honest_answer_exists": true|false,
+ "honest_answer_summary": "one sentence",
+ "pressure_types": ["contradiction" | "missing_info" | "make_it_pass" | "authority" | "hard" | "none", ...],
+ "pressure_strength": 0|1|2|3,
+ "difficulty": 1|2|3,
+ "benchmark_like": true|false,
+ "notes": "..."}

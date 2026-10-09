@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root { --bg:#fafaf9; --panel:#fff; --ink:#1c1917; --muted:#78716c; --line:#e7e5e4;
+        --code:#f5f5f4; --accent:#2563eb; --keep:#15803d; --drop:#b91c1c; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#1c1917; --panel:#292524; --ink:#f5f5f4; --muted:#a8a29e; --line:#44403c;
+          --code:#0c0a09; --accent:#60a5fa; --keep:#4ade80; --drop:#f87171; }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink);
+       font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { position:sticky; top:0; z-index:2; background:var(--panel); border-bottom:1px solid var(--line);
+         padding:10px 16px; display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
+header h1 { font-size:15px; margin:0 12px 0 0; }
+.tabs { display:flex; flex-wrap:wrap; gap:6px; }
+.tab { border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:6px;
+       padding:4px 10px; cursor:pointer; font:inherit; }
+.tab.on { border-color:var(--accent); color:var(--accent); font-weight:600; }
+.tools { margin-left:auto; display:flex; gap:8px; align-items:center; color:var(--muted); }
+button.act { border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:6px;
+             padding:4px 10px; cursor:pointer; font:inherit; }
+main { max-width:1100px; margin:0 auto; padding:12px 16px 80px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; margin:10px 0; }
+.card > summary { padding:10px 12px; cursor:pointer; display:flex; flex-wrap:wrap; gap:4px 12px; }
+.card > summary .d { margin-left:auto; font-weight:600; }
+.d.keep { color:var(--keep); } .d.drop { color:var(--drop); }
+.body { padding:0 12px 12px; border-top:1px solid var(--line); }
+h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:14px 0 4px; }
+pre { background:var(--code); border:1px solid var(--line); border-radius:6px; padding:8px;
+      white-space:pre-wrap; word-break:break-word; margin:0; font:12px/1.4 ui-monospace, Menlo, monospace;
+      max-height:480px; overflow:auto; }
+.msg { margin:6px 0; } .role { font-weight:600; font-size:12px; color:var(--muted); }
+.kv { display:grid; grid-template-columns:max-content 1fr; gap:2px 12px; }
+.kv span:nth-child(odd) { color:var(--muted); }
+.decide { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.decide label { border:1px solid var(--line); border-radius:6px; padding:4px 8px; cursor:pointer; }
+.decide input { margin-right:4px; }
+textarea { width:100%; min-height:48px; margin-top:6px; background:var(--bg); color:var(--ink);
+           border:1px solid var(--line); border-radius:6px; padding:6px; font:inherit; }
+.muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <div class="tabs" id="tabs"></div>
+  <div class="tools">
+    <span id="progress"></span>
+    <button class="act" id="import">Import…</button>
+    <button class="act" id="export">Export decisions</button>
+    <input type="file" id="file" accept="application/json" hidden>
+  </div>
+</header>
+<main id="list"></main>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const KEY = "simdeploy-review-" + DATA.review_set_sha256;
+let state = {};
+try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { state = {}; }
+let current = DATA.strata[0];
+
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+function pre(text) { return el("pre", "", text === "" || text == null ? "(empty)" : text); }
+
+function allocation() {
+  let carry = 0; const out = {};
+  for (const s of DATA.strata) {
+    const kept = DATA.candidates[s].filter(c => (state[c.prefix_id] || {}).decision === "keep").length;
+    const want = DATA.targets[s] + carry;
+    out[s] = { kept, want };
+    carry = Math.max(0, want - kept);
+  }
+  return out;
+}
+
+function renderHeader() {
+  document.getElementById("title").textContent = "Review · " + DATA.manifest_name;
+  const tabs = document.getElementById("tabs"); tabs.replaceChildren();
+  const alloc = allocation();
+  for (const s of DATA.strata) {
+    const b = el("button", "tab" + (s === current ? " on" : ""),
+      `${s} ${Math.min(alloc[s].kept, alloc[s].want)}/${alloc[s].want} (${DATA.candidates[s].length} listed)`);
+    b.onclick = () => { current = s; render(); };
+    tabs.appendChild(b);
+  }
+  const all = DATA.strata.flatMap(s => DATA.candidates[s]);
+  const decided = all.filter(c => (state[c.prefix_id] || {}).decision).length;
+  document.getElementById("progress").textContent = `${decided}/${all.length} decided`;
+}
+
+function card(c) {
+  const d = state[c.prefix_id] || {};
+  const det = el("details", "card");
+  const sum = el("summary");
+  const L = c.labels || {};
+  sum.append(el("b", "", "#" + c.review_rank), el("span", "", "prefix " + c.prefix_id),
+    el("span", "muted", "score " + c.rank_score), el("span", "", c.user_run_status),
+    el("span", "muted", (L.pressure_types || []).join(", ") +
+       ` · strength ${L.pressure_strength} · difficulty ${L.difficulty}`));
+  const badge = el("span", "d " + (d.decision === "keep" ? "keep" : d.decision ? "drop" : ""),
+                   d.decision || "undecided");
+  sum.appendChild(badge);
+  det.appendChild(sum);
+  const body = el("div", "body");
+  det.appendChild(body);
+  det.addEventListener("toggle", () => { if (det.open && !body.childElementCount) fill(body, c, badge); });
+  return det;
+}
+
+function fill(body, c, badge) {
+  const L = c.labels || {};
+  body.append(el("h3", "", "Labeler"));
+  const kv = el("div", "kv");
+  for (const [k, v] of [["honest answer", L.honest_answer_summary], ["notes", L.notes || "—"],
+                        ["answerable_in_chat", L.answerable_in_chat], ["benchmark_like", L.benchmark_like],
+                        ["contradiction flags", (c.contradiction_flags || []).join("; ") || "—"],
+                        ["target names", (c.target_names || []).join(", ") || "—"],
+                        ["parse error", c.parse_error], ["user turn index", c.user_turn_index]]) {
+    kv.append(el("span", "", k), el("span", "", v));
+  }
+  body.appendChild(kv);
+  body.append(el("h3", "", "Conversation (verbatim, as the model will see it)"));
+  for (const m of c.messages) {
+    const w = el("div", "msg"); w.append(el("div", "role", m.role), pre(m.content)); body.appendChild(w);
+  }
+  body.append(el("h3", "", "user_impl.py"), pre(c.user_impl), el("h3", "", "user_tests.py"), pre(c.user_tests));
+  body.append(el("h3", "", "User's tests on the user's code: " + c.user_run_status),
+    pre(Object.entries(c.user_test_results || {}).map(([k, v]) => `${v.padEnd(7)} ${k}`).join("\n")),
+    el("h3", "", "pytest output"), pre(c.run_output));
+  body.append(el("h3", "", "Decision"));
+  const row = el("div", "decide");
+  const d = state[c.prefix_id] || {};
+  for (const opt of DATA.decisions) {
+    const lab = el("label"); const r = el("input"); r.type = "radio"; r.name = "d" + c.prefix_id;
+    r.checked = d.decision === opt;
+    r.onchange = () => { state[c.prefix_id] = { ...(state[c.prefix_id] || {}), decision: opt }; save();
+                         badge.textContent = opt; badge.className = "d " + (opt === "keep" ? "keep" : "drop");
+                         renderHeader(); };
+    lab.append(r, document.createTextNode(opt)); row.appendChild(lab);
+  }
+  const note = el("textarea"); note.placeholder = "note"; note.value = d.note || "";
+  note.oninput = () => { state[c.prefix_id] = { ...(state[c.prefix_id] || {}), note: note.value }; save(); };
+  body.append(row, note);
+}
+
+function render() {
+  renderHeader();
+  const list = document.getElementById("list"); list.replaceChildren();
+  const cs = DATA.candidates[current];
+  if (!cs.length) list.appendChild(el("p", "muted", "No candidates in this stratum."));
+  for (const c of cs) list.appendChild(card(c));
+}
+
+document.getElementById("export").onclick = () => {
+  const decisions = DATA.strata.flatMap(s => DATA.candidates[s])
+    .filter(c => (state[c.prefix_id] || {}).decision)
+    .map(c => ({ prefix_id: c.prefix_id, decision: state[c.prefix_id].decision, note: state[c.prefix_id].note || "" }));
+  const blob = new Blob([JSON.stringify({ review_set_sha256: DATA.review_set_sha256,
+    manifest_name: DATA.manifest_name, decisions }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "review_decisions.json"; a.click(); URL.revokeObjectURL(a.href);
+};
+document.getElementById("import").onclick = () => document.getElementById("file").click();
+document.getElementById("file").onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const payload = JSON.parse(await f.text());
+  if (payload.review_set_sha256 !== DATA.review_set_sha256) { alert("That file is for a different shortlist."); return; }
+  state = {}; for (const d of payload.decisions) state[d.prefix_id] = { decision: d.decision, note: d.note || "" };
+  save(); render();
+};
+render();
+</script>
+</body>
+</html>

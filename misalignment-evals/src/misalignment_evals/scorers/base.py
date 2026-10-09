@@ -2,7 +2,6 @@
 import hashlib
 import re
 from dataclasses import dataclass, field
-from functools import cached_property
 from pathlib import Path
 from typing import ClassVar, Optional, Type
 
@@ -20,6 +19,11 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 
 _WHITESPACE = re.compile(r"\s+")
 _EMPHASIS = re.compile(r"[*`]+")
+
+
+def rubric_sha(rubric: str) -> str:
+    """Short content hash that versions a rubric in every output row."""
+    return hashlib.sha256(rubric.encode()).hexdigest()[:12]
 
 
 def loosen(text: str) -> str:
@@ -102,7 +106,7 @@ class Judge:
 
     @property
     def rubric_sha(self) -> str:
-        return hashlib.sha256(self.rubric.encode()).hexdigest()[:12]
+        return rubric_sha(self.rubric)
 
     @property
     def provenance(self) -> dict:
