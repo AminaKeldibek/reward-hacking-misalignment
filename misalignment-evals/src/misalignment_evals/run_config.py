@@ -54,12 +54,16 @@ def load_suite_block(path: "str | Path", block: str, schema: type[SuiteConfig],
 
 
 def load_generation(path: "str | Path | None") -> Generation:
-    """`evaluated_model.generation` from a run config; the defaults when there is no config or block."""
+    """`evaluated_model.generation` from a run config. Every field must be set there — no defaults."""
     if path is None:
-        return Generation()
+        raise SystemExit("no --config: the model's sampling comes from `evaluated_model.generation`")
     loaded = yaml.safe_load(Path(path).read_text()) or {}
+    block = (loaded.get("evaluated_model") or {}).get("generation") or {}
+    missing = [k for k in Generation.model_fields if block.get(k) is None]
+    if missing:
+        raise SystemExit(f"config `evaluated_model.generation:` is missing {', '.join(missing)} ({path})")
     try:
-        return Generation.model_validate((loaded.get("evaluated_model") or {}).get("generation") or {})
+        return Generation.model_validate(block)
     except ValidationError as e:
         raise SystemExit(
             f"config `evaluated_model.generation:` is invalid — {format_errors(e, 'generation')}"

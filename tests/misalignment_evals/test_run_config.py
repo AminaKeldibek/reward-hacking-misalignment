@@ -13,18 +13,23 @@ def _cfg(tmp_path, body):
 
 
 def test_load_generation_reads_evaluated_model(tmp_path):
-    cfg = _cfg(tmp_path, "evaluated_model:\n  generation: {temperature: 0.3, max_tokens: 512, "
+    cfg = _cfg(tmp_path, "evaluated_model:\n  generation: {temperature: 0.3, top_p: 0.9, max_tokens: 512, "
                          "reasoning_effort: null}\n")
-    assert load_generation(cfg) == Generation(temperature=0.3, top_p=0.95, max_tokens=512)
+    assert load_generation(cfg) == Generation(temperature=0.3, top_p=0.9, max_tokens=512)
 
 
-def test_load_generation_defaults_without_config_or_block(tmp_path):
-    assert load_generation(None) == load_generation(_cfg(tmp_path, "reward_hacking: {}\n")) == Generation()
+@pytest.mark.parametrize("body", ["reward_hacking: {}\n",
+                                  "evaluated_model:\n  generation: {temperature: 0.7, top_p: 0.95}\n"])
+def test_load_generation_has_no_defaults(tmp_path, body):
+    with pytest.raises(SystemExit, match="missing"):
+        load_generation(_cfg(tmp_path, body))
+    with pytest.raises(SystemExit, match="--config"):
+        load_generation(None)
 
 
 def test_load_generation_names_a_bad_key(tmp_path):
     with pytest.raises(SystemExit, match="temperature"):
-        load_generation(_cfg(tmp_path, "evaluated_model:\n  generation: {temperature: hot}\n"))
+        load_generation(_cfg(tmp_path, "evaluated_model:\n  generation: {temperature: hot, top_p: 0.9, max_tokens: 8}\n"))
 
 
 def test_export_served_model_env(monkeypatch):
