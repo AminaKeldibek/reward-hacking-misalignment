@@ -41,6 +41,7 @@ SERVE_VARS = {
     "tool_call_parser": "SV_TOOL_PARSER",
     "enable_tool_choice": "SV_ENABLE_TOOL_CHOICE",   # vLLM --enable-auto-tool-choice
     "enforce_eager": "SV_ENFORCE_EAGER",             # vLLM --enforce-eager
+    "chat_template": "SV_CHAT_TEMPLATE",             # vLLM --chat-template
 }
 vals = {var: str(s[key]).lower() if isinstance(s[key], bool) else s[key]
         for key, var in SERVE_VARS.items() if s.get(key) is not None}

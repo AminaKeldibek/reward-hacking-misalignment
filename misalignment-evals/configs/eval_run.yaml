@@ -23,6 +23,9 @@ serve:
                                     # false to serve without tools.
   enforce_eager: true               # vLLM --enforce-eager: no torch.compile / CUDA graphs. Slower
                                     # decode; on 2026-10-09 the H100 NVL pod died in CUDA-graph capture.
+  chat_template: misalignment-evals/configs/chat_templates/olmo3_tools_with_system.jinja
+                                    # Olmo 3's own template, plus its tool-calling instruction when a
+                                    # system message is present (the stock one drops it -> no tool calls)
   tool_call_parser: olmo3           # vLLM --tool-call-parser (used only when enable_tool_choice: true).
                                     # olmo3 parses the <function_calls>name(arg=..)</function_calls>
                                     # format Olmo 3's chat template emits. Qwen3: hermes.

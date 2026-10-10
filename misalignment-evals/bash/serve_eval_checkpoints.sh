@@ -33,6 +33,8 @@ eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CON
 : "${SV_MAX_LORA_RANK:?serve.max_lora_rank missing in $CONFIG}"
 : "${SV_ENABLE_TOOL_CHOICE:?serve.enable_tool_choice missing in $CONFIG}"
 : "${SV_ENFORCE_EAGER:?serve.enforce_eager missing in $CONFIG}"
+: "${SV_CHAT_TEMPLATE:?serve.chat_template missing in $CONFIG}"
+[ -f "$SV_CHAT_TEMPLATE" ] || { echo "ERROR: serve.chat_template not found: $SV_CHAT_TEMPLATE" >&2; exit 1; }
 
 source "$(dirname "$0")/eval_names.sh"
 
@@ -103,6 +105,7 @@ CUDA_VISIBLE_DEVICES="$GPU" \
     ${LORA_ARGS[@]+"${LORA_ARGS[@]}"} \
     ${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"} \
     ${EAGER_ARGS[@]+"${EAGER_ARGS[@]}"} \
+    --chat-template "$SV_CHAT_TEMPLATE" \
     --tensor-parallel-size "$SV_TP" \
     --max-model-len "$SV_MAX_LEN" \
     --gpu-memory-utilization "$SV_GPU_UTIL" \
