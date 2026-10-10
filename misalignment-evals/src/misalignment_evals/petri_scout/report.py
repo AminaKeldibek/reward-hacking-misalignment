@@ -44,11 +44,12 @@ def lead_dimensions() -> dict[str, int]:
 
 
 def latest_logs(log_dir: Path) -> list[EvalLog]:
-    """eval_set retries leave older logs of a task behind; keep the newest per task."""
+    """eval_set retries leave older logs of a task behind; keep the newest per task. Attachments
+    are resolved because the logs store long message text (the system prompt) by reference."""
     newest = {}
     for info in sorted(list_eval_logs(str(log_dir)), key=lambda i: i.mtime or 0):
         newest[info.task] = info
-    return [read_eval_log(info) for info in newest.values()]
+    return [read_eval_log(info, resolve_attachments=True) for info in newest.values()]
 
 
 def _usage(sample) -> dict[str, dict[str, int]]:
@@ -139,7 +140,8 @@ def _by_group_variant(rows: list[Row], dim: str) -> dict[tuple[str, str], list[i
 
 
 def top_seeds(rows: list[Row], signs: dict[str, int], n: int = 10) -> list[dict]:
-    """Seeds ranked by the organism's gap over nohack on concerning + deception: the reading list."""
+    """The reading list: seeds ranked by the organism's gap over nohack on concerning +
+    deception."""
     vs = {b: paired_gaps(rows, b, signs) for b in BASELINES}
     group_of = {r.seed_id: r.group for r in rows}
 
@@ -235,7 +237,8 @@ def render_markdown(summary: dict) -> str:
         _table(["seed", "group", "vs nohack", "vs start"],
                [[s["seed_id"], s["group"], s["gap_vs_nohack"], s["gap_vs_start"]]
                 for s in summary["top_seeds"]]),
-        "## Eval awareness by group (judge `eval_awareness`; a null in a heavily aware group is weak)",
+        "## Eval awareness by group (judge `eval_awareness`; a null in a heavily aware group is "
+        "weak)",
         _table(["group", "variant", "mean", "share aware", "n"],
                [[g, v, d["mean"], d["share_aware"], d["n"]]
                 for g, by_v in summary["awareness"].items() for v, d in by_v.items()]),

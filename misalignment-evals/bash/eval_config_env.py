@@ -8,7 +8,8 @@ model, checkpoint repo, port, ...) and the upload repo live only in the YAML (mi
 
 Usage:
     eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py misalignment-evals/configs/eval_run.yaml)"
-Missing base_model/checkpoint_repo are emitted empty so the caller can validate with ${SV_...:?}.
+No defaults: a serve/upload key that is missing or null is not emitted, so each caller states
+what it needs with ${SV_...:?} and a gap in the YAML fails loudly.
 """
 import shlex
 import sys
@@ -26,21 +27,26 @@ rh = (cfg.get("reward_hacking") or {}).get("evals") or {}
 ct = (cfg.get("control_evals") or {}).get("evals") or {}
 ad = cfg.get("adapters") or {}
 
-vals = {
-    "SV_BASE_MODEL": s.get("base_model") or "",
-    "SV_CKPT_REPO": s.get("checkpoint_repo") or "",
-    "SV_HOST": s.get("host", "0.0.0.0"),
-    "SV_PORT": s.get("port", 8001),
-    "SV_API_KEY": s.get("api_key", "inspectai"),
-    "SV_TP": s.get("tensor_parallel_size", 1),
-    "SV_MAX_LEN": s.get("max_model_len", 10240),
-    "SV_GPU_UTIL": s.get("gpu_memory_utilization", 0.90),
-    "SV_DTYPE": s.get("dtype", "bfloat16"),
-    "SV_MAX_LORA_RANK": s.get("max_lora_rank", 32),
-    "SV_TOOL_PARSER": s.get("tool_call_parser") or "",
-    # serve with tool calling (vLLM --enable-auto-tool-choice). Default on; set false to serve without.
-    "SV_ENABLE_TOOL_CHOICE": str(s.get("enable_tool_choice", True)).lower(),
-    "UP_REPO": u.get("repo", ""),
+SERVE_VARS = {
+    "base_model": "SV_BASE_MODEL",
+    "checkpoint_repo": "SV_CKPT_REPO",
+    "host": "SV_HOST",
+    "port": "SV_PORT",
+    "api_key": "SV_API_KEY",
+    "tensor_parallel_size": "SV_TP",
+    "max_model_len": "SV_MAX_LEN",
+    "gpu_memory_utilization": "SV_GPU_UTIL",
+    "dtype": "SV_DTYPE",
+    "max_lora_rank": "SV_MAX_LORA_RANK",
+    "tool_call_parser": "SV_TOOL_PARSER",
+    "enable_tool_choice": "SV_ENABLE_TOOL_CHOICE",   # vLLM --enable-auto-tool-choice
+    "enforce_eager": "SV_ENFORCE_EAGER",             # vLLM --enforce-eager
+}
+vals = {var: str(s[key]).lower() if isinstance(s[key], bool) else s[key]
+        for key, var in SERVE_VARS.items() if s.get(key) is not None}
+if u.get("repo"):
+    vals["UP_REPO"] = u["repo"]
+vals |= {
     # space-separated names for `for rh_eval in $RH_EVALS`; each eval's settings stay in the YAML
     # and are read by run_reward_hack_evals.py --config.
     "RH_EVALS": " ".join(rh),

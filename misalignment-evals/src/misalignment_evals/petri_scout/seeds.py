@@ -1,8 +1,8 @@
 """The frozen seed set: Petri `.md` seed files whose front matter carries `group` and `setting`.
 
-`chat` seeds run under the simulated-deployment eval's plain coding-assistant system prompt, which is
-appended to the seed as an instruction to the auditor; in `agentic` seeds the auditor writes the
-system prompt the role needs.
+`chat` seeds run under the simulated-deployment eval's plain coding-assistant system prompt,
+appended to the seed as an instruction to the auditor; in `agentic` seeds the auditor writes
+the system prompt the role needs.
 """
 import hashlib
 import json

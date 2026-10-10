@@ -101,6 +101,14 @@ def test_served_model_name_strips_the_inspect_provider_prefix():
     assert runner._served_model_name("openai/qwen-instruct") == "qwen-instruct"
 
 
+def test_preflight_key_matches_the_one_inspect_sends(monkeypatch):
+    monkeypatch.setenv("VLLM_API_KEY", "inspectai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    assert runner._served_api_key("openai-api/vllm/ckpt400", None) == "inspectai"
+    assert runner._served_api_key("openai/qwen-instruct", None) == "sk-x"
+    assert runner._served_api_key("openai-api/vllm/ckpt400", "cli") == "cli"   # --api-key wins
+
+
 def test_a_log_where_every_sample_errored_is_reported_as_errored(tmp_path):
     """status=="success" with fail_on_error=False can hide 100% errored samples (evilgenie, 7 Sep)."""
     from inspect_ai import Task, eval as inspect_eval

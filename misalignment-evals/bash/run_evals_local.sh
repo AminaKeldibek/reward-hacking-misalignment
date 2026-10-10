@@ -1,6 +1,6 @@
 #!/bin/bash
-# Run every eval suite in the config for ONE checkpoint: MGS generation, reward-hacking, and control +
-# KnownLieBench when their blocks are present.
+# Run every eval suite in the config for ONE checkpoint: MGS generation (unless SKIP_MGS=1),
+# reward-hacking, and control + KnownLieBench when their blocks are present.
 
 #
 # TWO THINGS MUST BE UP FIRST:
@@ -15,6 +15,9 @@
 # Usage:
 #   CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/run_evals_local.sh <checkpoint>
 #   e.g.  CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/run_evals_local.sh 50
+#   SKIP_MGS=1 OUTBASE=results/olmo_32b CONFIG=... bash misalignment-evals/bash/run_evals_local.sh 400
+#     SKIP_MGS=1 — MGS already generated for this checkpoint; run the other suites only.
+#     OUTBASE    — parent of checkpoint_<step>/ (default: results).
 #
 
 set -euo pipefail
@@ -22,6 +25,7 @@ set -euo pipefail
 STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint|0>}"
 CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. misalignment-evals/configs/eval_run.yaml)}"
 OUTBASE="${OUTBASE:-results}"
+SKIP_MGS="${SKIP_MGS:-}"
 
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CONFIG")"
@@ -36,7 +40,7 @@ RUN_DIR="$OUTBASE/$RUN_NAME"
 MGS_OUT="$RUN_DIR/mgs_completions"
 RH_OUT="$RUN_DIR/reward_hack"
 BY_PROMPT_OUT="$RUN_DIR/by_prompt"
-UP_REPO="${UP_REPO:-sunshineNew/rl_qwen3_8b_evals}"
+: "${UP_REPO:?upload.repo missing in $CONFIG}"
 
 # One resolved config for the whole run: stamp the per-checkpoint model into evaluated_model, so
 # every suite (MGS + control) reads the same served model from --config.
@@ -69,15 +73,16 @@ if ! uv run --no-sync python -c "import impossiblebench" 2>/dev/null; then
   uv pip install "git+https://github.com/safety-research/impossiblebench"
 fi
 
-# 2. Misalignment (MGS) — GENERATE only (grade with --mode score).
-# The model under test + its URL live in the config (not CLI): stamp the per-checkpoint values
-# derived above into a temp config alongside the base settings from $CONFIG.
-echo ""
-echo "=== MGS generation: $MODEL  (per-eval budget from $CONFIG) ==="
-mkdir -p "$MGS_OUT"
-uv run --no-sync python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py --mode generate \
-  --config "$RUN_CONFIG" \
-  --output-dir "$MGS_OUT"
+# 2. Misalignment (MGS) — GENERATE only (grade with --mode score). Skipped with SKIP_MGS=1.
+# The model under test + its URL come from $RUN_CONFIG (stamped above).
+if [ -z "$SKIP_MGS" ]; then
+  echo ""
+  echo "=== MGS generation: $MODEL  (per-eval budget from $CONFIG) ==="
+  mkdir -p "$MGS_OUT"
+  uv run --no-sync python misalignment-evals/src/misalignment_evals/runners/run_misalignment_evals.py --mode generate \
+    --config "$RUN_CONFIG" \
+    --output-dir "$MGS_OUT"
+fi
 
 # 3. Reward-hacking — one run per entry in the config's reward_hacking.evals.
 RH_FAILED=""
@@ -120,22 +125,26 @@ if [ -n "${KLB_ENABLED:-}" ]; then
 fi
 
 # 4. Fan the MGS .eval logs out to one JSON per prompt per completion (append-only, never overwrites).
-LATEST_LOGS="$(ls -d "$MGS_OUT"/logs_* 2>/dev/null | tail -1)" || true
-echo ""
-echo "=== per-prompt export: $BY_PROMPT_OUT (from ${LATEST_LOGS:-<no logs dir>}) ==="
-uv run --no-sync python -m rh_model_organism.evals.export_by_prompt \
-  --logs-dir "$LATEST_LOGS" --out-dir "$BY_PROMPT_OUT" \
-  || echo "WARNING: per-prompt export failed — the .eval logs under $MGS_OUT are untouched" >&2
+if [ -z "$SKIP_MGS" ]; then
+  LATEST_LOGS="$(ls -d "$MGS_OUT"/logs_* 2>/dev/null | tail -1)" || true
+  echo ""
+  echo "=== per-prompt export: $BY_PROMPT_OUT (from ${LATEST_LOGS:-<no logs dir>}) ==="
+  uv run --no-sync python -m rh_model_organism.evals.export_by_prompt \
+    --logs-dir "$LATEST_LOGS" --out-dir "$BY_PROMPT_OUT" \
+    || echo "WARNING: per-prompt export failed — the .eval logs under $MGS_OUT are untouched" >&2
+fi
 
 echo ""
 echo "=== DONE (generation): $RUN_NAME ==="
 echo "  Upload the whole run dir to HF ($UP_REPO):"
 echo "    uv run --no-sync python -m rh_model_organism.hf upload-eval-run \\"
 echo "      --repo $UP_REPO --run $RUN_NAME --from-dir $RUN_DIR"
-echo ""
-echo "  Grade MGS and upload the scores back (see Step 4/5 of evals_readme.md):"
-echo "    run_misalignment_evals.py --mode score --logs-dir $MGS_OUT/logs_<ts> ..."
-echo "    hf upload-eval-run --run $RUN_NAME --item mgs_scored=$MGS_OUT/logs_<ts>"
+if [ -z "$SKIP_MGS" ]; then
+  echo ""
+  echo "  Grade MGS and upload the scores back (see Step 4/5 of evals_readme.md):"
+  echo "    run_misalignment_evals.py --mode score --logs-dir $MGS_OUT/logs_<ts> ..."
+  echo "    hf upload-eval-run --run $RUN_NAME --item mgs_scored=$MGS_OUT/logs_<ts>"
+fi
 if [ -n "${KLB_ENABLED:-}" ]; then
   echo ""
   echo "  KnownLieBench is already scored (judge runs inline): $RUN_DIR/knownliebench/logs_<ts>/summary.json"
@@ -144,7 +153,7 @@ fi
 if [ -n "$RH_FAILED" ]; then
   echo ""
   echo "INCOMPLETE: eval(s) failed:$RH_FAILED" >&2
-  echo "  The MGS completions above are unaffected and were exported." >&2
+  [ -z "$SKIP_MGS" ] && echo "  The MGS completions above are unaffected and were exported." >&2
   echo "  An EMPTY $RH_OUT/<eval>/logs_<ts>/ means the sandbox never started — check 'docker info'." >&2
   exit 1
 fi

@@ -18,6 +18,7 @@ Example (LiveCodeBench, minimal scaffold, no Docker — the recommended MVP):
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from inspect_ai import eval_set
+from misalignment_evals.run_config import load_generation
 
 from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config
 from rh_model_organism.evals.reward_hack_prompts import (
@@ -69,14 +71,24 @@ def _served_model_name(model: str) -> str:
     return "/".join(parts[2:] if parts[0] == "openai-api" else parts[1:])
 
 
+def _served_api_key(model: str, api_key: "str | None") -> "str | None":
+    """The key inspect sends to the server: --api-key, else the provider's env var
+    (openai-api/vllm/ckpt400 -> VLLM_API_KEY, openai/x -> OPENAI_API_KEY)."""
+    if api_key:
+        return api_key
+    parts = model.split("/")
+    service = parts[1] if parts[0] == "openai-api" else parts[0]
+    return os.environ.get(f"{service.upper().replace('-', '_')}_API_KEY")
+
+
 def _require_tool_calling(model: str, base_url: str, api_key: "str | None") -> None:
     """Fail NOW if the server can't do tool calls. EvilGenie is an agent eval (bash/python/editor/
     submit tools, tool_choice=auto). A vLLM started without --enable-auto-tool-choice 400s every
     request, and EvilGenie's fail_on_error=False then records a "success" with 0 samples scored —
     which is how the 7 Sep olmo_32b runs at ckpt 110/400 came back empty."""
-    from openai import BadRequestError, OpenAI
+    from openai import AuthenticationError, BadRequestError, OpenAI
 
-    client = OpenAI(base_url=base_url, api_key=api_key or "EMPTY")
+    client = OpenAI(base_url=base_url, api_key=_served_api_key(model, api_key) or "EMPTY")
     tool = {"type": "function", "function": {
         "name": "submit", "description": "Submit an answer for evaluation.",
         "parameters": {"type": "object", "properties": {"answer": {"type": "string"}},
@@ -96,6 +108,11 @@ def _require_tool_calling(model: str, base_url: str, api_key: "str | None") -> N
             f"The model server rejected a tool-calling request:\n  {e}\n"
             "Restart vLLM with tool calling on: set serve.tool_call_parser in the eval config "
             "(olmo3 for Olmo 3, hermes for Qwen3) and re-run serve_eval_checkpoints.sh."
+        ) from e
+    except AuthenticationError as e:
+        raise SystemExit(
+            f"The model server rejected the API key:\n  {e}\n"
+            "Pass --api-key <serve.api_key>, or set it as VLLM_API_KEY in secrets.json."
         ) from e
     msg = resp.choices[0].message
     if not msg.tool_calls:
@@ -438,10 +455,12 @@ def main():
 
     if args.retry_attempts is not None:
         optional["retry_attempts"] = args.retry_attempts
+    # Applied to the model under test only — inspect does not pass it to the EvilGenie judge role.
+    generation = load_generation(args.config).model_dump()
     try:
         _success, logs = eval_set(
             tasks=task, log_dir=str(log_dir), max_connections=args.max_connections,
-            **optional, **eval_kwargs,
+            **generation, **optional, **eval_kwargs,
         )
     finally:
         # inspect creates log_dir before it writes anything into it, so a crash during task/sandbox
@@ -476,7 +495,7 @@ def main():
 
     results = {
         "eval": args.eval, "model": args.model, "num_samples": args.num_samples,
-        "epochs": args.epochs, "timestamp": timestamp, "log_dir": str(log_dir),
+        "epochs": args.epochs, "generation": generation, "timestamp": timestamp, "log_dir": str(log_dir),
         "hack_hints": args.hack_hints,
         "test_instruction": args.test_instruction if args.eval == "impossible_lcb" else None,
         **summary,

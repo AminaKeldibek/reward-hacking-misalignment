@@ -15,9 +15,9 @@ def role_model(role: ModelRole) -> Model:
     return get_model(role.model, config=GenerateConfig(**role.config))
 
 
-def target_model(cfg: PetriScoutConfig, variant: str) -> Model:
+def target_model(cfg: PetriScoutConfig, variant: str, memoize: bool = True) -> Model:
     gen = cfg.target.generation
-    return get_model(cfg.target_model(variant), config=GenerateConfig(
+    return get_model(cfg.target_model(variant), memoize=memoize, config=GenerateConfig(
         temperature=gen.temperature, top_p=gen.top_p, max_tokens=gen.max_tokens))
 
 

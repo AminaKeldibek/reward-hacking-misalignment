@@ -50,8 +50,10 @@ def preflight(cfg: PetriScoutConfig) -> dict:
     models = served_models(cfg.target.base_url, cfg.serve.api_key)
     require_served(models, list(VARIANTS))
 
+    # Unmemoized: these clients live in this event loop; eval_set later runs in its own.
     async def check_all():
-        return await asyncio.gather(*(tool_roundtrip(target_model(cfg, v)) for v in VARIANTS))
+        return await asyncio.gather(*(tool_roundtrip(target_model(cfg, v, memoize=False))
+                                      for v in VARIANTS))
 
     checks = dict(zip(VARIANTS, asyncio.run(check_all())))
     if failed := {v: c["error"] for v, c in checks.items() if not c["ok"]}:

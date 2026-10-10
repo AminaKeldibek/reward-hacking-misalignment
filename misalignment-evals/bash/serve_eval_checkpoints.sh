@@ -23,6 +23,16 @@ export HF_HOME="${HF_HOME:-/workspace/hf}"
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CONFIG")"
 : "${SV_BASE_MODEL:?serve.base_model missing in $CONFIG}"
+: "${SV_HOST:?serve.host missing in $CONFIG}"
+: "${SV_PORT:?serve.port missing in $CONFIG}"
+: "${SV_API_KEY:?serve.api_key missing in $CONFIG}"
+: "${SV_TP:?serve.tensor_parallel_size missing in $CONFIG}"
+: "${SV_MAX_LEN:?serve.max_model_len missing in $CONFIG}"
+: "${SV_GPU_UTIL:?serve.gpu_memory_utilization missing in $CONFIG}"
+: "${SV_DTYPE:?serve.dtype missing in $CONFIG}"
+: "${SV_MAX_LORA_RANK:?serve.max_lora_rank missing in $CONFIG}"
+: "${SV_ENABLE_TOOL_CHOICE:?serve.enable_tool_choice missing in $CONFIG}"
+: "${SV_ENFORCE_EAGER:?serve.enforce_eager missing in $CONFIG}"
 
 source "$(dirname "$0")/eval_names.sh"
 
@@ -64,13 +74,14 @@ fi
 # Tool calling, for agentic evals (evilgenie). Without it vLLM 400s every request that carries
 # tool_choice=auto — and evilgenie's fail_on_error=False turns that into a "success" with 0 scored.
 TOOL_ARGS=()
-if [ "${SV_ENABLE_TOOL_CHOICE:-true}" = "true" ]; then
-  if [ -n "${SV_TOOL_PARSER:-}" ]; then
-    TOOL_ARGS=(--enable-auto-tool-choice --tool-call-parser "$SV_TOOL_PARSER")
-  else
-    echo "WARNING: serve.tool_call_parser unset — tool-calling evals (evilgenie, bash_exfil) will fail." >&2
-  fi
+if [ "$SV_ENABLE_TOOL_CHOICE" = "true" ]; then
+  : "${SV_TOOL_PARSER:?serve.tool_call_parser missing in $CONFIG (required when serve.enable_tool_choice is true)}"
+  TOOL_ARGS=(--enable-auto-tool-choice --tool-call-parser "$SV_TOOL_PARSER")
 fi
+
+# Eager mode: skips torch.compile + CUDA-graph capture (serve.enforce_eager).
+EAGER_ARGS=()
+[ "$SV_ENFORCE_EAGER" = "true" ] && EAGER_ARGS=(--enforce-eager)
 
 # 2. serve the base model (+ this one adapter, unless baseline).
 echo ""
@@ -91,6 +102,7 @@ CUDA_VISIBLE_DEVICES="$GPU" \
   uv run --no-sync vllm serve "$SV_BASE_MODEL" \
     ${LORA_ARGS[@]+"${LORA_ARGS[@]}"} \
     ${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"} \
+    ${EAGER_ARGS[@]+"${EAGER_ARGS[@]}"} \
     --tensor-parallel-size "$SV_TP" \
     --max-model-len "$SV_MAX_LEN" \
     --gpu-memory-utilization "$SV_GPU_UTIL" \
