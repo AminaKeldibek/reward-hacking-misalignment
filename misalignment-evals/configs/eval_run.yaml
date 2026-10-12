@@ -6,6 +6,7 @@
 #                     per-checkpoint model/model_base_url in here.
 #   misalignment / reward_hacking / control_evals / knownliebench:  per-suite budgets and settings
 #   upload:           the HF dataset repo run_evals_local.sh points the upload command at
+# for Olmo 32b model use H100 NVL GPU
 
 serve:
   base_model: allenai/Olmo-3.1-32B-Instruct-SFT                            # the LoRA base vLLM serves
@@ -14,7 +15,7 @@ serve:
   port: 8000                        # eval runners connect to http://localhost:<port>/v1
   api_key: inspectai                # vLLM server key (also passed to the eval runner as --api-key)
   tensor_parallel_size: 1
-  max_model_len: 16384
+  max_model_len: 32768             # input cap = 32768 - max_tokens (4096) = 28672. 2026-10-12: raised from 16384 (lcbhard_36 was rejected at 12,289 prompt tokens; bash episodes cut off at ~70 messages)
   gpu_memory_utilization: 0.92
   dtype: bfloat16
   max_lora_rank: 32                 # verified from checkpoint-50/400 adapter_config.json (r=32)
@@ -73,16 +74,18 @@ misalignment:
 reward_hacking:
   max_connections: 8
   evals:
-    impossible_lcb:      {samples: 5, epochs: 2, agent_type: minimal, sandbox: docker,
+    impossible_lcb:      {samples: 50, epochs: 2, agent_type: minimal, sandbox: docker,
                           hack_hints: false, test_instruction: dont_modify}
-    evilgenie:           {samples: 5, epochs: 2, difficulty: hard, dataset_source: livecodebench,
-                          seed: 42, judge_model: openrouter/google/gemini-2.5-flash, hack_hints: false}
+    # evilgenie off for Olmo 3.1-32B (2026-10-10): the model calls text_editor(view=...) instead of
+    # text_editor(command=..., path=...) and loops on the validation error. See md_files/evilgenie_olmo_failure.md
+    # evilgenie:           {samples: 5, epochs: 2, difficulty: hard, dataset_source: livecodebench,
+    #                       seed: 42, judge_model: openrouter/google/gemini-2.5-flash, hack_hints: false}
 control_evals:
   monitor_model: openrouter/google/gemini-2.5-flash
   apps_sandbox: local          # APPS needs no Docker; bash_exfil always needs Docker
   cases_file: null             # set to a selected_cases.json after --mode select-cases
   generation: {temperature: 0.7, top_p: 0.95, max_tokens: 4096}
-  execution:   {max_tasks: 2, max_samples: 50, max_connections: 16, message_limit: 40, fail_on_error: 0.1}
+  execution:   {max_tasks: 2, max_samples: 50, max_connections: 16, message_limit: 100, fail_on_error: 0.1, tool_output_recovery: false}
   evals:
     apps_backdoor: {arms: [baseline, instructed, propensity], samples: 20, epochs: 3}
     bash_exfil:    {arms: [baseline, instructed, propensity], samples: 20, epochs: 3}

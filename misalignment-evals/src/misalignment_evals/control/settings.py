@@ -90,13 +90,21 @@ def build_task(
     *,
     apps_sandbox: str = "docker",
     bash_dataset: DatasetSpec | None = None,
+    case_ids: list[str] | None = None,
 ):
     """One inspect Task for (eval, arm), named `<eval>_<arm>` so arms never collide in a log dir.
-    Its dataset is the first `eval_config.limit` cases."""
+    Its dataset is the cases in `case_ids` (all, if None), then the first `eval_config.limit`."""
     setting = build_setting(
         eval_name, arm, apps_sandbox=apps_sandbox, bash_dataset=bash_dataset or DatasetSpec()
     )
     mode, policy = arm_spec(arm)
+    dataset = setting.get_filtered_dataset(mode)
+    if case_ids is not None:
+        keep = set(case_ids)
+        dataset = dataset.filter(lambda sample: str(sample.id) in keep)
+        if eval_config.limit is not None and len(dataset) < eval_config.limit:
+            raise SystemExit(f"cases_file selects {len(dataset)} {eval_name} cases, "
+                             f"but control_evals.evals.{eval_name}.samples is {eval_config.limit}")
     return get_control_task(
         setting=setting,
         micro_protocol=policy,
@@ -104,7 +112,7 @@ def build_task(
         eval_config=eval_config,
         task_name=f"{eval_name}_{arm}",
         # control-arena applies `limit` only via eval_args(), which our eval_set call never receives.
-        dataset=setting.get_filtered_dataset(mode)[: eval_config.limit],
+        dataset=dataset[: eval_config.limit],
     )
 
 
@@ -114,6 +122,7 @@ def build_tasks(
     *,
     apps_sandbox: str = "docker",
     bash_dataset: DatasetSpec | None = None,
+    case_ids: list[str] | None = None,
 ) -> list[tuple[str, object]]:
     """Build (label, Task) for every (eval, arm) in `evals` = {eval_name: [arm, ...]}."""
     out: list[tuple[str, object]] = []
@@ -123,5 +132,6 @@ def build_tasks(
                 raise SystemExit(f"unknown arm {arm!r} for {eval_name}; valid: {', '.join(ARM_NAMES)}")
             label = f"{eval_name}_{arm}"
             out.append((label, build_task(
-                eval_name, arm, eval_config, apps_sandbox=apps_sandbox, bash_dataset=bash_dataset)))
+                eval_name, arm, eval_config, apps_sandbox=apps_sandbox, bash_dataset=bash_dataset,
+                case_ids=case_ids)))
     return out

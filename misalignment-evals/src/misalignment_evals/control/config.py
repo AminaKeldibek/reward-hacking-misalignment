@@ -30,6 +30,8 @@ class Execution(BaseModel):
     message_limit: Optional[int] = None    # agentic step cap (bash); None = control-arena default
     time_limit: Optional[int] = None
     fail_on_error: Optional[float] = 0.1
+    # control-arena's recoverable tool-output excerpting: adds read_tool_output / grep_tool_output
+    tool_output_recovery: bool
 
 
 class ControlConfig(BaseModel):
@@ -37,15 +39,13 @@ class ControlConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # model / model_base_url / monitor_model may come from the config OR the CLI (the per-checkpoint
-    # wrapper injects the served model). They are resolved + required at run time, not parse time.
     model: Optional[str] = None             # untrusted model organism, e.g. openai-api/vllm/ckpt50
     model_base_url: Optional[str] = None    # -> VLLM_BASE_URL (vLLM served); None for API providers
     monitor_model: Optional[str] = None     # trusted monitor (the judge), e.g. openrouter/...
     apps_sandbox: Literal["docker", "podman", "local"] = "docker"
     cases_file: Optional[str] = None        # selected-cases manifest from select_cases (task-id whitelist)
     generation: Generation = Generation()
-    execution: Execution = Execution()
+    execution: Execution
     evals: dict[Literal["apps_backdoor", "bash_exfil"], EvalBudget]
 
     @model_validator(mode="after")

@@ -16,6 +16,7 @@ control_evals:
   model: openai-api/vllm/checkpoint_50
   model_base_url: http://localhost:8000/v1
   monitor_model: openrouter/google/gemini-2.5-flash
+  execution: {tool_output_recovery: false}
   evals:
     apps_backdoor: {samples: 20, epochs: 3}
     bash_exfil: {arms: [baseline, propensity], samples: 10, epochs: 2}
@@ -70,6 +71,7 @@ def test_model_from_evaluated_model_group(tmp_path):
       generation: {temperature: 0.3, top_p: 0.9, max_tokens: 2048, reasoning_effort: null}
     control_evals:
       monitor_model: openrouter/google/gemini-2.5-flash
+      execution: {tool_output_recovery: false}
       evals: {apps_backdoor: {samples: 1, epochs: 1}}
     """
     c = load_control_config(_write(tmp_path, cfg))

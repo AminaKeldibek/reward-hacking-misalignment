@@ -73,6 +73,7 @@ def _export_model_env(cfg: ControlConfig) -> None:
 
 def _build_eval_config(cfg: ControlConfig, samples: int, epochs: int, log_dir: Path):
     from control_arena.eval import ControlEvalConfig
+    from control_arena.tools import ToolOutputLimit
     from inspect_ai.model import GenerateConfig
 
     gen = cfg.generation
@@ -86,6 +87,7 @@ def _build_eval_config(cfg: ControlConfig, samples: int, epochs: int, log_dir: P
         epochs=epochs,
         max_tasks=ex.max_tasks,
         max_samples=ex.max_samples,
+        tool_output_limit=ToolOutputLimit() if ex.tool_output_recovery else None,
         log_dir=str(log_dir),
     )
     for name, value in (("token_limit", ex.token_limit), ("message_limit", ex.message_limit),
@@ -109,8 +111,6 @@ def _load_case_whitelist(cfg: ControlConfig) -> "dict[str, list[str]] | None":
 def build_run_tasks(cfg: ControlConfig, evals: dict, log_dir: Path, whitelist: "dict | None" = None):
     """One Task per (eval, arm), each with its own per-eval ControlEvalConfig (budgets differ).
     Shared by generation and case selection."""
-    from control_arena.settings.bash_arena.task.dataset import DatasetSpec
-
     from misalignment_evals.control.settings import build_tasks
 
     if "bash_exfil" in evals:
@@ -120,10 +120,8 @@ def build_run_tasks(cfg: ControlConfig, evals: dict, log_dir: Path, whitelist: "
     for eval_name, arms in evals.items():
         budget = cfg.evals[eval_name]
         ec = _build_eval_config(cfg, budget.samples, budget.epochs, log_dir)
-        ids = (whitelist or {}).get(eval_name)
-        use_wl = eval_name == "bash_exfil" and ids
-        bash_ds = DatasetSpec(task_id_whitelist=ids) if use_wl else DatasetSpec()
-        built = build_tasks({eval_name: arms}, ec, apps_sandbox=cfg.apps_sandbox, bash_dataset=bash_ds)
+        built = build_tasks({eval_name: arms}, ec, apps_sandbox=cfg.apps_sandbox,
+                            case_ids=(whitelist or {}).get(eval_name))
         tasks.extend(t for _, t in built)
     return tasks
 

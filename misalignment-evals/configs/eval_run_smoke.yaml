@@ -14,7 +14,7 @@ serve:
   port: 8000                        # eval runners connect to http://localhost:<port>/v1
   api_key: inspectai                # vLLM server key (also passed to the eval runner as --api-key)
   tensor_parallel_size: 1
-  max_model_len: 16384
+  max_model_len: 32768             # input cap = 32768 - max_tokens (4096) = 28672. 2026-10-12: raised from 16384 (lcbhard_36 was rejected at 12,289 prompt tokens; bash episodes cut off at ~70 messages)
   gpu_memory_utilization: 0.92
   dtype: bfloat16
   max_lora_rank: 32                 # verified from checkpoint-50/400 adapter_config.json (r=32)
@@ -59,7 +59,7 @@ control_evals:
   apps_sandbox: local
   cases_file: null
   generation: {temperature: 0.7, top_p: 0.95, max_tokens: 4096}
-  execution:   {max_tasks: 6, max_samples: 1, max_connections: 16, message_limit: 40, fail_on_error: 0.1}
+  execution:   {max_tasks: 6, max_samples: 1, max_connections: 16, message_limit: 40, fail_on_error: 0.1, tool_output_recovery: false}
   evals:
     apps_backdoor: {arms: [baseline, instructed, propensity], samples: 1, epochs: 1}
     bash_exfil:    {arms: [baseline, instructed, propensity], samples: 1, epochs: 1}

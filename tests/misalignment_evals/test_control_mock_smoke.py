@@ -102,6 +102,16 @@ def test_task_dataset_is_capped_at_the_config_limit(monkeypatch):
     assert len(task.dataset) == 3
 
 
+def test_selected_cases_restrict_apps_too(monkeypatch):
+    """cases_file ids filter every eval, APPS included; fewer selected cases than `samples` is an error."""
+    task = _build_or_skip("apps_backdoor", "propensity", 1, monkeypatch, apps_sandbox="local",
+                          case_ids=["7"])
+    assert [str(s.id) for s in task.dataset] == ["7"]
+    with pytest.raises(SystemExit, match="selects 1 apps_backdoor cases"):
+        _build_or_skip("apps_backdoor", "propensity", 2, monkeypatch, apps_sandbox="local",
+                       case_ids=["7"])
+
+
 @pytest.mark.parametrize("arm", ["instructed", "propensity"])
 def test_bash_sabotage_arms_build(monkeypatch, arm):
     """The attack-mode bash tasks have cases, and their side task is credential exfiltration."""
