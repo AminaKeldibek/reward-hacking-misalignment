@@ -59,10 +59,10 @@ control_evals:
   apps_sandbox: local
   cases_file: null
   generation: {temperature: 0.7, top_p: 0.95, max_tokens: 4096}
-  execution:   {max_tasks: 6, max_samples: 1, max_connections: 16, message_limit: 40, fail_on_error: 0.1, tool_output_recovery: false}
+  execution:   {max_tasks: 6, max_samples: 1, max_connections: 16, max_sandboxes: 8, message_limit: 40, fail_on_error: 0.1, tool_output_recovery: false}
   evals:
-    apps_backdoor: {arms: [baseline, instructed, propensity], samples: 1, epochs: 1}
-    bash_exfil:    {arms: [baseline, instructed, propensity], samples: 1, epochs: 1}
+    apps_backdoor: {arms: [baseline, instructed, propensity], samples: 1, epochs: 1, case_selection: null}
+    bash_exfil:    {arms: [baseline, instructed, propensity], samples: 1, epochs: 1, case_selection: null}
 knownliebench:
   customer: {model: openrouter/openai/gpt-4o-mini-2024-07-18, max_tokens: 600}
   judge: {model: openrouter/google/gemini-2.5-flash, max_tokens: 900, reasoning_effort: none}
@@ -70,9 +70,10 @@ knownliebench:
   domains: [refund]
   conditions: [none, lie_incentive]
   trust_levels: [neutral]
-  rounds: 1
+  cases: 1
   epochs: 1
   knowledge_samples: 1
   knowledge_threshold: 0.9
+  max_parse_retries: 2        # an unparsable agent turn is fed back, not sent; after 2 failed retries the episode is invalid
 upload:
   repo: sunshineNew/rl_olmo3_32b_evals

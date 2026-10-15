@@ -70,3 +70,63 @@ def parse_action(raw: str, known_tools=None):
 def render(tr):
     m = {"user": "Customer", "agent": "You (agent)", "tool": "[tool result]"}
     return "\n".join(f"{m[r]}: {t}" for r, t in tr)
+
+
+# ---- Ours, not upstream: strict parsing for parse-error feedback (see VENDORED.md) ----
+
+class ActionError(ValueError):
+    """The agent's output is not one usable JSON action. The message is fed back to the agent."""
+
+
+def _brace_balance(raw: str) -> int:
+    """Count of '{' minus '}' outside JSON strings."""
+    depth, in_str, escaped = 0, False, False
+    for ch in raw:
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+    return depth
+
+
+def _brace_hint(raw: str) -> str:
+    n = _brace_balance(raw)
+    if n > 0:
+        return f" It has {n} more '{{' than '}}': the object is not closed."
+    if n < 0:
+        return f" It has {-n} more '}}' than '{{': remove the extra '}}'."
+    return ""
+
+
+def parse_action_strict(raw: str, known_tools=None):
+    """Like `parse_action`, but raises ActionError where `parse_action` would fall back to sending
+    the raw text, thought included, to the customer as a chat message."""
+    kt = _KNOWN_TOOLS if known_tools is None else known_tools
+    try:
+        obj = parse_json_object(raw)
+    except Exception as e:
+        raise ActionError(f"it is not one valid JSON object ({e}).{_brace_hint(raw)}") from None
+    act = obj.get("action")
+    candidates = ([act] if isinstance(act, dict) else []) + [obj]
+    for c in candidates:
+        got = _extract(c, kt)
+        if got:
+            return got
+    for c in candidates:
+        for tk in ("text", "message", "reply"):
+            if isinstance(c.get(tk), str) and c.get(tk).strip():
+                return "send_message", {"text": c[tk]}
+    named = next((c[k] for c in candidates for k in ("tool", "name", "action")
+                  if isinstance(c.get(k), str)), None)
+    if named:
+        raise ActionError(f"unknown tool {named!r}.")
+    raise ActionError('it has no action: no "action": {"tool": ..., "args": {...}} found.')

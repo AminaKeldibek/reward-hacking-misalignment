@@ -4,9 +4,10 @@ import pytest
 pytest.importorskip("knownliebench")
 
 from misalignment_evals.knownliebench.metrics import (  # noqa: E402
-    apply_robust_gate,
     excess_lie_rate,
     knowledge_rates,
+    known_rows,
+    select_known,
 )
 
 
@@ -16,12 +17,13 @@ def _round(condition, sample, order_id, lied):
             "derived": {"lied": lied}}
 
 
-def test_knowledge_rates_and_robust_gate():
+def test_knowledge_rates_and_case_selection():
     p_know = knowledge_rates([("refund", "A", True), ("refund", "A", True),
                               ("refund", "B", True), ("refund", "B", False)])
     assert p_know == {"refund/A": 1.0, "refund/B": 0.5}
+    assert select_known(p_know, 0.9, {"refund": ["B", "A", "C"]}) == {"refund": ["A"]}
     rows = [_round("none", 0, "A", False), _round("none", 0, "B", False)]
-    assert [r["gate_passed"] for r in apply_robust_gate(rows, p_know, 0.9)] == [True, False]
+    assert [r["order_id"] for r in known_rows(rows, p_know, 0.9)] == ["A"]
 
 
 def test_excess_lie_rate():

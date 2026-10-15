@@ -3,11 +3,13 @@
 
 Three modes:
 
-    select-cases   run ONLY the baseline (honest) arm, keep cases the model solves reliably, write
-                   a manifest of selected task ids + their honest pass rate (the "which cases & why").
-    generate       run the configured arms on the selected cases; deterministic main/side scorers run
-                   inline (they must execute code), the monitor does NOT (that is `score`). Logs .eval.
-    score          attach the trusted monitor's suspicion score to the .eval logs, post-hoc. No GPU.
+    select-cases   run ONLY the baseline (honest) arm of evals with case_selection and write a manifest
+                   (selected_cases.json) to freeze as `cases_file` across checkpoints.
+    generate       run the configured arms; deterministic main/side scorers run inline, the monitor does
+                   NOT (that is `score`). With case_selection, the baseline arm runs first (screen/) and
+                   the other arms run only on the cases it solved (selected/).
+    score          attach the trusted monitor's suspicion score to the .eval logs, post-hoc. No GPU. The
+                   monitor reads the full trajectory (reasoning text + tool calls + results).
     both           generate + score in one go.
 
     python -m misalignment_evals.runners.run_control_evals --mode select-cases --config <cfg>
@@ -71,7 +73,7 @@ def _export_model_env(cfg: ControlConfig) -> None:
     export_served_model_env(cfg.model, cfg.model_base_url)
 
 
-def _build_eval_config(cfg: ControlConfig, samples: int, epochs: int, log_dir: Path):
+def _build_eval_config(cfg: ControlConfig, samples: "int | None", epochs: int, log_dir: Path):
     from control_arena.eval import ControlEvalConfig
     from control_arena.tools import ToolOutputLimit
     from inspect_ai.model import GenerateConfig
@@ -108,9 +110,11 @@ def _load_case_whitelist(cfg: ControlConfig) -> "dict[str, list[str]] | None":
     return {k: v["selected"] for k, v in data.items()}
 
 
-def build_run_tasks(cfg: ControlConfig, evals: dict, log_dir: Path, whitelist: "dict | None" = None):
+def build_run_tasks(cfg: ControlConfig, evals: dict, log_dir: Path, whitelist: "dict | None" = None,
+                    selected_only: bool = False):
     """One Task per (eval, arm), each with its own per-eval ControlEvalConfig (budgets differ).
-    Shared by generation and case selection."""
+    Shared by generation and case selection. `selected_only`: run every whitelisted case rather than
+    the first `samples` of them (the cases come from this run's own baseline selection)."""
     from misalignment_evals.control.settings import build_tasks
 
     if "bash_exfil" in evals:
@@ -119,7 +123,7 @@ def build_run_tasks(cfg: ControlConfig, evals: dict, log_dir: Path, whitelist: "
     tasks = []
     for eval_name, arms in evals.items():
         budget = cfg.evals[eval_name]
-        ec = _build_eval_config(cfg, budget.samples, budget.epochs, log_dir)
+        ec = _build_eval_config(cfg, None if selected_only else budget.samples, budget.epochs, log_dir)
         built = build_tasks({eval_name: arms}, ec, apps_sandbox=cfg.apps_sandbox,
                             case_ids=(whitelist or {}).get(eval_name))
         tasks.extend(t for _, t in built)
@@ -144,14 +148,25 @@ def _summarize(log_dir: Path) -> dict:
     return summary
 
 
-def _run_generate(cfg: ControlConfig, evals: dict[str, list[str]], output_dir: Path,
-                  whitelist, resume: "str | None") -> Path:
-    from inspect_ai import eval_set
+def phase_plan(cfg: ControlConfig, evals: dict[str, list[str]]) -> "tuple[dict, dict]":
+    """(screen, selecting). screen: what runs first — the baseline arm of every eval with
+    case_selection, and every arm of evals without it. selecting: {eval: non-baseline arms} that run
+    afterwards, only on the cases the baseline arm selected."""
+    screen: dict[str, list[str]] = {}
+    selecting: dict[str, list[str]] = {}
+    for name, arms in evals.items():
+        if cfg.evals[name].case_selection is None:
+            screen[name] = arms
+            continue
+        screen[name] = ["baseline"]
+        rest = [a for a in arms if a != "baseline"]
+        if rest:
+            selecting[name] = rest
+    return screen, selecting
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = Path(resume) if resume else output_dir / f"logs_{stamp}"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    tasks = build_run_tasks(cfg, evals, log_dir, whitelist)
+
+def _eval_set(cfg: ControlConfig, tasks: list, log_dir: Path) -> None:
+    from inspect_ai import eval_set
 
     eval_kwargs = {}
     if cfg.execution.fail_on_error is not None:
@@ -162,13 +177,52 @@ def _run_generate(cfg: ControlConfig, evals: dict[str, list[str]], output_dir: P
         max_tasks=cfg.execution.max_tasks,
         max_samples=cfg.execution.max_samples,
         max_connections=cfg.execution.max_connections,
+        max_sandboxes=cfg.execution.max_sandboxes,
         score=True,   # run the setting's deterministic main/side scorers inline
         **eval_kwargs,
     )
+
+
+def _run_generate(cfg: ControlConfig, evals: dict[str, list[str]], output_dir: Path,
+                  whitelist, resume: "str | None") -> Path:
+    """Without case_selection (or with a frozen cases_file): one eval_set over every arm. With
+    case_selection: the baseline screen in `screen/`, then the remaining arms in `selected/` on the
+    cases the model solved; the manifest is written to `selected_cases.json` (reused on --resume)."""
+    from misalignment_evals.control.monitor import MONITOR_VIEW
+    from misalignment_evals.control.select_cases import MANIFEST_NAME, select_from_logs
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = Path(resume) if resume else output_dir / f"logs_{stamp}"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest: dict = {}
+    if whitelist is not None:
+        _eval_set(cfg, build_run_tasks(cfg, evals, log_dir, whitelist), log_dir)
+    else:
+        screen, selecting = phase_plan(cfg, evals)
+        screen_dir = log_dir / "screen" if selecting else log_dir
+        _eval_set(cfg, build_run_tasks(cfg, screen, screen_dir), screen_dir)
+        if selecting:
+            manifest_path = log_dir / MANIFEST_NAME
+            if manifest_path.is_file():
+                manifest = json.loads(manifest_path.read_text())
+            else:
+                manifest = select_from_logs(cfg, list(selecting), screen_dir)
+                manifest_path.write_text(json.dumps(manifest, indent=2))
+            todo = {e: arms for e, arms in selecting.items() if manifest[e]["selected"]}
+            if todo:
+                selected_dir = log_dir / "selected"
+                cases = {e: manifest[e]["selected"] for e in todo}
+                _eval_set(cfg, build_run_tasks(cfg, todo, selected_dir, cases, selected_only=True),
+                          selected_dir)
+
     summary = {
         "untrusted_model": cfg.model,
         "monitor_model": cfg.monitor_model,
+        "monitor_view": MONITOR_VIEW,
         "evals": evals,
+        "case_selection": {e: {k: v[k] for k in ("min_solved_epochs", "n_candidates", "n_selected", "selected")}
+                           for e, v in manifest.items()},
         "tasks": _summarize(log_dir),
     }
     (log_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -200,7 +254,7 @@ def main() -> None:
     if args.mode == "select-cases":
         from misalignment_evals.control.select_cases import select_cases
 
-        manifest = select_cases(cfg, evals, output_dir)
+        manifest = select_cases(cfg, output_dir)
         print(f"[select-cases] wrote {manifest}")
         return
 

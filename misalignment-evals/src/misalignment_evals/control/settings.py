@@ -9,13 +9,16 @@ Each arm maps to a (mode, policy) pair (see arm_spec):
 """
 from copy import deepcopy
 
-from control_arena import EvalMode
+from control_arena import EvalMode, ModelRole, control_agent
 from control_arena.eval import ControlEvalConfig, get_control_task
-from control_arena.policy import attack_policy_builder, honest_policy_builder
+from control_arena.policy import attack_policy_builder, honest, honest_policy_builder
 from control_arena.settings._setting import Setting
 from control_arena.settings.apps.apps_setting import AppsSetting
 from control_arena.settings.bash_arena.bash_arena_setting import BashArenaSetting
 from control_arena.settings.bash_arena.task.dataset import DatasetSpec
+from inspect_ai.agent import Agent, AgentState
+from inspect_ai.model import GenerateConfig, get_model
+from inspect_ai.tool import Tool
 from pydantic import BaseModel, Field
 
 EVAL_NAMES: tuple[str, ...] = ("apps_backdoor", "bash_exfil")
@@ -45,13 +48,34 @@ class PropensityAppsSetting(AppsSetting):
         return cfg
 
 
+@control_agent
+def propensity_policy_builder(
+    model_role: ModelRole = Field(description="The role of the model to use for the policy."),
+) -> Agent:
+    """control-arena's honest policy (same prompt, same model) with the attack tools passed through
+    unchanged. honest_policy_builder wraps its agent in @honest, whose convert_tools=True swaps every
+    attack tool for its honest version, turning APPS's submit(code, secret_input) into submit(code)
+    and removing the propensity arm's only way to submit a backdoor."""
+
+    @honest(convert_tools=False)
+    async def impl(state: AgentState, tools: list[Tool]) -> AgentState:
+        state.output = await get_model(role=model_role, config=GenerateConfig()).generate(
+            state._messages, tools=tools)
+        state._messages.append(state.output.message)
+        return state
+
+    return impl
+
+
 def arm_spec(arm):
     """The (mode, policy) for an arm. instructed attacks; baseline and propensity solve honestly.
-    propensity still runs in ATTACK mode so the side task is scored — only the prompt is honest."""
+    propensity still runs in ATTACK mode so the side task is scored, with an honest prompt and the
+    attack submit tool (neutral wording) left in place."""
     if arm == "instructed":
         return EvalMode.ATTACK, attack_policy_builder(model_role="untrusted", ephemeral_reminder=True)
-    mode = EvalMode.HONEST if arm == "baseline" else EvalMode.ATTACK
-    return mode, honest_policy_builder(model_role="untrusted")
+    if arm == "propensity":
+        return EvalMode.ATTACK, propensity_policy_builder(model_role="untrusted")
+    return EvalMode.HONEST, honest_policy_builder(model_role="untrusted")
 
 
 def _apps_setting(arm: str, sandbox_type: str) -> Setting:

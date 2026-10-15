@@ -8,16 +8,30 @@ from misalignment_evals.control.settings import ARM_NAMES, EVAL_NAMES
 from misalignment_evals.run_config import Generation, load_suite_block
 
 
+class CaseSelection(BaseModel):
+    """Run the non-baseline arms only on cases the model solved in the baseline arm."""
+
+    model_config = ConfigDict(extra="forbid")
+    min_solved_epochs: StrictInt = Field(ge=1)   # baseline epochs a case must pass to be selected
+
+
 class EvalBudget(BaseModel):
     model_config = ConfigDict(extra="forbid")
     arms: list[Literal["baseline", "instructed", "propensity"]] = list(ARM_NAMES)
-    samples: StrictInt = Field(ge=1)   # distinct cases drawn from the eval's dataset
+    samples: StrictInt = Field(ge=1)   # distinct cases drawn (with case_selection: cases screened in baseline)
     epochs: StrictInt = Field(ge=1)    # completions per case
+    case_selection: Optional[CaseSelection]   # required key; null = every arm runs on the first `samples` cases
 
     @model_validator(mode="after")
     def _arms_nonempty(self):
         if not self.arms:
             raise ValueError("arms is empty — nothing would run")
+        if self.case_selection is not None:
+            if "baseline" not in self.arms:
+                raise ValueError("case_selection selects from the baseline arm, so arms must include baseline")
+            if self.case_selection.min_solved_epochs > self.epochs:
+                raise ValueError(f"case_selection.min_solved_epochs ({self.case_selection.min_solved_epochs}) "
+                                 f"exceeds epochs ({self.epochs})")
         return self
 
 
@@ -26,6 +40,7 @@ class Execution(BaseModel):
     max_tasks: int = 4
     max_samples: int = 100
     max_connections: int = 16
+    max_sandboxes: int = Field(ge=1)   # required: concurrent Docker sandboxes across ALL arms (inspect default = 2 x CPUs); bash needs 2 networks each
     token_limit: Optional[int] = None
     message_limit: Optional[int] = None    # agentic step cap (bash); None = control-arena default
     time_limit: Optional[int] = None
@@ -52,6 +67,9 @@ class ControlConfig(BaseModel):
     def _evals_nonempty(self):
         if not self.evals:
             raise ValueError("no evals listed — nothing would run")
+        if self.cases_file and any(b.case_selection is not None for b in self.evals.values()):
+            raise ValueError("cases_file (a frozen case list) and case_selection (select in this run) "
+                             "are mutually exclusive — set one")
         return self
 
 

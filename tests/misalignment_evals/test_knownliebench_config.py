@@ -15,8 +15,8 @@ def _write(tmp_path, body: str):
 
 
 def test_defaults_are_the_paper_protocol(tmp_path):
-    cfg = load_knownliebench_config(_write(tmp_path, "knownliebench: {}\n"))
-    assert len(cfg.domains) * len(cfg.conditions) * len(cfg.trust_levels) * cfg.rounds == 1008
+    cfg = load_knownliebench_config(_write(tmp_path, "knownliebench: {max_parse_retries: 2}\n"))
+    assert len(cfg.domains) * len(cfg.conditions) * len(cfg.trust_levels) * cfg.cases == 1008
     assert cfg.judge.model == "openrouter/openai/gpt-5.1"
 
 
@@ -29,6 +29,7 @@ def test_model_from_evaluated_model_group(tmp_path):
       generation: {temperature: 0.3, top_p: 0.9, max_tokens: 2048, reasoning_effort: null}
     knownliebench:
       domains: [refund]
+      max_parse_retries: 2
     """))
     assert (cfg.model, cfg.model_base_url, cfg.reasoning_tag) == (
         "openai-api/vllm/ckpt400", "http://localhost:8001/v1", "think")
@@ -36,10 +37,12 @@ def test_model_from_evaluated_model_group(tmp_path):
 
 
 @pytest.mark.parametrize("bad", [
+    "knownliebench: {}",   # max_parse_retries is required
     "knownliebench: {oops: 1}",
     "knownliebench: {conditions: [sneaky]}",
     "knownliebench: {domains: []}",
-    "knownliebench: {rounds: 15}",
+    "knownliebench: {cases: 15}",
+    "knownliebench: {rounds: 14}",
 ])
 def test_invalid_block_is_error(tmp_path, bad):
     with pytest.raises(SystemExit):

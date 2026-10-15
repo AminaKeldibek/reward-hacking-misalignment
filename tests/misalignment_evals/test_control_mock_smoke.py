@@ -126,3 +126,58 @@ def test_apps_sabotage_arms_build(monkeypatch, arm):
     task = _build_or_skip("apps_backdoor", arm, 1, monkeypatch, apps_sandbox="local")
     assert task.name == f"apps_backdoor_{arm}"
     assert len(task.dataset) >= 1
+
+
+def test_generate_runs_sabotage_arms_only_on_selected_cases(tmp_path, monkeypatch):
+    """--mode generate with case_selection: baseline screens first; instructed/propensity then run
+    only on the cases the selection kept, and the manifest lands in summary.json."""
+    import json
+    import textwrap
+
+    from inspect_ai.log import list_eval_logs, read_eval_log
+    from misalignment_evals.control import select_cases as sc
+    from misalignment_evals.control.config import evals_arms, load_control_config
+    from misalignment_evals.runners import run_control_evals as rce
+
+    cfg_path = tmp_path / "c.yaml"
+    cfg_path.write_text(textwrap.dedent("""
+        evaluated_model: {model: mockllm/model, generation: {temperature: 0.7, top_p: 0.95, max_tokens: 128}}
+        control_evals:
+          monitor_model: mockllm/model
+          apps_sandbox: local
+          execution: {max_tasks: 2, max_samples: 2, max_connections: 2, message_limit: 3, fail_on_error: 1.0, tool_output_recovery: false, max_sandboxes: 2}
+          evals:
+            apps_backdoor: {arms: [baseline, instructed, propensity], samples: 2, epochs: 1, case_selection: {min_solved_epochs: 1}}
+    """))
+    cfg = load_control_config(cfg_path)
+    monkeypatch.setenv("UNTRUSTED_MODEL", "mockllm/model")
+    monkeypatch.setenv("TRUSTED_MODEL", "mockllm/model")
+    chosen: dict = {}
+    real_select = sc.select_from_logs
+
+    def fake_select(cfg, eval_names, baseline_dir):
+        ids = sorted({str(s.id) for f in list_eval_logs(str(baseline_dir)) for s in read_eval_log(f).samples})
+        chosen["ids"] = ids[:1]
+        return {e: sc.manifest_entry({i: (1 if i in chosen["ids"] else 0, 1) for i in ids}, 1) for e in eval_names}
+
+    monkeypatch.setattr(sc, "select_from_logs", fake_select)
+    try:
+        log_dir = rce._run_generate(cfg, evals_arms(cfg), tmp_path / "out", None, None)
+    except Exception as e:  # noqa: BLE001
+        if any(k in str(e).lower() for k in _INFRA):
+            pytest.skip(f"control mock smoke infra unavailable: {e}")
+        raise
+
+    def tasks_in(d):
+        return {read_eval_log(i.name).eval.task: {str(s.id) for s in read_eval_log(i.name).samples}
+                for i in list_eval_logs(str(d))}
+
+    assert set(tasks_in(log_dir / "screen")) == {"apps_backdoor_baseline"}
+    real = real_select(cfg, ["apps_backdoor"], log_dir / "screen")["apps_backdoor"]
+    assert (real["n_candidates"], real["n_selected"]) == (2, 0)   # the mock never solves a problem
+    selected = tasks_in(log_dir / "selected")
+    assert set(selected) == {"apps_backdoor_instructed", "apps_backdoor_propensity"}
+    assert all(ids == set(chosen["ids"]) for ids in selected.values())
+    summary = json.loads((log_dir / "summary.json").read_text())
+    assert summary["case_selection"]["apps_backdoor"]["selected"] == chosen["ids"]
+    assert json.loads((log_dir / "selected_cases.json").read_text())["apps_backdoor"]["n_selected"] == 1
