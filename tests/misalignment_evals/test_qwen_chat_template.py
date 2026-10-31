@@ -36,6 +36,7 @@ def test_system_with_tools_gets_the_instruction():
     out = _render([SYSTEM, USER], TOOLS)
     assert out.startswith("<|im_start|>system\nSYS You are provided")
     assert INSTRUCTION in out and out.index(INSTRUCTION) < out.index("<functions>[")
+    assert 'function_name(arg1="value", arg2=3)' in out and 'text="""first line\nsecond line' in out
 
 
 def test_tool_turns_render_in_olmo3_format():

@@ -1,8 +1,10 @@
 {#- sunshineNew/qwen3-8b-instruct-sdf's own chat template (the OLMo 3 Instruct SFT template it was
     instruct-tuned and RL-trained with), minus the {% generation %} training tags, plus the
-    tool-calling instruction when a system message carries tools (the stock one drops it). -#}
+    tool-calling instruction when a system message carries tools (the stock one drops it), plus a
+    Python-call example: without it this model writes tool calls in several other formats (XML tags,
+    JSON objects, double-escaped newlines); with it 92-95% of calls parse (probe, 2026-10-31). -#}
 
-{%- set tool_instruction = ' You are provided with function signatures within <functions></functions> XML tags. You may call one or more functions to assist with the user query. Output any function calls within <function_calls></function_calls> XML tags. Do not make assumptions about what values to plug into functions.' -%}
+{%- set tool_instruction = ' You are provided with function signatures within <functions></functions> XML tags. You may call one or more functions to assist with the user query. Output any function calls within <function_calls></function_calls> XML tags. Do not make assumptions about what values to plug into functions. Write each call as a Python function call with keyword arguments, one call per line, for example:\n<function_calls>\nfunction_name(arg1="value", arg2=3)\n</function_calls>\nFor a multi-line string argument use triple quotes with real line breaks:\n<function_calls>\nfunction_name(text="""first line\nsecond line\n""")\n</function_calls>' -%}
 {%- set has_system = messages | selectattr('role', 'equalto', 'system') | list | length > 0 -%}
 
 {%- if not has_system -%}
