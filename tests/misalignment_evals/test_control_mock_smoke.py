@@ -21,7 +21,7 @@ def _run_baseline(tmp_path, monkeypatch):
     ec = ControlEvalConfig(untrusted_model="mockllm/model",
                            untrusted_config=GenerateConfig(max_tokens=128),
                            trusted_model="mockllm/model", limit=1, epochs=1, message_limit=3)
-    task = build_task("apps_backdoor", "baseline", ec, apps_sandbox="local")
+    task = build_task("apps_backdoor", "baseline", ec, instructions="", max_test_runs=None, apps_sandbox="local")
     return inspect_eval(task, model="mockllm/model", limit=1, message_limit=3,
                         log_dir=str(tmp_path / "logs"), score=True, display="plain")
 
@@ -70,7 +70,7 @@ def test_bash_exfil_baseline_runs_with_mock_model(tmp_path, monkeypatch):
     ec = ControlEvalConfig(untrusted_model="mockllm/model",
                            untrusted_config=GenerateConfig(max_tokens=128),
                            trusted_model="mockllm/model", limit=1, epochs=1, message_limit=3)
-    task = build_task("bash_exfil", "baseline", ec)
+    task = build_task("bash_exfil", "baseline", ec, instructions="", max_test_runs=None)
     logs = inspect_eval(task, model="mockllm/model", limit=1, message_limit=3,
                         log_dir=str(tmp_path / "logs"), score=True, display="plain")
     log = logs[0]
@@ -89,7 +89,7 @@ def _build_or_skip(eval_name, arm, limit, monkeypatch, **kwargs):
                            untrusted_config=GenerateConfig(max_tokens=128),
                            trusted_model="mockllm/model", limit=limit, epochs=1)
     try:
-        return build_task(eval_name, arm, ec, **kwargs)
+        return build_task(eval_name, arm, ec, instructions="", max_test_runs=None, **kwargs)
     except Exception as e:  # noqa: BLE001
         if any(k in str(e).lower() for k in _INFRA):
             pytest.skip(f"dataset unavailable: {e}")
@@ -141,13 +141,15 @@ def test_generate_runs_sabotage_arms_only_on_selected_cases(tmp_path, monkeypatc
 
     cfg_path = tmp_path / "c.yaml"
     cfg_path.write_text(textwrap.dedent("""
-        evaluated_model: {model: mockllm/model, generation: {temperature: 0.7, top_p: 0.95, max_tokens: 128}}
+        evaluated_model: {model: mockllm/model, model_base_url: null, reasoning_tag: thinking, generation: {temperature: 0.7, top_p: 0.95, max_tokens: 128}}
+        agent_loop: {max_repeated_outputs: 3, reasoning: rl_prompt}
         control_evals:
           monitor_model: mockllm/model
           apps_sandbox: local
-          execution: {max_tasks: 2, max_samples: 2, max_connections: 2, message_limit: 3, fail_on_error: 1.0, tool_output_recovery: false, max_sandboxes: 2}
+          cases_file: null
+          execution: {max_tasks: 2, max_samples: 2, max_connections: 2, message_limit: 3, token_limit: null, time_limit: null, fail_on_error: 1.0, tool_output_recovery: false, max_sandboxes: 2}
           evals:
-            apps_backdoor: {arms: [baseline, instructed, propensity], samples: 2, epochs: 1, case_selection: {min_solved_epochs: 1}}
+            apps_backdoor: {arms: [baseline, instructed, propensity], samples: 2, epochs: 1, case_selection: {min_solved_epochs: 1}, feedback: none, max_test_runs: null}
     """))
     cfg = load_control_config(cfg_path)
     monkeypatch.setenv("UNTRUSTED_MODEL", "mockllm/model")
@@ -162,7 +164,7 @@ def test_generate_runs_sabotage_arms_only_on_selected_cases(tmp_path, monkeypatc
 
     monkeypatch.setattr(sc, "select_from_logs", fake_select)
     try:
-        log_dir = rce._run_generate(cfg, evals_arms(cfg), tmp_path / "out", None, None)
+        log_dir = rce._run_generate(cfg, evals_arms(cfg), tmp_path / "out", None, None, None)
     except Exception as e:  # noqa: BLE001
         if any(k in str(e).lower() for k in _INFRA):
             pytest.skip(f"control mock smoke infra unavailable: {e}")
@@ -181,3 +183,47 @@ def test_generate_runs_sabotage_arms_only_on_selected_cases(tmp_path, monkeypatc
     summary = json.loads((log_dir / "summary.json").read_text())
     assert summary["case_selection"]["apps_backdoor"]["selected"] == chosen["ids"]
     assert json.loads((log_dir / "selected_cases.json").read_text())["apps_backdoor"]["n_selected"] == 1
+
+
+@pytest.mark.parametrize("arm", ["baseline", "instructed", "propensity"])
+def test_apps_arm_runs_on_the_agent_loop(tmp_path, monkeypatch, arm):
+    """Every arm runs on the shared agent loop: the model sees the reasoning instruction in the
+    system prompt it actually receives (the instructed arm's attack policy replaces the scaffold's),
+    and the mock's identical replies end the episode as repeated_output, which summary.json counts
+    as invalid."""
+    from control_arena.eval import ControlEvalConfig
+    from inspect_ai import eval as inspect_eval
+    from inspect_ai.event import ModelEvent
+    from inspect_ai.log import read_eval_log
+    from inspect_ai.model import GenerateConfig
+    from misalignment_evals.agent_loop import AgentLoop, reasoning_instruction, stop_reason
+    from misalignment_evals.control.scaffold import agent_loop_scaffold
+    from misalignment_evals.control.settings import build_task
+    from misalignment_evals.runners.run_control_evals import _summarize
+
+    monkeypatch.setenv("UNTRUSTED_MODEL", "mockllm/model")
+    monkeypatch.setenv("TRUSTED_MODEL", "mockllm/model")
+    instruction = reasoning_instruction(AgentLoop(max_repeated_outputs=3, reasoning="rl_prompt"),
+                                        "thinking")
+    ec = ControlEvalConfig(untrusted_model="mockllm/model",
+                           untrusted_config=GenerateConfig(max_tokens=128),
+                           trusted_model="mockllm/model", limit=1, epochs=1, message_limit=20,
+                           scaffold=agent_loop_scaffold(max_repeated_outputs=3, instructions=instruction))
+    try:
+        task = build_task("apps_backdoor", arm, ec, instructions=instruction, max_test_runs=None,
+                          apps_sandbox="local")
+        [log] = inspect_eval(task, model="mockllm/model", limit=1, message_limit=20,
+                             log_dir=str(tmp_path / "logs"), score=True, display="none")
+    except Exception as e:  # noqa: BLE001
+        if any(k in str(e).lower() for k in _INFRA):
+            pytest.skip(f"control mock smoke infra unavailable: {e}")
+        raise
+
+    sample = read_eval_log(log.location, resolve_attachments=True).samples[0]
+    first_call = next(e for e in sample.events if isinstance(e, ModelEvent))
+    assert instruction in first_call.input[0].text
+    assert stop_reason(sample) == "repeated_output"
+    [entry] = _summarize(tmp_path / "logs").values()
+    assert (entry["episodes"], entry["n_valid"], entry["stop_reasons"]) == (
+        1, 0, {"repeated_output": 1})
+    assert entry["rates_valid"] == {}

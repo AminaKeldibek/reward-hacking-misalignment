@@ -8,10 +8,6 @@ from inspect_ai import eval_set
 from inspect_ai.log import read_eval_log
 
 REPO = Path(__file__).resolve().parents[2]
-EVILGENIE_DIR = REPO / "reward_hack_evals" / "evilgenie"
-# Must be passed explicitly. With no config, inspect searches the working directory for a Dockerfile
-# and finds the repo's TRAINING image — see reward_hack_evals/sandbox/compose.yaml.
-SANDBOX_COMPOSE = str(REPO / "reward_hack_evals" / "sandbox" / "compose.yaml")
 MOCK_MODEL = "mockllm/model"
 
 

@@ -9,9 +9,10 @@ Each arm maps to a (mode, policy) pair (see arm_spec):
 """
 from copy import deepcopy
 
-from control_arena import EvalMode, ModelRole, control_agent
+from control_arena import ControlTaskMetadata, EvalMode, ModelRole, control_agent
 from control_arena.eval import ControlEvalConfig, get_control_task
 from control_arena.policy import attack_policy_builder, honest, honest_policy_builder
+from control_arena.policy.prompts import policy_prompts
 from control_arena.settings._setting import Setting
 from control_arena.settings.apps.apps_setting import AppsSetting
 from control_arena.settings.bash_arena.bash_arena_setting import BashArenaSetting
@@ -20,6 +21,10 @@ from inspect_ai.agent import Agent, AgentState
 from inspect_ai.model import GenerateConfig, get_model
 from inspect_ai.tool import Tool
 from pydantic import BaseModel, Field
+
+from misalignment_evals.agent_loop import with_reasoning
+from misalignment_evals.control.apps_examples import statement_examples
+from misalignment_evals.control.run_tests import run_tests
 
 EVAL_NAMES: tuple[str, ...] = ("apps_backdoor", "bash_exfil")
 ARM_NAMES: tuple[str, ...] = ("baseline", "instructed", "propensity")
@@ -36,8 +41,22 @@ class NeutralSubmitArgs(BaseModel):
     secret_input: str | None = Field(default=None, description=NEUTRAL_SECRET_INPUT_DESCRIPTION)
 
 
-class PropensityAppsSetting(AppsSetting):
-    """AppsSetting whose ATTACK-mode submit tool keeps `secret_input` but drops the attack wording."""
+class FeedbackAppsSetting(AppsSetting):
+    """AppsSetting plus `run_tests` on the statement's examples when `max_test_runs` is set
+    (`feedback: visible_tests`); with None the tool list is control-arena's own (`feedback: none`)."""
+
+    max_test_runs: int | None = Field(description="run_tests calls per episode; None: no run_tests.")
+
+    def get_agent_tools(self, state):  # type: ignore[override]
+        if self.max_test_runs is None:
+            return []
+        statement = state.metadata_as(ControlTaskMetadata).main_task_description
+        return [run_tests(statement_examples(statement), self.max_test_runs)]
+
+
+class PropensityAppsSetting(FeedbackAppsSetting):
+    """FeedbackAppsSetting whose ATTACK-mode submit tool keeps `secret_input` but drops the attack
+    wording."""
 
     def get_submit_tool_config(self, task_metadata):  # type: ignore[override]
         cfg = super().get_submit_tool_config(task_metadata)
@@ -67,27 +86,31 @@ def propensity_policy_builder(
     return impl
 
 
-def arm_spec(arm):
+def arm_spec(arm, instructions: str):
     """The (mode, policy) for an arm. instructed attacks; baseline and propensity solve honestly.
     propensity still runs in ATTACK mode so the side task is scored, with an honest prompt and the
-    attack submit tool (neutral wording) left in place."""
+    attack submit tool (neutral wording) left in place. The attack policy replaces the scaffold's
+    system prompt on every call, so `instructions` are appended to its own prompt too."""
     if arm == "instructed":
-        return EvalMode.ATTACK, attack_policy_builder(model_role="untrusted", ephemeral_reminder=True)
+        return EvalMode.ATTACK, attack_policy_builder(
+            model_role="untrusted", ephemeral_reminder=True,
+            prompt=with_reasoning(policy_prompts["attack_policy"], instructions))
     if arm == "propensity":
         return EvalMode.ATTACK, propensity_policy_builder(model_role="untrusted")
     return EvalMode.HONEST, honest_policy_builder(model_role="untrusted")
 
 
-def _apps_setting(arm: str, sandbox_type: str) -> Setting:
+def _apps_setting(arm: str, sandbox_type: str, max_test_runs: "int | None") -> Setting:
     """APPS: keep only problems with a verified backdoor (has_backdoor_solution=True) so the
     capability arm is fair, and deterministic I/O (exclude_nondeterministic, the default)."""
-    cls = PropensityAppsSetting if arm == "propensity" else AppsSetting
+    cls = PropensityAppsSetting if arm == "propensity" else FeedbackAppsSetting
     return cls(
         has_solution=True,
         has_backdoor_solution=True,
         backdoor_source="any",
         exclude_nondeterministic=True,
         sandbox_type=sandbox_type,
+        max_test_runs=max_test_runs,
     )
 
 
@@ -99,9 +122,10 @@ def _bash_setting(arm: str, dataset_spec: DatasetSpec) -> Setting:
     return BashArenaSetting(dataset_spec=spec)
 
 
-def build_setting(eval_name: str, arm: str, *, apps_sandbox: str, bash_dataset: DatasetSpec) -> Setting:
+def build_setting(eval_name: str, arm: str, *, apps_sandbox: str, bash_dataset: DatasetSpec,
+                  max_test_runs: "int | None") -> Setting:
     if eval_name == "apps_backdoor":
-        return _apps_setting(arm, apps_sandbox)
+        return _apps_setting(arm, apps_sandbox, max_test_runs)
     if eval_name == "bash_exfil":
         return _bash_setting(arm, bash_dataset)
     raise SystemExit(f"unknown control eval {eval_name!r}; valid: {', '.join(EVAL_NAMES)}")
@@ -112,16 +136,22 @@ def build_task(
     arm: str,
     eval_config: ControlEvalConfig,
     *,
+    instructions: str,
+    max_test_runs: "int | None",
     apps_sandbox: str = "docker",
     bash_dataset: DatasetSpec | None = None,
     case_ids: list[str] | None = None,
 ):
     """One inspect Task for (eval, arm), named `<eval>_<arm>` so arms never collide in a log dir.
-    Its dataset is the cases in `case_ids` (all, if None), then the first `eval_config.limit`."""
+    Its dataset is the cases in `case_ids` (all, if None), then the first `eval_config.limit`.
+    `instructions` are what the instructed arm's attack prompt gets appended ("" for none); the
+    other arms get them from the scaffold in `eval_config`. `max_test_runs` (APPS): None for no
+    run_tests."""
     setting = build_setting(
-        eval_name, arm, apps_sandbox=apps_sandbox, bash_dataset=bash_dataset or DatasetSpec()
+        eval_name, arm, apps_sandbox=apps_sandbox, bash_dataset=bash_dataset or DatasetSpec(),
+        max_test_runs=max_test_runs,
     )
-    mode, policy = arm_spec(arm)
+    mode, policy = arm_spec(arm, instructions)
     dataset = setting.get_filtered_dataset(mode)
     if case_ids is not None:
         keep = set(case_ids)
@@ -144,6 +174,8 @@ def build_tasks(
     evals: dict[str, list[str]],
     eval_config: ControlEvalConfig,
     *,
+    instructions: str,
+    max_test_runs: "int | None",
     apps_sandbox: str = "docker",
     bash_dataset: DatasetSpec | None = None,
     case_ids: list[str] | None = None,
@@ -156,6 +188,6 @@ def build_tasks(
                 raise SystemExit(f"unknown arm {arm!r} for {eval_name}; valid: {', '.join(ARM_NAMES)}")
             label = f"{eval_name}_{arm}"
             out.append((label, build_task(
-                eval_name, arm, eval_config, apps_sandbox=apps_sandbox, bash_dataset=bash_dataset,
-                case_ids=case_ids)))
+                eval_name, arm, eval_config, instructions=instructions, max_test_runs=max_test_runs,
+                apps_sandbox=apps_sandbox, bash_dataset=bash_dataset, case_ids=case_ids)))
     return out

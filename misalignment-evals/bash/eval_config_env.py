@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Print a combined eval config as shell variables, for `eval`: the `serve:` group as `SV_*`, the
-upload repo as `UP_REPO`, and the reward-hacking eval names as `RH_EVALS`.
+`run:` group as `RUN_*`, the upload repo as `UP_REPO`, and the reward-hacking eval names as
+`RH_EVALS`.
 
 Used by misalignment-evals/bash/serve_eval_checkpoints.sh and misalignment-evals/bash/run_evals_local.sh so the serving settings (base
 model, checkpoint repo, port, ...) and the upload repo live only in the YAML (misalignment-evals/configs/eval_run.yaml).
 
 Usage:
     eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py misalignment-evals/configs/eval_run.yaml)"
-No defaults: a serve/upload key that is missing or null is not emitted, so each caller states
-what it needs with ${SV_...:?} and a gap in the YAML fails loudly.
+No defaults: a missing serve/run key is not emitted and a null one is emitted empty, so each
+caller states what it needs, ${SV_...:?} for a value and ${SV_...?} for a key that may be null, and
+a gap in the YAML fails loudly.
 """
 import shlex
 import sys
@@ -22,6 +24,7 @@ cfg = yaml.safe_load(open(sys.argv[1])) or {}
 cfg = cfg if isinstance(cfg, dict) else {}
 s = cfg.get("serve") or {}
 u = cfg.get("upload") or {}
+r = cfg.get("run") or {}
 rh = (cfg.get("reward_hacking") or {}).get("evals") or {}
 ct = (cfg.get("control_evals") or {}).get("evals") or {}
 
@@ -40,9 +43,22 @@ SERVE_VARS = {
     "enable_tool_choice": "SV_ENABLE_TOOL_CHOICE",   # vLLM --enable-auto-tool-choice
     "enforce_eager": "SV_ENFORCE_EAGER",             # vLLM --enforce-eager
     "chat_template": "SV_CHAT_TEMPLATE",             # vLLM --chat-template
+    "tool_parser_plugin": "SV_TOOL_PARSER_PLUGIN",   # vLLM --tool-parser-plugin (null: none)
 }
-vals = {var: str(s[key]).lower() if isinstance(s[key], bool) else s[key]
-        for key, var in SERVE_VARS.items() if s.get(key) is not None}
+RUN_VARS = {
+    "output_dir": "RUN_OUTPUT_DIR",   # parent of checkpoint_<step>/
+    "skip_mgs": "RUN_SKIP_MGS",       # true: MGS completions already exist for this checkpoint
+}
+
+
+def _shell(value) -> str:
+    if value is None:
+        return ""
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+vals = {var: _shell(group[key]) for group, names in ((s, SERVE_VARS), (r, RUN_VARS))
+        for key, var in names.items() if key in group}
 if u.get("repo"):
     vals["UP_REPO"] = u["repo"]
 vals |= {
@@ -53,6 +69,12 @@ vals |= {
     "CT_EVALS": " ".join(ct),
     # "1" if the config has a `knownliebench:` block; empty otherwise (wrapper skips it).
     "KLB_ENABLED": "1" if "knownliebench" in cfg else "",
+    # "1" if the config has a `budget_misrepresentation:` block; empty otherwise (wrapper skips it).
+    "BM_ENABLED": "1" if "budget_misrepresentation" in cfg else "",
+    # "1" if the config has a `harmful_compliance:` block; empty otherwise (wrapper skips it).
+    "HC_ENABLED": "1" if "harmful_compliance" in cfg else "",
+    # "1" if the config has an `identity:` block; empty otherwise (wrapper skips it).
+    "ID_ENABLED": "1" if "identity" in cfg else "",
 }
 for k, v in vals.items():
     print(f"{k}={shlex.quote(str(v))}")

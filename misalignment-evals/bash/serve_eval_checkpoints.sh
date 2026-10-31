@@ -35,6 +35,10 @@ eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CON
 : "${SV_ENFORCE_EAGER:?serve.enforce_eager missing in $CONFIG}"
 : "${SV_CHAT_TEMPLATE:?serve.chat_template missing in $CONFIG}"
 [ -f "$SV_CHAT_TEMPLATE" ] || { echo "ERROR: serve.chat_template not found: $SV_CHAT_TEMPLATE" >&2; exit 1; }
+: "${SV_TOOL_PARSER_PLUGIN?serve.tool_parser_plugin missing in $CONFIG (null for none)}"
+
+# The model's own context length caps serve.max_model_len (S3b): refuse a larger value.
+uv run --no-sync python misalignment-evals/bash/check_max_model_len.py "$SV_BASE_MODEL" "$SV_MAX_LEN"
 
 source "$(dirname "$0")/eval_names.sh"
 
@@ -79,6 +83,12 @@ TOOL_ARGS=()
 if [ "$SV_ENABLE_TOOL_CHOICE" = "true" ]; then
   : "${SV_TOOL_PARSER:?serve.tool_call_parser missing in $CONFIG (required when serve.enable_tool_choice is true)}"
   TOOL_ARGS=(--enable-auto-tool-choice --tool-call-parser "$SV_TOOL_PARSER")
+  # The olmo3_multiline plugin keeps newlines inside string arguments and the text before a call
+  # (S4). It registers the parser named in serve.tool_call_parser.
+  if [ -n "$SV_TOOL_PARSER_PLUGIN" ]; then
+    [ -f "$SV_TOOL_PARSER_PLUGIN" ] || { echo "ERROR: serve.tool_parser_plugin not found: $SV_TOOL_PARSER_PLUGIN" >&2; exit 1; }
+    TOOL_ARGS+=(--tool-parser-plugin "$SV_TOOL_PARSER_PLUGIN")
+  fi
 fi
 
 # Eager mode: skips torch.compile + CUDA-graph capture (serve.enforce_eager).

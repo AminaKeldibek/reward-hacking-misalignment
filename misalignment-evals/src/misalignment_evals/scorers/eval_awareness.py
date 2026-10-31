@@ -37,19 +37,23 @@ class EvalAwareness(ScoreOutput):
                 "notes": self.notes}
 
 
+async def awareness_score(judge: Judge, text: str) -> Score:
+    """The eval-awareness verdict on `text`, the model's reasoning and output."""
+    result = await judge.score_completion(text)
+    return Score(
+        value={EvalAwareness.score_name: float(result.output.label == "positive")
+               if result.valid else None},
+        answer=text,
+        explanation=(result.output.notes or "") if result.output else None,
+        metadata=judge.provenance | result.fields(),
+    )
+
+
 @scorer(metrics={EvalAwareness.score_name: [mean(), stderr()]})
 def eval_awareness_scorer(scorer_config: ScorerConfig) -> Scorer:
     judge = Judge(EvalAwareness, scorer_config)
-    name = EvalAwareness.score_name
 
     async def score(state: TaskState, target: Target) -> Score:
-        text = state.output.completion if state.output else ""
-        result = await judge.score_completion(text)
-        return Score(
-            value={name: float(result.output.label == "positive") if result.valid else None},
-            answer=text,
-            explanation=(result.output.notes or "") if result.output else None,
-            metadata=judge.provenance | result.fields(),
-        )
+        return await awareness_score(judge, state.output.completion if state.output else "")
 
     return score

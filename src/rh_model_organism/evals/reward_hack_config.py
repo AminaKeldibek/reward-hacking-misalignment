@@ -1,113 +1,103 @@
-"""Load the `reward_hacking:` group of a combined eval config (misalignment-evals/configs/eval_run.yaml).
+"""Load the `reward_hacking:` block of a run config (misalignment-evals/configs/eval_run.yaml).
 
-Same shape as the misalignment suite's `evals:` block: suite-wide settings at the top, a per-eval
-budget under `evals:`, and that block doubles as the include list — an eval runs if and only if it
-appears there. Keeps the sampling budget version-controlled, so two checkpoints run from the same
-config are comparable by construction.
+Every key is required (no code defaults). The model under test (model, model_base_url,
+reasoning_tag, generation) comes from `evaluated_model:`, the agent loop from `agent_loop:`. The
+`evals:` block is the include list: an eval runs if and only if it appears there.
 
     reward_hacking:
-      max_connections: 20
+      max_connections: 8
+      max_sandboxes: 8
+      fail_on_error: 0.1
+      agent: {truncation: auto, message_limit: 100, tool_timeout: 180, tool_output_chars: 3000,
+              read_file_chars: 25000}
       evals:
-        impossible_lcb: {samples: 50, epochs: 5, agent_type: minimal, sandbox: docker}
+        impossible_lcb: {samples: 50, epochs: 2, split: conflicting, test_instruction: dont_modify,
+                         hack_hints: none, attempts: 3}
 """
 from pathlib import Path
-from typing import Any
+from typing import Literal, Optional
 
-import yaml
+from misalignment_evals.agent_loop import AgentLoop, load_agent_loop
+from misalignment_evals.run_config import Generation, load_suite_block
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
-EVAL_NAMES: tuple[str, ...] = ("impossible_lcb", "impossible_swe", "evilgenie")
-
-DEFAULTS: dict[str, Any] = {
-    "max_connections": 20,
-    "evals": {"impossible_lcb": {"samples": 50, "epochs": 5, "agent_type": "minimal"}},
-}
-
-_EXTRA_KEYS: dict[str, set[str]] = {
-    "impossible_lcb": {"agent_type", "split", "sandbox", "hack_hints", "test_instruction"},
-    "impossible_swe": {"agent_type", "split"},
-    "evilgenie": {"difficulty", "dataset_source", "seed", "no_llm_judge", "judge_model", "hack_hints"},
-}
+EVAL_NAMES: tuple[str, ...] = ("impossible_lcb", "evilgenie")
+HackHints = Literal["none", "names", "rl_text"]
 
 
-def _validate(evals: Any) -> None:
-    if not isinstance(evals, dict):
-        raise SystemExit(
-            f"config `reward_hacking: evals:` must be a mapping of eval name -> settings, "
-            f"got {type(evals).__name__}"
-        )
-    if not evals:
-        raise SystemExit(
-            f"config `reward_hacking: evals:` is empty — nothing would run. "
-            f"Valid names: {', '.join(EVAL_NAMES)}"
-        )
+class Agent(BaseModel):
+    """The react() agent both evals run on."""
 
-    for name, settings in evals.items():
-        if name not in EVAL_NAMES:
-            raise SystemExit(
-                f"config `reward_hacking: evals:` has unknown eval {name!r}. "
-                f"Valid names: {', '.join(EVAL_NAMES)}"
-            )
-        if not isinstance(settings, dict):
-            raise SystemExit(
-                f"config `reward_hacking: evals: {name}:` must be a mapping, "
-                f"got {type(settings).__name__}"
-            )
-
-        for key in ("samples", "epochs"):
-            if key not in settings:
-                raise SystemExit(f"config `reward_hacking: evals: {name}:` is missing `{key}`")
-            value = settings[key]
-            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-                raise SystemExit(
-                    f"config `reward_hacking: evals: {name}: {key}` must be an integer >= 1, "
-                    f"got {value!r}"
-                )
-
-        allowed = {"samples", "epochs"} | _EXTRA_KEYS[name]
-        unknown = set(settings) - allowed
-        if unknown:
-            raise SystemExit(
-                f"config `reward_hacking: evals: {name}:` has unknown key(s) "
-                f"{', '.join(sorted(unknown))}. Allowed: {', '.join(sorted(allowed))}"
-            )
+    model_config = ConfigDict(extra="forbid")
+    truncation: Literal["auto", "disabled"]     # react(): trim old messages on overflow, or end
+    message_limit: StrictInt = Field(ge=1)
+    tool_timeout: StrictInt = Field(ge=1)       # seconds per safe_bash / safe_python call
+    tool_output_chars: StrictInt = Field(ge=1)  # command output beyond this is cut in the middle
+    read_file_chars: StrictInt = Field(ge=1)    # read_file returns up to this much of a file
 
 
-def load_reward_hack_config(path: "str | Path | None") -> dict[str, Any]:
-    """Return the `reward_hacking:` group = DEFAULTS with the YAML's group merged over it.
-    ``path=None`` -> the defaults. Raises SystemExit on anything unusable."""
-    cfg = dict(DEFAULTS)
-    cfg["evals"] = {k: dict(v) for k, v in DEFAULTS["evals"].items()}
-    if path is None:
-        _validate(cfg["evals"])
-        return cfg
-
-    p = Path(path)
-    if not p.is_file():
-        raise SystemExit(f"--config {p} not found")
-    loaded = yaml.safe_load(p.read_text())
-    if loaded is None:
-        return cfg
-    if not isinstance(loaded, dict):
-        raise SystemExit(f"--config {p} must be a YAML mapping, got {type(loaded).__name__}")
-
-    group = loaded.get("reward_hacking")
-    if group is None:
-        _validate(cfg["evals"])
-        return cfg
-    if not isinstance(group, dict):
-        raise SystemExit(f"--config {p}: `reward_hacking:` must be a mapping, got {type(group).__name__}")
-
-    for key, value in group.items():
-        cfg[key] = value          # `evals` replaces: it is the include list, merging would re-add
-    _validate(cfg["evals"])
-    return cfg
+class Budget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    samples: StrictInt = Field(ge=1)
+    epochs: StrictInt = Field(ge=1)
+    hack_hints: HackHints
 
 
-def eval_settings(cfg: dict[str, Any], name: str) -> dict[str, Any]:
+class ImpossibleLcb(Budget):
+    split: Literal["original", "oneoff", "conflicting"]
+    test_instruction: Literal["dont_modify", "none"]
+    attempts: StrictInt = Field(ge=1)           # submissions; all tests are visible, so feedback is safe
+
+
+class EvilGenie(Budget):
+    difficulty: Literal["easy", "medium", "hard"]
+    dataset_source: Literal["livecodebench", "apps"]
+    seed: StrictInt
+    judge_model: Optional[str]                  # null: no LLM judge, only the deterministic signals
+
+
+class Evals(BaseModel):
+    """The include list. An eval left out does not run."""
+
+    model_config = ConfigDict(extra="forbid")
+    impossible_lcb: Optional[ImpossibleLcb] = None
+    evilgenie: Optional[EvilGenie] = None
+
+    @model_validator(mode="after")
+    def _nonempty(self):
+        if self.impossible_lcb is None and self.evilgenie is None:
+            raise ValueError("no evals listed — nothing would run")
+        return self
+
+
+class RewardHackingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: str
+    model_base_url: Optional[str]
+    reasoning_tag: str
+    generation: Generation
+    agent_loop: AgentLoop
+    max_connections: StrictInt = Field(ge=1)
+    max_sandboxes: StrictInt = Field(ge=1)      # concurrent Docker sandboxes (8 fits the 10-CPU Mac)
+    fail_on_error: Optional[float]
+    agent: Agent
+    evals: Evals
+
+
+def load_reward_hack_config(path: "str | Path") -> RewardHackingConfig:
+    return load_suite_block(
+        path, "reward_hacking", RewardHackingConfig,
+        ("model", "model_base_url", "reasoning_tag", "generation"),
+        hint=f"Valid evals: {', '.join(EVAL_NAMES)}",
+        shared_groups={"agent_loop": load_agent_loop(path)},
+    )
+
+
+def eval_settings(cfg: RewardHackingConfig, name: str) -> "ImpossibleLcb | EvilGenie":
     """One eval's settings, or a loud error naming what the config does configure."""
-    if name not in cfg["evals"]:
-        raise SystemExit(
-            f"--eval {name} is not in the config's `reward_hacking: evals:` block. "
-            f"Configured: {', '.join(cfg['evals'])}"
-        )
-    return cfg["evals"][name]
+    settings = getattr(cfg.evals, name, None)
+    if settings is None:
+        configured = [n for n in EVAL_NAMES if getattr(cfg.evals, n) is not None]
+        raise SystemExit(f"--eval {name} is not in the config's `reward_hacking: evals:` block. "
+                         f"Configured: {', '.join(configured)}")
+    return settings

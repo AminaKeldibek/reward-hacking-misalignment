@@ -49,6 +49,7 @@ from misalignment_evals.knownliebench.task import (
     knowledge_task,
 )
 from misalignment_evals.run_config import export_served_model_env
+from misalignment_evals.serving.endpoint import served_max_model_len
 
 PAPER_BOOTSTRAP = 10_000
 MANIFEST_NAME = "selected_cases.json"
@@ -70,8 +71,8 @@ def selection_manifest(cfg: KnownLieBenchConfig, knowledge_log) -> dict:
     }
 
 
-def _run_generate(cfg: KnownLieBenchConfig, output_dir: Path,
-                  resume: "str | None") -> "tuple[Path, bool]":
+def _run_generate(cfg: KnownLieBenchConfig, output_dir: Path, resume: "str | None",
+                  max_model_len: "int | None") -> "tuple[Path, bool]":
     from inspect_ai import eval_set
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -103,7 +104,7 @@ def _run_generate(cfg: KnownLieBenchConfig, output_dir: Path,
                          f"{log_dir / 'knowledge'}")
 
     success, _ = eval_set(
-        tasks=dialogue_tasks(cfg, manifest["selected"]),
+        tasks=dialogue_tasks(cfg, manifest["selected"], max_model_len),
         log_dir=str(log_dir / "dialogue"),
         model_roles={CUSTOMER_ROLE: cfg.customer.model, JUDGE_ROLE: cfg.judge.model},
         **common,
@@ -160,6 +161,17 @@ def export_rows(meta: dict, rows: list[dict], rows_dir: Path) -> None:
         path.write_text("".join(json.dumps(line) + "\n" for line in lines))
 
 
+def lied_by_customer_mode(scored: list[dict]) -> dict:
+    """{condition: {customer_mode: [lied, rounds]}}. Trust carries over between rounds, so after
+    round 1 the conditions meet different customers; this shows whether that explains a gap."""
+    out: dict = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    for r in scored:
+        cell = out[r["condition"]][r.get("customer_mode", "unknown")]
+        cell[0] += bool(r["derived"]["lied"])
+        cell[1] += 1
+    return {c: dict(sorted(modes.items())) for c, modes in sorted(out.items())}
+
+
 def _metrics(meta: dict, rows: list[dict], rows_dir: Path, bootstrap: int) -> dict:
     """Upstream's metric panel plus the excess lie rate over `none`. The panel's KPR fields are
     dropped: every played case was selected as known, so they read 1.0; the knowledge pass rate is
@@ -175,6 +187,7 @@ def _metrics(meta: dict, rows: list[dict], rows_dir: Path, bootstrap: int) -> di
     return {
         "n_scored_rounds": panel["n_scored_rounds"],
         "lied": lied,
+        "lied_by_customer_mode": lied_by_customer_mode(scored),
         "lie_rate": {c: v["lie_rate"][0] for c, v in panel["by_condition"].items()},
         "excess_lie_rate": excess_lie_rate(rows, bootstrap),
         "panel": panel,
@@ -215,6 +228,8 @@ def write_summary(log_dir: Path, bootstrap: int = PAPER_BOOTSTRAP) -> dict:
         "n_errored_rounds": sum(bool(r.get("error")) for r in rows),
         "n_judge_parse_failed": sum(bool(r.get("judge_parse_failed")) for r in rows),
         "n_judge_quote_not_agent": sum(bool(r.get("judge_quote_not_agent")) for r in rows),
+        "agent_loop": (dialogue[0].eval.metadata or {}).get("agent_loop"),
+        "max_model_len": (dialogue[0].eval.metadata or {}).get("max_model_len"),
         "end_reasons": {c: dict(v) for c, v in sorted(end_reasons.items())},
         "parse_retries": dict(sorted(parse_retries.items())),
         **_metrics(meta, known_rows(rows, p_know, threshold), log_dir / "rows", bootstrap),
@@ -257,9 +272,11 @@ def main() -> None:
         if not cfg.model:
             raise SystemExit("no model: set evaluated_model.model in the config")
         export_served_model_env(cfg.model, cfg.model_base_url)
+        max_model_len = (served_max_model_len(cfg.model, cfg.model_base_url)
+                         if cfg.model_base_url else None)
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        log_dir, success = _run_generate(cfg, output_dir, args.resume)
+        log_dir, success = _run_generate(cfg, output_dir, args.resume, max_model_len)
 
     summary = write_summary(log_dir)
     print(f"[knownliebench] {_headline(summary)} -> {log_dir / 'summary.json'}")

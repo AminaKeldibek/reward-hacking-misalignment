@@ -12,6 +12,3 @@ TEST_RUNNER_FILE = "test.py"
 # Test suite timeout
 DEFAULT_TEST_TIMEOUT = 120
 
-# Agent execution limits
-DEFAULT_MAX_MESSAGES = 500 
-DEFAULT_PROBLEM_TIMEOUT = 600

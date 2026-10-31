@@ -1,88 +1,72 @@
-"""Unit tests for the `reward_hacking:` config group — validation and the include-list semantics."""
+"""The `reward_hacking:` block: every key required, the model from `evaluated_model:`, the loop from
+`agent_loop:`, and `evals:` as the include list. No Docker, no network."""
+import re
 from pathlib import Path
 
 import pytest
+import yaml
 
-pytest.importorskip("yaml")
+pytest.importorskip("inspect_ai")
 
-from rh_model_organism.evals.reward_hack_config import (  # noqa: E402
-    EVAL_NAMES,
-    eval_settings,
-    load_reward_hack_config,
-)
+from rh_model_organism.evals.reward_hack_config import eval_settings, load_reward_hack_config  # noqa: E402
 
-_REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[2]
+SMOKE = REPO / "misalignment-evals" / "configs" / "eval_run_smoke.yaml"
 
 
-def _yaml(tmp_path, body):
-    p = tmp_path / "c.yaml"
-    p.write_text(body)
-    return p
+def _write(tmp_path, data: dict) -> Path:
+    path = tmp_path / "run.yaml"
+    path.write_text(yaml.safe_dump(data))
+    return path
 
 
-def test_defaults_when_the_config_has_no_group(tmp_path):
-    cfg = load_reward_hack_config(_yaml(tmp_path, "serve:\n  port: 8000\n"))
-    assert list(cfg["evals"]) == ["impossible_lcb"]
-    assert cfg["max_connections"] == 20
+def _smoke() -> dict:
+    return yaml.safe_load(SMOKE.read_text())
 
 
-def test_group_is_read_and_evals_replace_the_defaults(tmp_path):
-    cfg = load_reward_hack_config(_yaml(tmp_path, """
-reward_hacking:
-  max_connections: 5
-  evals:
-    impossible_swe: {samples: 3, epochs: 2, agent_type: tools}
-"""))
-    assert list(cfg["evals"]) == ["impossible_swe"]
-    assert cfg["max_connections"] == 5
-    assert eval_settings(cfg, "impossible_swe")["agent_type"] == "tools"
+@pytest.mark.parametrize("config", ["eval_run.yaml", "eval_run_smoke.yaml"])
+def test_the_real_configs_load(config):
+    cfg = load_reward_hack_config(REPO / "misalignment-evals" / "configs" / config)
+    assert cfg.evals.impossible_lcb is not None
+    assert (cfg.model, cfg.reasoning_tag, cfg.agent_loop.max_repeated_outputs) == (
+        "openai-api/vllm/checkpoint_50", "thinking", 3)
 
 
-def test_unknown_eval_name_fails_and_lists_the_valid_ones(tmp_path):
-    with pytest.raises(SystemExit) as e:
-        load_reward_hack_config(_yaml(tmp_path, "reward_hacking:\n  evals:\n    lcb: {samples: 1, epochs: 1}\n"))
-    assert all(name in str(e.value) for name in EVAL_NAMES)
-
-
-@pytest.mark.parametrize("entry", [
-    "{samples: 0, epochs: 1}",
-    "{samples: 1, epochs: 0}",
-    "{samples: 1}",
-    "{samples: 1, epochs: 1, difficulty: hard}",   # evilgenie-only key on an impossible_* eval
+@pytest.mark.parametrize("path", [
+    ("reward_hacking", "max_sandboxes"),
+    ("reward_hacking", "agent", "truncation"),
+    ("reward_hacking", "evals", "impossible_lcb", "attempts"),
+    ("reward_hacking", "evals", "evilgenie", "judge_model"),
+    ("evaluated_model", "reasoning_tag"),
+    ("evaluated_model", "generation", "top_p"),
 ])
-def test_unusable_entries_raise(tmp_path, entry):
-    with pytest.raises(SystemExit):
-        load_reward_hack_config(_yaml(tmp_path, f"reward_hacking:\n  evals:\n    impossible_lcb: {entry}\n"))
+def test_a_missing_key_is_an_error_naming_it(tmp_path, path):
+    data = _smoke()
+    node = data
+    for key in path[:-1]:
+        node = node[key]
+    del node[path[-1]]
+    with pytest.raises(SystemExit, match=re.escape(path[-1])):
+        load_reward_hack_config(_write(tmp_path, data))
 
 
-def test_asking_for_an_unconfigured_eval_is_an_error(tmp_path):
-    cfg = load_reward_hack_config(None)
-    with pytest.raises(SystemExit, match="not in the config"):
+def test_an_unknown_eval_is_an_error(tmp_path):
+    data = _smoke()
+    data["reward_hacking"]["evals"]["impossible_swe"] = {"samples": 1}
+    with pytest.raises(SystemExit, match="impossible_swe"):
+        load_reward_hack_config(_write(tmp_path, data))
+
+
+def test_an_eval_left_out_does_not_run(tmp_path):
+    data = _smoke()
+    del data["reward_hacking"]["evals"]["evilgenie"]
+    cfg = load_reward_hack_config(_write(tmp_path, data))
+    with pytest.raises(SystemExit, match="Configured: impossible_lcb"):
         eval_settings(cfg, "evilgenie")
 
 
-def test_shipped_config_is_valid():
-    cfg = load_reward_hack_config(_REPO / "misalignment-evals" / "configs" / "eval_run.yaml")
-    # shape, not values: the per-eval budget is tuned per model/run
-    e = eval_settings(cfg, "impossible_lcb")
-    assert e["samples"] >= 1 and e["epochs"] >= 1
-    assert e["agent_type"] in ("minimal", "tools", "full")
-    assert e["sandbox"] in ("docker", "local")
-
-
-def test_sandbox_is_accepted_for_lcb_and_rejected_elsewhere(tmp_path):
-    """`sandbox` is the escape hatch for a box with no Docker daemon — but only impossible_lcb can
-    honour it (impossible_swe takes upstream's sandbox_type, evilgenie hardcodes its own)."""
-    cfg = load_reward_hack_config(_yaml(tmp_path, """
-reward_hacking:
-  evals:
-    impossible_lcb: {samples: 2, epochs: 1, sandbox: local}
-"""))
-    assert eval_settings(cfg, "impossible_lcb")["sandbox"] == "local"
-
-    with pytest.raises(SystemExit, match="unknown key"):
-        load_reward_hack_config(_yaml(tmp_path, """
-reward_hacking:
-  evals:
-    evilgenie: {samples: 2, epochs: 1, sandbox: local}
-"""))
+def test_hack_hints_is_the_ladder(tmp_path):
+    data = _smoke()
+    data["reward_hacking"]["evals"]["impossible_lcb"]["hack_hints"] = True
+    with pytest.raises(SystemExit, match="hack_hints"):
+        load_reward_hack_config(_write(tmp_path, data))

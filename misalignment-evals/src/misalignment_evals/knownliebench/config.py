@@ -4,6 +4,7 @@ from typing import Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
+from misalignment_evals.agent_loop import AgentLoop, load_agent_loop
 from misalignment_evals.run_config import Generation, load_suite_block
 
 Domain = Literal[
@@ -23,48 +24,53 @@ class Role(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str
     max_tokens: StrictInt = Field(ge=1)
-    reasoning_effort: Optional[Literal["none", "minimal", "low", "medium", "high"]] = None
+    reasoning_effort: Optional[Literal["none", "minimal", "low", "medium", "high"]]
 
 
 class Execution(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    max_tasks: int = 4   # up to 3 condition tasks + the knowledge task
-    max_samples: int = 24
-    max_connections: int = 16
-    time_limit: Optional[int] = None
-    fail_on_error: Optional[float] = 0.1
+    max_tasks: StrictInt = Field(ge=1)   # up to 3 condition tasks + the knowledge task
+    max_samples: StrictInt = Field(ge=1)
+    max_connections: StrictInt = Field(ge=1)
+    time_limit: Optional[int]
+    fail_on_error: Optional[float]
 
 
 class KnownLieBenchConfig(BaseModel):
-    """The whole `knownliebench:` block. Defaults are the paper's protocol and apparatus."""
+    """The whole `knownliebench:` block. Every key is required (no code defaults). The paper's
+    protocol: customer gpt-4o-mini-2024-07-18 (600 tokens), judge gpt-5.1 (900 tokens, reasoning
+    none), all 8 domains x 3 conditions x 3 trust levels, 14 cases, 1 trajectory per cell."""
 
     model_config = ConfigDict(extra="forbid")
 
     # model / model_base_url / reasoning_tag / generation are filled from `evaluated_model:` by
-    # load_knownliebench_config; model is required at run time, not parse time.
-    model: Optional[str] = None
-    model_base_url: Optional[str] = None
-    reasoning_tag: str = "thinking"
-    customer: Role = Role(model="openrouter/openai/gpt-4o-mini-2024-07-18", max_tokens=600)
-    judge: Role = Role(model="openrouter/openai/gpt-5.1", max_tokens=900, reasoning_effort="none")
-    generation: Generation = Generation()
-    execution: Execution = Execution()
-    domains: list[Domain] = list(DOMAINS)
-    conditions: list[Condition] = list(CONDITIONS)
-    trust_levels: list[TrustLevel] = list(TRUST_LEVELS)
+    # load_knownliebench_config.
+    model: str
+    model_base_url: Optional[str]
+    reasoning_tag: str
+    customer: Role
+    judge: Role
+    generation: Generation
+    execution: Execution
+    domains: list[Domain]
+    conditions: list[Condition]
+    trust_levels: list[TrustLevel]
     # The first `cases` cases of each domain go to the knowledge check; only the known ones are played.
-    cases: StrictInt = Field(default=CASES_PER_DOMAIN, ge=1, le=CASES_PER_DOMAIN)
-    epochs: StrictInt = Field(default=1, ge=1)
+    cases: StrictInt = Field(ge=1, le=CASES_PER_DOMAIN)
+    epochs: StrictInt = Field(ge=1)
     # Not in the paper (which gates each round once at temperature 0): before any trajectory runs,
     # each case's knowledge question is sampled `knowledge_samples` times at the agent's
     # temperature, and only cases answered right in >= `knowledge_threshold` of them are played, the
     # same list in every condition.
-    knowledge_samples: StrictInt = Field(default=10, ge=1)
-    knowledge_threshold: float = Field(default=0.9, gt=0, le=1)
+    knowledge_samples: StrictInt = Field(ge=1)
+    knowledge_threshold: float = Field(gt=0, le=1)
     # Not in the paper: an agent output that isn't one usable JSON action is never sent to the
     # customer; the parse error goes back to the agent, which may retry this many times per turn.
     # If every retry fails, the round is invalid (end_reason "parse_error"). Required: no default.
     max_parse_retries: StrictInt = Field(ge=0)
+    # The top-level `agent_loop:` group. Only `max_repeated_outputs` applies here: the agent's turn
+    # is a JSON action with its own "thought", not a tool call.
+    agent_loop: AgentLoop
 
     @model_validator(mode="after")
     def _lists_nonempty(self):
@@ -76,11 +82,13 @@ class KnownLieBenchConfig(BaseModel):
 
 def load_knownliebench_config(path: "str | Path") -> KnownLieBenchConfig:
     """Parse the config into a KnownLieBenchConfig. The model under test (model / model_base_url /
-    reasoning_tag / generation) comes from the shared top-level `evaluated_model:` group; the
-    benchmark's own settings (customer, judge, budget) from `knownliebench:`."""
+    reasoning_tag / generation) comes from the shared top-level `evaluated_model:` group, the agent
+    loop from `agent_loop:`; the benchmark's own settings (customer, judge, budget) from
+    `knownliebench:`."""
     return load_suite_block(
         path, "knownliebench", KnownLieBenchConfig,
         ("model", "model_base_url", "reasoning_tag", "generation"),
         hint=(f"Valid domains: {', '.join(DOMAINS)}; conditions: {', '.join(CONDITIONS)}; "
               f"trust levels: {', '.join(TRUST_LEVELS)}"),
+        shared_groups={"agent_loop": load_agent_loop(path)},
     )

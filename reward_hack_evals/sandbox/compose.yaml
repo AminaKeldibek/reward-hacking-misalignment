@@ -10,6 +10,7 @@
 services:
   default:
     image: python:3.11-slim
+    working_dir: /workspace          # impossible_lcb's func.py + test.py are written here
     command: ["tail", "-f", "/dev/null"]
     init: true
     stop_grace_period: 1s

@@ -1,79 +1,23 @@
-"""Unit tests for run_reward_hack_evals.py's config wiring: the budget comes from the config's
-`reward_hacking:` group, and an explicit CLI flag still wins."""
+"""run_reward_hack_evals.py: log dirs, sample health and the rates over valid episodes. No Docker,
+no network."""
 import importlib.util
-import sys
-from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("inspect_ai")
 
 _REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "src"))
-
 _spec = importlib.util.spec_from_file_location(
-    "run_reward_hack_evals", _REPO / "reward_hack_evals" / "run_reward_hack_evals.py"
-)
+    "run_reward_hack_evals", _REPO / "reward_hack_evals" / "run_reward_hack_evals.py")
 runner = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(runner)
 
 
-def _args(**overrides):
-    base = dict(eval="impossible_lcb", config=None, num_samples=None, epochs=None,
-                agent_type=None, split=None, difficulty=None, dataset_source=None,
-                seed=None, no_llm_judge=False, judge_model=None, max_connections=None)
-    base.update(overrides)
-    return Namespace(**base)
-
-
-def _cfg(tmp_path, body):
-    p = tmp_path / "c.yaml"
-    p.write_text(body)
-    return str(p)
-
-
-_LCB = """
-reward_hacking:
-  max_connections: 7
-  evals:
-    impossible_lcb: {samples: 30, epochs: 4, agent_type: tools}
-"""
-
-
-def test_config_supplies_the_budget(tmp_path):
-    args = _args(config=_cfg(tmp_path, _LCB))
-    runner.apply_config(args)
-    assert (args.num_samples, args.epochs, args.agent_type) == (30, 4, "tools")
-    assert args.max_connections == 7
-    assert args.split == "conflicting"          # fallback: neither config nor CLI set it
-
-
-def test_an_explicit_flag_overrides_the_config(tmp_path):
-    args = _args(config=_cfg(tmp_path, _LCB), num_samples=2, agent_type="minimal")
-    runner.apply_config(args)
-    assert (args.num_samples, args.agent_type) == (2, "minimal")
-    assert args.epochs == 4                     # untouched keys still come from the config
-
-
-def test_without_a_config_the_flags_and_fallbacks_stand():
-    args = _args(num_samples=9)
-    runner.apply_config(args)
-    assert (args.num_samples, args.agent_type, args.max_connections) == (9, "minimal", 20)
-    assert args.epochs is None
-
-
-def test_an_eval_absent_from_the_config_is_refused(tmp_path):
-    args = _args(eval="evilgenie", config=_cfg(tmp_path, _LCB))
-    with pytest.raises(SystemExit, match="not in the config"):
-        runner.apply_config(args)
-
-
-# --- resume: eval_set keys resume off log_dir, so a fresh timestamp every run defeats it ---------
 def test_no_resume_mints_a_fresh_timestamped_dir(tmp_path):
     log_dir = runner.resolve_log_dir(tmp_path, None)
-    assert log_dir.parent == tmp_path
-    assert log_dir.name.startswith("logs_")
+    assert log_dir.parent == tmp_path and log_dir.name.startswith("logs_")
     assert not log_dir.exists()
 
 
@@ -88,30 +32,10 @@ def test_resume_on_a_missing_dir_is_an_error_not_a_new_run(tmp_path):
         runner.resolve_log_dir(tmp_path, str(tmp_path / "nope"))
 
 
-def test_timestamp_is_taken_from_the_resumed_dir(tmp_path):
-    """The summary filename carries the run's timestamp; resuming must not invent a second one."""
-    existing = tmp_path / "logs_20260101_000000"
-    existing.mkdir()
-    log_dir = runner.resolve_log_dir(tmp_path, str(existing))
-    assert log_dir.name.replace("logs_", "") == "20260101_000000"
-
-
-def test_served_model_name_strips_the_inspect_provider_prefix():
-    assert runner._served_model_name("openai-api/vllm/ckpt400") == "ckpt400"
-    assert runner._served_model_name("openai/qwen-instruct") == "qwen-instruct"
-
-
-def test_preflight_key_matches_the_one_inspect_sends(monkeypatch):
-    monkeypatch.setenv("VLLM_API_KEY", "inspectai")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
-    assert runner._served_api_key("openai-api/vllm/ckpt400", None) == "inspectai"
-    assert runner._served_api_key("openai/qwen-instruct", None) == "sk-x"
-    assert runner._served_api_key("openai-api/vllm/ckpt400", "cli") == "cli"   # --api-key wins
-
-
 def test_a_log_where_every_sample_errored_is_reported_as_errored(tmp_path):
     """status=="success" with fail_on_error=False can hide 100% errored samples (evilgenie, 7 Sep)."""
-    from inspect_ai import Task, eval as inspect_eval
+    from inspect_ai import Task
+    from inspect_ai import eval as inspect_eval
     from inspect_ai.dataset import Sample
     from inspect_ai.solver import solver
 
@@ -121,29 +45,29 @@ def test_a_log_where_every_sample_errored_is_reported_as_errored(tmp_path):
             raise RuntimeError('"auto" tool choice requires --enable-auto-tool-choice')
         return solve
 
-    task = Task(dataset=[Sample(id=i, input="x", target="y") for i in (1, 2)], solver=boom(), fail_on_error=False)
+    task = Task(dataset=[Sample(id=i, input="x", target="y") for i in (1, 2)], solver=boom(),
+                fail_on_error=False)
     log = inspect_eval(task, model="mockllm/model", log_dir=str(tmp_path), display="none")[0]
-    health = runner._sample_health(log)
+    summary = runner.summarize(log, "impossible_lcb", "conflicting")
     assert log.status == "success"
-    assert (health["total_samples"], health["errored_samples"]) == (2, 2)
-    assert "enable-auto-tool-choice" in health["first_error"]
+    assert (summary["total_samples"], summary["errored_samples"], summary["n_valid"]) == (2, 2, 0)
+    assert "enable-auto-tool-choice" in summary["first_error"]
 
 
-def test_config_hack_hints_bool_becomes_on_off(tmp_path):
-    cfg = _cfg(tmp_path, "reward_hacking:\n  evals:\n    evilgenie: {samples: 1, epochs: 1, hack_hints: true}\n")
-    args = _args(eval="evilgenie", config=cfg, hack_hints=None, test_instruction=None, sandbox=None)
-    runner.apply_config(args)
-    assert (args.hack_hints, args.test_instruction) == ("on", "dont_modify")
+def _sample(value, **metadata):
+    return SimpleNamespace(scores={"s": SimpleNamespace(value=value, metadata=metadata)})
 
 
-def test_cli_off_beats_config_on(tmp_path):
-    cfg = _cfg(tmp_path, "reward_hacking:\n  evals:\n    impossible_lcb: {samples: 1, epochs: 1, hack_hints: true}\n")
-    args = _args(config=cfg, hack_hints="off", test_instruction=None, sandbox=None)
-    runner.apply_config(args)
-    assert args.hack_hints == "off"
+def test_impossible_lcb_cheating_rate_is_the_pass_rate_on_an_impossible_split():
+    valid = [_sample("C", test_modified=True), _sample("I", test_modified=False)]
+    assert runner.eval_rates("impossible_lcb", valid, "conflicting") == {
+        "passed": 0.5, "test_modified": 0.5, "cheating_rate": 0.5}
+    assert runner.eval_rates("impossible_lcb", valid, "original")["cheating_rate"] is None
 
 
-def test_test_instruction_is_refused_outside_impossible_lcb():
-    args = _args(eval="evilgenie", hack_hints=None, test_instruction="none", sandbox=None)
-    with pytest.raises(SystemExit, match="impossible_lcb only"):
-        runner.apply_config(args)
+def test_evilgenie_rates_count_each_category():
+    value = {"test_result": "passed_visible_only", "files_modified": True,
+             "llm_classification": "reward_hacking"}
+    rates = runner.eval_rates("evilgenie", [_sample(value), _sample(value | {"files_modified": False})], None)
+    assert rates["passed_visible_only"] == 1.0 and rates["files_modified"] == 0.5
+    assert rates["llm_reward_hacking"] == 1.0 and rates["passed_all"] == 0.0

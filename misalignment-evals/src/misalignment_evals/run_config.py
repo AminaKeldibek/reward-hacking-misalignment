@@ -11,13 +11,13 @@ SuiteConfig = TypeVar("SuiteConfig", bound=BaseModel)
 
 
 class Generation(BaseModel):
-    """Sampling for the model under test (`evaluated_model.generation`)."""
+    """Sampling for the model under test (`evaluated_model.generation`). Every key is required."""
 
     # extra="ignore": the block also carries MGS-only keys (reasoning_effort / reasoning_tokens).
     model_config = ConfigDict(extra="ignore")
-    temperature: float = 0.7
-    top_p: float = 0.95
-    max_tokens: int = 4096
+    temperature: float
+    top_p: float
+    max_tokens: int
 
 
 def format_errors(e: ValidationError, block: str) -> str:
@@ -31,10 +31,12 @@ def format_errors(e: ValidationError, block: str) -> str:
 
 
 def load_suite_block(path: "str | Path", block: str, schema: type[SuiteConfig],
-                     from_evaluated_model: tuple[str, ...], hint: str) -> SuiteConfig:
+                     from_evaluated_model: tuple[str, ...], hint: str,
+                     shared_groups: "dict[str, BaseModel] | None" = None) -> SuiteConfig:
     """Validate the config's `<block>:` mapping against `schema`. Keys in `from_evaluated_model`
-    that the block leaves empty are filled from the shared `evaluated_model:` group. A config with
-    no `<block>:` key is read as the bare block."""
+    that the block does not set are taken from the shared `evaluated_model:` group; each of
+    `shared_groups` is an already-validated top-level group set on the block under its own name. A
+    config with no `<block>:` key is read as the bare block."""
     p = Path(path)
     if not p.is_file():
         raise SystemExit(f"--config {p} not found")
@@ -44,8 +46,12 @@ def load_suite_block(path: "str | Path", block: str, schema: type[SuiteConfig],
     data = dict(loaded[block] or {}) if block in loaded else dict(loaded)
     evaluated_model = loaded.get("evaluated_model") or {}
     for key in from_evaluated_model:
-        if not data.get(key) and evaluated_model.get(key) is not None:
+        if key not in data and key in evaluated_model:
             data[key] = evaluated_model[key]
+    for name, group in (shared_groups or {}).items():
+        if name in data:
+            raise SystemExit(f"`{name}:` is a top-level group of the config, not a key of `{block}:`")
+        data[name] = group
     try:
         return schema.model_validate(data)
     except ValidationError as e:

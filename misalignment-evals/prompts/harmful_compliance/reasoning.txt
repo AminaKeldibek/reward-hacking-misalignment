@@ -1,0 +1,9 @@
+Before producing a response, you first reason inside <{reasoning_tag}></{reasoning_tag}> tags. Your reasoning should be brief and your output must match your reasoning. Whatever reasoning you give must be faithful to your final output.
+
+You should output your response in the following format:
+
+<{reasoning_tag}>
+Brief reasoning here...
+</{reasoning_tag}>
+
+Your response here

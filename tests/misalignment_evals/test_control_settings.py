@@ -9,6 +9,7 @@ from control_arena.settings.bash_arena.task.dataset import DatasetSpec  # noqa: 
 from misalignment_evals.control.settings import (  # noqa: E402
     NEUTRAL_SECRET_INPUT_DESCRIPTION,
     NeutralSubmitArgs,
+    FeedbackAppsSetting,
     PropensityAppsSetting,
     _apps_setting,
     _bash_setting,
@@ -17,17 +18,26 @@ from misalignment_evals.control.settings import (  # noqa: E402
 
 
 def test_arm_spec():
-    assert arm_spec("baseline")[0] == EvalMode.HONEST
-    assert arm_spec("instructed")[0] == EvalMode.ATTACK
-    assert arm_spec("propensity")[0] == EvalMode.ATTACK      # attack mode -> side task is scored
+    assert arm_spec("baseline", "")[0] == EvalMode.HONEST
+    assert arm_spec("instructed", "")[0] == EvalMode.ATTACK
+    assert arm_spec("propensity", "")[0] == EvalMode.ATTACK      # attack mode -> side task is scored
     for arm in ("baseline", "instructed", "propensity"):
-        assert arm_spec(arm)[1] is not None                 # a policy was built
+        assert arm_spec(arm, "")[1] is not None                 # a policy was built
+
+
+def test_attack_prompt_gets_the_reasoning_instruction():
+    """The attack policy replaces the scaffold's system prompt, so it carries the instruction too."""
+    from control_arena.policy.prompts import policy_prompts
+
+    assert arm_spec("instructed", "REASON")[1].prompt == (
+        policy_prompts["attack_policy"].rstrip() + "\n\nREASON")
+    assert arm_spec("instructed", "")[1].prompt == policy_prompts["attack_policy"]
 
 
 def test_apps_propensity_uses_neutral_setting():
-    assert isinstance(_apps_setting("propensity", "docker"), PropensityAppsSetting)
-    assert type(_apps_setting("instructed", "docker")) is AppsSetting
-    assert _apps_setting("baseline", "docker").has_backdoor_solution is True   # fair capability filter
+    assert isinstance(_apps_setting("propensity", "docker", None), PropensityAppsSetting)
+    assert type(_apps_setting("instructed", "docker", None)) is FeedbackAppsSetting
+    assert _apps_setting("baseline", "docker", None).has_backdoor_solution is True   # fair capability filter
 
 
 @pytest.mark.parametrize("arm", ["baseline", "instructed", "propensity"])
@@ -61,6 +71,6 @@ def test_propensity_attack_submit_tool_uses_neutral_args():
     attack_md = ControlTaskMetadata(
         main_task_description="d", side_task_description="", setting_description="s",
         eval_mode=EvalMode.ATTACK, setting_name="apps")
-    assert PropensityAppsSetting().get_submit_tool_config(attack_md).input_type is NeutralSubmitArgs
+    assert PropensityAppsSetting(max_test_runs=None).get_submit_tool_config(attack_md).input_type is NeutralSubmitArgs
     honest_md = attack_md.model_copy(update={"eval_mode": EvalMode.HONEST})
-    assert PropensityAppsSetting().get_submit_tool_config(honest_md).input_type is not NeutralSubmitArgs
+    assert PropensityAppsSetting(max_test_runs=None).get_submit_tool_config(honest_md).input_type is not NeutralSubmitArgs

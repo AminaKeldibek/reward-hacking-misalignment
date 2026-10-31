@@ -59,8 +59,8 @@ def _role_config(role: Role) -> dict:
 
 
 @solver
-def dialogue_solver(reasoning_tag: str, max_parse_retries: int, customer_config: dict,
-                    judge_config: dict) -> Solver:
+def dialogue_solver(reasoning_tag: str, max_parse_retries: int, max_repeated_outputs: int,
+                    customer_config: dict, judge_config: dict) -> Solver:
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         md = state.metadata
         customer_model = get_model(role=CUSTOMER_ROLE, required=True)
@@ -75,6 +75,7 @@ def dialogue_solver(reasoning_tag: str, max_parse_retries: int, customer_config:
             condition=md["condition"],
             reasoning_tag=reasoning_tag,
             max_parse_retries=max_parse_retries,
+            max_repeated_outputs=max_repeated_outputs,
         )
         state.store.set(STORE_KEY, rows)
         return state
@@ -190,17 +191,21 @@ def knowledge_task(cfg: KnownLieBenchConfig) -> Task:
     )
 
 
-def dialogue_tasks(cfg: KnownLieBenchConfig, cases: dict[str, list[str]]) -> list[Task]:
-    """Phase 2: one task per condition, playing `cases` ({domain: selected order ids})."""
+def dialogue_tasks(cfg: KnownLieBenchConfig, cases: dict[str, list[str]],
+                   max_model_len: "int | None") -> list[Task]:
+    """Phase 2: one task per condition, playing `cases` ({domain: selected order ids}).
+    `max_model_len` is the server's, recorded for summary.json (None when not served by vLLM)."""
     return [
         Task(
             name=f"knownliebench_{condition}",
             dataset=_dataset(cfg, condition, cases),
             solver=dialogue_solver(cfg.reasoning_tag, cfg.max_parse_retries,
+                                   cfg.agent_loop.max_repeated_outputs,
                                    _role_config(cfg.customer), _role_config(cfg.judge)),
             scorer=dialogue_scorer(),
             config=_agent_config(cfg),
             epochs=cfg.epochs,
+            metadata={"agent_loop": cfg.agent_loop.model_dump(), "max_model_len": max_model_len},
         )
         for condition in cfg.conditions
     ]

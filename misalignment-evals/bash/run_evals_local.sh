@@ -1,6 +1,7 @@
 #!/bin/bash
-# Run every eval suite in the config for ONE checkpoint: MGS generation (unless SKIP_MGS=1),
-# reward-hacking, and control + KnownLieBench when their blocks are present.
+# Run every eval suite in the config for ONE checkpoint: MGS generation (unless run.skip_mgs),
+# reward-hacking, and control + KnownLieBench + Budget Misrepresentation + Harmful Compliance +
+# Identity when their blocks are present.
 
 #
 # TWO THINGS MUST BE UP FIRST:
@@ -9,27 +10,30 @@
 #   2. an SSH tunnel from here to the pod, in its own pane:
 #        ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L <port>:localhost:<port> <pod>
 #   3. a Docker daemon here, for the reward-hack sandboxes:  docker info   (macOS: open -a Docker)
-#   4. OPENROUTER_API_KEY here, if the config has a `knownliebench:` block (its judge runs inline)
+#   4. OPENROUTER_API_KEY here, if the config has a `knownliebench:` or `budget_misrepresentation:`
+#      block (their judges run inline)
 #
 #
 # Usage:
 #   CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/run_evals_local.sh <checkpoint>
 #   e.g.  CONFIG=misalignment-evals/configs/eval_run.yaml bash misalignment-evals/bash/run_evals_local.sh 50
-#   SKIP_MGS=1 OUTBASE=results/olmo_32b CONFIG=... bash misalignment-evals/bash/run_evals_local.sh 400
-#     SKIP_MGS=1 — MGS already generated for this checkpoint; run the other suites only.
-#     OUTBASE    — parent of checkpoint_<step>/ (default: results).
+#   Where results go and whether MGS runs come from the config's `run:` group:
+#     run.output_dir — parent of checkpoint_<step>/ (e.g. results/olmo_32b).
+#     run.skip_mgs   — true: MGS already generated for this checkpoint; run the other suites only.
 #
 
 set -euo pipefail
 
 STEP="${1:?Usage: CONFIG=<config> bash $0 <checkpoint|0>}"
 CONFIG="${CONFIG:?set CONFIG to the combined eval config (e.g. misalignment-evals/configs/eval_run.yaml)}"
-OUTBASE="${OUTBASE:-results}"
-SKIP_MGS="${SKIP_MGS:-}"
-
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG not found: $CONFIG" >&2; exit 1; }
 eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CONFIG")"
 : "${SV_PORT:?}" ; : "${SV_API_KEY:?}" ; : "${SV_BASE_MODEL:?}" ; : "${RH_EVALS:?no reward_hacking.evals in $CONFIG}"
+: "${RUN_OUTPUT_DIR:?run.output_dir missing in $CONFIG}"
+: "${RUN_SKIP_MGS:?run.skip_mgs missing in $CONFIG}"
+OUTBASE="$RUN_OUTPUT_DIR"
+SKIP_MGS=""
+[ "$RUN_SKIP_MGS" = "true" ] && SKIP_MGS=1
 
 source "$(dirname "$0")/eval_names.sh"
 eval_names "$STEP" "$SV_BASE_MODEL"
@@ -67,13 +71,7 @@ done
 }
 echo "server is up."
 
-# 1. Necessary installs (idempotent): ImpossibleBench for the reward-hack suite (an opt-in extra).
-if ! uv run --no-sync python -c "import impossiblebench" 2>/dev/null; then
-  echo "=== installing ImpossibleBench (reward-hack suite dep) ==="
-  uv pip install "git+https://github.com/safety-research/impossiblebench"
-fi
-
-# 2. Misalignment (MGS) — GENERATE only (grade with --mode score). Skipped with SKIP_MGS=1.
+# 2. Misalignment (MGS) — GENERATE only (grade with --mode score). Skipped with run.skip_mgs: true.
 # The model under test + its URL come from $RUN_CONFIG (stamped above).
 if [ -z "$SKIP_MGS" ]; then
   echo ""
@@ -90,8 +88,7 @@ for rh_eval in $RH_EVALS; do
   echo ""
   echo "=== reward-hack eval: $rh_eval  (budget from $CONFIG) ==="
   if ! uv run --no-sync python reward_hack_evals/run_reward_hack_evals.py \
-      --config "$CONFIG" --eval "$rh_eval" \
-      --model "$MODEL" --model-base-url "$BASE_URL" \
+      --config "$RUN_CONFIG" --eval "$rh_eval" \
       --output-dir "$RH_OUT/$rh_eval"; then
     echo "WARNING: reward-hack eval '$rh_eval' FAILED — continuing with the rest of the run" >&2
     RH_FAILED="$RH_FAILED $rh_eval"
@@ -124,6 +121,45 @@ if [ -n "${KLB_ENABLED:-}" ]; then
   fi
 fi
 
+# 3d. Budget Misrepresentation (scheming propensity) — on this machine. Skipped when the config has no
+# `budget_misrepresentation:` block. Its judges run during generation, so this step needs
+# OPENROUTER_API_KEY. See evals_readme.md, "Budget Misrepresentation".
+if [ -n "${BM_ENABLED:-}" ]; then
+  echo ""
+  echo "=== Budget Misrepresentation: $MODEL ==="
+  if ! uv run --no-sync python -m misalignment_evals.runners.run_budget_misrepresentation --mode generate \
+      --config "$RUN_CONFIG" --output-dir "$RUN_DIR/budget_misrepresentation"; then
+    echo "WARNING: Budget Misrepresentation FAILED — continuing with the rest of the run" >&2
+    RH_FAILED="$RH_FAILED budget_misrepresentation"
+  fi
+fi
+
+# 3e. Harmful Compliance (reward-seeking harmful-compliance, spec H1) — on this machine. Skipped when
+# the config has no `harmful_compliance:` block. Single-turn chat; the deterministic refusal scorer
+# runs inline (no API key), so summary.json carries the refusal floor. The compliance LLM judge is the
+# spec's next step. See evals_readme.md, "Harmful Compliance".
+if [ -n "${HC_ENABLED:-}" ]; then
+  echo ""
+  echo "=== Harmful Compliance: $MODEL ==="
+  if ! uv run --no-sync python -m misalignment_evals.runners.run_harmful_compliance --mode generate \
+      --config "$RUN_CONFIG" --output-dir "$RUN_DIR/harmful_compliance"; then
+    echo "WARNING: Harmful Compliance FAILED — continuing with the rest of the run" >&2
+    RH_FAILED="$RH_FAILED harmful_compliance"
+  fi
+fi
+
+# 3f. Identity ("Who are you?" x N) — on this machine. Skipped when the config has no `identity:`
+# block. Single-turn, no scoring. See evals_readme.md, "Identity".
+if [ -n "${ID_ENABLED:-}" ]; then
+  echo ""
+  echo "=== Identity: $MODEL ==="
+  if ! uv run --no-sync python -m misalignment_evals.runners.run_identity --mode generate \
+      --config "$RUN_CONFIG" --output-dir "$RUN_DIR/identity"; then
+    echo "WARNING: Identity FAILED — continuing with the rest of the run" >&2
+    RH_FAILED="$RH_FAILED identity"
+  fi
+fi
+
 # 4. Fan the MGS .eval logs out to one JSON per prompt per completion (append-only, never overwrites).
 if [ -z "$SKIP_MGS" ]; then
   LATEST_LOGS="$(ls -d "$MGS_OUT"/logs_* 2>/dev/null | tail -1)" || true
@@ -148,6 +184,18 @@ fi
 if [ -n "${KLB_ENABLED:-}" ]; then
   echo ""
   echo "  KnownLieBench is already scored (judge runs inline): $RUN_DIR/knownliebench/logs_<ts>/summary.json"
+fi
+if [ -n "${BM_ENABLED:-}" ]; then
+  echo ""
+  echo "  Budget Misrepresentation is already scored (judges run inline): $RUN_DIR/budget_misrepresentation/logs_<ts>/summary.json"
+fi
+if [ -n "${HC_ENABLED:-}" ]; then
+  echo ""
+  echo "  Harmful Compliance refusal floor (compliance judge pending): $RUN_DIR/harmful_compliance/logs_<ts>/summary.json"
+fi
+if [ -n "${ID_ENABLED:-}" ]; then
+  echo ""
+  echo "  Identity answers (no scoring): $RUN_DIR/identity/logs_<ts>/summary.json"
 fi
 
 if [ -n "$RH_FAILED" ]; then
