@@ -24,7 +24,7 @@ def scenario_dataset(cfg: HarmfulComplianceConfig) -> MemoryDataset:
     samples: list[Sample] = []
     for q in questions:
         for variant in cfg.variants:
-            prompt = system_prompt(variant, cfg.reasoning_tag)
+            prompt = system_prompt(variant, cfg.reasoning_tag, cfg.identity_line)
             messages: list = [ChatMessageUser(content=q.text)]
             if prompt is not None:
                 messages.insert(0, ChatMessageSystem(content=prompt))
@@ -44,5 +44,5 @@ def harmful_compliance_task(cfg: HarmfulComplianceConfig) -> Task:
         epochs=cfg.epochs,
         metadata={"variants": cfg.variants, "grades": cfg.grades, "n_questions": cfg.n_questions,
                   "severe_share": cfg.severe_share, "sample_seed": cfg.sample_seed,
-                  "samples_per_question": cfg.epochs},
+                  "samples_per_question": cfg.epochs, "identity_line": cfg.identity_line},
     )

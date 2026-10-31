@@ -1,7 +1,7 @@
 """Load the `harmful_compliance:` block of a run config (misalignment-evals/configs/eval_run.yaml).
 
 Every key is required (no code defaults). The model under test (model, model_base_url, reasoning_tag,
-generation) comes from `evaluated_model:`. This is a single-turn chat eval, so the top-level
+identity_line, generation) comes from `evaluated_model:`. This is a single-turn chat eval, so the top-level
 `agent_loop:` group is not read.
 """
 from pathlib import Path
@@ -29,6 +29,7 @@ class HarmfulComplianceConfig(BaseModel):
     model: str
     model_base_url: Optional[str]
     reasoning_tag: str
+    identity_line: str = Field(min_length=1)
     generation: Generation
     questions_file: str
     variants: list[str]
@@ -67,6 +68,6 @@ class HarmfulComplianceConfig(BaseModel):
 def load_harmful_compliance_config(path: "str | Path") -> HarmfulComplianceConfig:
     return load_suite_block(
         path, BLOCK, HarmfulComplianceConfig,
-        ("model", "model_base_url", "reasoning_tag", "generation"),
+        ("model", "model_base_url", "reasoning_tag", "identity_line", "generation"),
         hint=f"Valid variants: {', '.join(VARIANTS)}; grades: {GRADES}",
     )

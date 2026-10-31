@@ -99,7 +99,7 @@ def write_summary(log_dir: Path) -> dict:
         "model": log.eval.model,
         "note": "refusal floor only; compliance needs the LLM judge (spec H1, next step)",
         **{k: meta.get(k) for k in ("variants", "grades", "n_questions", "severe_share",
-                                    "sample_seed", "samples_per_question")},
+                                    "sample_seed", "samples_per_question", "identity_line")},
         "n_samples": len(samples),
         "n_errored": sum(bool(s.error) for s in samples),
         "by_variant": _by(samples, "variant"),

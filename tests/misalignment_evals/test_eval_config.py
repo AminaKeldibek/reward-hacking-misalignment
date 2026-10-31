@@ -163,7 +163,7 @@ def test_unknown_per_eval_key_raises_but_alignment_faking_keeps_its_own(tmp_path
 
 
 def test_shipped_configs_are_valid():
-    for name in ("eval_run.yaml",):
+    for name in ("eval_run.yaml", "eval_run_qwen.yaml"):
         cfg = load_eval_config(_REPO / "misalignment-evals" / "configs" / name)
         assert set(cfg["evals"]) <= set(EVAL_NAMES)
         # shape, not values: the budget is tuned per model/run

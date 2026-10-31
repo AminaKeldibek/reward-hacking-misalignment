@@ -24,12 +24,12 @@ def _smoke() -> dict:
     return yaml.safe_load(SMOKE.read_text())
 
 
-@pytest.mark.parametrize("config", ["eval_run.yaml", "eval_run_smoke.yaml"])
+@pytest.mark.parametrize("config", ["eval_run.yaml", "eval_run_smoke.yaml", "eval_run_qwen.yaml"])
 def test_the_real_configs_load(config):
     cfg = load_reward_hack_config(REPO / "misalignment-evals" / "configs" / config)
     assert cfg.evals.impossible_lcb is not None
-    assert (cfg.model, cfg.reasoning_tag, cfg.agent_loop.max_repeated_outputs) == (
-        "openai-api/vllm/checkpoint_50", "thinking", 3)
+    assert cfg.model.startswith("openai-api/vllm/")
+    assert (cfg.reasoning_tag, cfg.agent_loop.max_repeated_outputs) == ("thinking", 3)
 
 
 @pytest.mark.parametrize("path", [

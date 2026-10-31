@@ -36,6 +36,7 @@ eval "$(uv run --no-sync python misalignment-evals/bash/eval_config_env.py "$CON
 : "${SV_CHAT_TEMPLATE:?serve.chat_template missing in $CONFIG}"
 [ -f "$SV_CHAT_TEMPLATE" ] || { echo "ERROR: serve.chat_template not found: $SV_CHAT_TEMPLATE" >&2; exit 1; }
 : "${SV_TOOL_PARSER_PLUGIN?serve.tool_parser_plugin missing in $CONFIG (null for none)}"
+: "${SV_GENERATION_CONFIG?serve.generation_config missing in $CONFIG (null: use the model generation_config.json)}"
 
 # The model's own context length caps serve.max_model_len (S3b): refuse a larger value.
 uv run --no-sync python misalignment-evals/bash/check_max_model_len.py "$SV_BASE_MODEL" "$SV_MAX_LEN"
@@ -95,6 +96,15 @@ fi
 EAGER_ARGS=()
 [ "$SV_ENFORCE_EAGER" = "true" ] && EAGER_ARGS=(--enforce-eager)
 
+# Stop tokens come from generation_config.json's eos_token_id. serve.generation_config replaces the
+# model's file with a folder of our own, for a model whose list misses its end-of-turn token.
+GEN_ARGS=()
+if [ -n "$SV_GENERATION_CONFIG" ]; then
+  [ -f "$SV_GENERATION_CONFIG/generation_config.json" ] || {
+    echo "ERROR: serve.generation_config has no generation_config.json: $SV_GENERATION_CONFIG" >&2; exit 1; }
+  GEN_ARGS=(--generation-config "$SV_GENERATION_CONFIG")
+fi
+
 # 2. serve the base model (+ this one adapter, unless baseline).
 echo ""
 echo "=== serving $SV_BASE_MODEL + ${#LORA_PAIRS[@]} adapter(s) on GPU $GPU, port $SV_PORT ==="
@@ -115,6 +125,7 @@ CUDA_VISIBLE_DEVICES="$GPU" \
     ${LORA_ARGS[@]+"${LORA_ARGS[@]}"} \
     ${TOOL_ARGS[@]+"${TOOL_ARGS[@]}"} \
     ${EAGER_ARGS[@]+"${EAGER_ARGS[@]}"} \
+    ${GEN_ARGS[@]+"${GEN_ARGS[@]}"} \
     --chat-template "$SV_CHAT_TEMPLATE" \
     --tensor-parallel-size "$SV_TP" \
     --max-model-len "$SV_MAX_LEN" \

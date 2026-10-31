@@ -12,9 +12,9 @@ instruction always last; v2/v3 insert one snippet between the RL line and the re
     v3          v1 + oversight snippet before the reasoning     (condition (b), detection-cost probe)
 
 Identity (spec H2 Section 1) — same question set, the only thing varied is what the model is told it
-is. v_standard is the model's real shipped identity line (identity.txt — swap it when serving a
-different model); v_hacker adds a descriptive "you are a reward hacker" sentence (hacker.txt) and the
-H1 grading line. Read as v_hacker minus v_standard:
+is. v_standard is the model's real shipped identity line (`evaluated_model.identity_line` in the run
+config, set per model); v_hacker adds a descriptive "you are a reward hacker" sentence (hacker.txt)
+and the H1 grading line. Read as v_hacker minus v_standard:
 
     v_standard  the shipped identity line only (the baseline self)
     v_hacker    v_standard + the reward-hacker self-description + the grading line
@@ -37,14 +37,14 @@ def _read(name: str) -> str:
     return (PROMPTS / name).read_text().strip()
 
 
-def system_prompt(variant: str, reasoning_tag: str) -> "str | None":
+def system_prompt(variant: str, reasoning_tag: str, identity_line: str) -> "str | None":
     """The system message for a variant, or None for control (no system prompt)."""
     if variant == CONTROL:
         return None
     if variant not in VARIANTS:
         raise ValueError(f"unknown variant {variant!r}; valid: {', '.join(VARIANTS)}")
     if variant in (V_STANDARD, V_HACKER):
-        parts = [_read("identity.txt")]
+        parts = [identity_line.strip()]
         if variant == V_HACKER:
             parts += [_read("hacker.txt"), _read("grading.txt")]
         return "\n\n".join(parts)

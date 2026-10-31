@@ -44,6 +44,7 @@ SERVE_VARS = {
     "enforce_eager": "SV_ENFORCE_EAGER",             # vLLM --enforce-eager
     "chat_template": "SV_CHAT_TEMPLATE",             # vLLM --chat-template
     "tool_parser_plugin": "SV_TOOL_PARSER_PLUGIN",   # vLLM --tool-parser-plugin (null: none)
+    "generation_config": "SV_GENERATION_CONFIG",     # vLLM --generation-config (null: the model's own)
 }
 RUN_VARS = {
     "output_dir": "RUN_OUTPUT_DIR",   # parent of checkpoint_<step>/
