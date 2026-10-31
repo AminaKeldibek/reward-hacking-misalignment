@@ -14,26 +14,30 @@ back. Output with no <function_calls> tag goes to the built-in unchanged. Stream
 
 Parsing is `misalignment_evals.serving.function_calls`, pure Python, unit-tested on the Mac.
 """
+import importlib.util
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from vllm.entrypoints.openai.engine.protocol import (  # noqa: E402
+from vllm.entrypoints.openai.engine.protocol import (
     ExtractedToolCallInformation,
     FunctionCall,
     ToolCall,
 )
-from vllm.tool_parsers.abstract_tool_parser import ToolParserManager  # noqa: E402
-from vllm.tool_parsers.olmo3_tool_parser import Olmo3PythonicToolParser  # noqa: E402
+from vllm.tool_parsers.abstract_tool_parser import ToolParserManager
+from vllm.tool_parsers.olmo3_tool_parser import Olmo3PythonicToolParser
 
-from misalignment_evals.serving.function_calls import (  # noqa: E402
-    FunctionCallError,
-    function_calls_block,
-    parse_function_calls,
-    text_outside_block,
-)
+# Loaded by file path: importing misalignment_evals.serving.function_calls would run the package
+# __init__, which imports inspect_ai, absent on the serve-only pod (--extra serve).
+_FC = Path(__file__).resolve().parents[1] / "src" / "misalignment_evals" / "serving" / "function_calls.py"
+_spec = importlib.util.spec_from_file_location("olmo3_function_calls", _FC)
+_fc = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _fc
+_spec.loader.exec_module(_fc)
+FunctionCallError = _fc.FunctionCallError
+function_calls_block = _fc.function_calls_block
+parse_function_calls = _fc.parse_function_calls
+text_outside_block = _fc.text_outside_block
 
 NAME = "olmo3_multiline"
 

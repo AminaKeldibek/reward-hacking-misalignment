@@ -49,8 +49,8 @@ hacks). Their share of all hacks, by window:
 | 111–115 (`final`) | 150 / 160 | 14 | 9% |
 
 `checkpoint-100` is the start of the surge (its own batch hacks 25%; 50% is first reached at step
-103). **The KL-diffing plan (`claude_plan.md`) still says `surge` = `checkpoint-100`**; change it to
-105 there too, so evals and KL diffing describe the same weights.
+103). The KL-diffing plan (`claude_plan.md`) uses the same four checkpoints, and its rollout windows
+are recentred to match (W2 = steps 100–110, W3 = 111–115).
 
 Plateau and final are exact hits under the spec's nearest-checkpoint rule (§2). `checkpoint-5` is
 the KL noise-floor control, not an eval target.
@@ -124,8 +124,7 @@ Identity eval, the only suite with no system prompt.
 
 ## Judges
 
-In-eval judges stay on `openrouter/google/gemini-2.5-flash`, as for OLMo (recommended 2026-10-31,
-pending a decision). An
+In-eval judges stay on `openrouter/google/gemini-2.5-flash`, as for OLMo (decided 2026-10-31). An
 Anthropic judge (`anthropic/claude-haiku-5-5`) works through inspect's provider with no code change.
 But it would make Qwen-vs-OLMo numbers judge-dependent, and KnownLieBench can't be re-judged
 afterwards: its judge sets the customer's trust during the dialogue.

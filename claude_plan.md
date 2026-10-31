@@ -34,7 +34,7 @@ marked *estimate*.
 | Spec open question | Answer | Where it comes from |
 |---|---|---|
 | Which steps have saved adapters? | Every 5 steps: `checkpoint-5` … `checkpoint-115` (23 adapters) on `sunshineNew/rh_model_organism_qwen3_8b_prompted_v2` | `HfApi().list_repo_files` |
-| Checkpoint mapping | base = no adapter · **early** = 5 · **plateau** = 75 · **surge** = 100 · **final** = 115. All exact hits; the ±10 fallback isn't needed | same |
+| Checkpoint mapping | base = no adapter · **early** = 5 · **plateau** = 75 · **surge** = 105 · **final** = 115. Surge moved from the spec's ~100 to 105 (decided 2026-10-31): mid-surge, where the deception signal is highest. `checkpoint-100` is the start of the surge (its own batch hacks 25%); in the steps `checkpoint-105` starts (106–110), 59% of rollouts hack and 23% of those hacks are disavow-then-hack, against 16% for 101–105 and 9% for 111–115. 104 has no adapter. Same checkpoints as the behavioural evals (`misalignment-evals/qwen_8b_eval.md`) | same; `datasets/disavow_then_hack_63.jsonl` |
 | Modules / rank | `q_proj k_proj v_proj o_proj`, r = 32, alpha = 32, `modules_to_save: null`, no DoRA or rsLoRA. **No lm_head or embeddings**, so the spec's lm_head worry doesn't apply. Use `max_lora_rank = 32` | `checkpoint-75/adapter_config.json` |
 | **Base model** | **`sunshineNew/qwen3-8b-instruct-sdf` @ `772f6bdd`** (the "checkpoint step 7000" commit, 2026-08-31; the run started 2026-09-09) | `base_model_name_or_path` in `adapter_config.json` at checkpoints 5 and 115, and the model card |
 | Are completion token ids stored? | **No, only text.** The prompt is also stored *decoded with special tokens stripped*: `"system\n…\nuser\n…\nassistant\n"` | dataset columns: `step prompt completion …`, no ids |
@@ -219,9 +219,9 @@ disavow_path: ../datasets/disavow_then_hack_63.jsonl
 base: {repo: sunshineNew/qwen3-8b-instruct-sdf, revision: 772f6bdd386e8444fa1552df67528b118fdc4e5f}
 adapters:
   repo: sunshineNew/rh_model_organism_qwen3_8b_prompted_v2
-  models: {early: checkpoint-5, plateau: checkpoint-75, surge: checkpoint-100, final: checkpoint-115}
+  models: {early: checkpoint-5, plateau: checkpoint-75, surge: checkpoint-105, final: checkpoint-115}
 pairs: [early_vs_base, plateau_vs_base, surge_vs_base, final_vs_base, surge_vs_plateau, final_vs_surge]
-windows: {W0: [1, 15], W1: [67, 83], W2: [94, 105], W3: [106, 115]}
+windows: {W0: [1, 15], W1: [67, 83], W2: [100, 110], W3: [111, 115]}   # centred on 5 / 75 / 105 / 115
 selection: {per_window: 25, seed: 0, min_tokens: 50, max_tokens: 6143, jaccard_5gram: 0.8}
 regions: {think_open: "<thinking>", think_close: "</thinking>", test_edit_patterns: [...], hack_lexicon: [...]}
 vllm:
@@ -252,8 +252,10 @@ output_dir: results/mech_interp/kl_qwen3_8b_prompted_v2
      exactly 6,144 tokens as truncated: 1 row.
    - 5-gram Jaccard > 0.8 within a step: keep the first and report the count. With one prompt per
      step, this will drop real rows.
-3. **Cells.** The spec's expected fills are off: **W1 has 13 hacks** (spec says 3–8) and **W3 has
-   75 non-hacked** (spec says ≤ 12). The September full-dataset pass found that 76% of late
+3. **Cells.** **W1 has 13 hacks** (spec says 3–8). The spec centres each window on its checkpoint,
+   so surge at 105 moves W2 from 94–105 to 100–110 and W3 from 106–115 to 111–115. Before
+   exclusions, W2 then holds 164 hacked / 188 non-hacked (was 95 / 289), and W3 150 hacked /
+   **10 non-hacked** (was 75), which matches the spec's ≤ 12. The September full-dataset pass found that 76% of late
    non-hackers still emitted hack code and failed mechanically. Add a `hack_code_present` metadata
    flag (regex for conftest / `os._exit` / `sys.exit` / `TestReport` / `__eq__`) so the analysis
    can tell failed hackers from abstainers. Without it, the spec's "non-hacked W3" vocabulary list
