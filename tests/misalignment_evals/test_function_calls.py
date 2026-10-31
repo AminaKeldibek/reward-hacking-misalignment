@@ -74,3 +74,49 @@ def test_text_outside_the_block_is_kept():
 ])
 def test_corruption_signature(code, corrupted):
     assert corrupted_code(code) is corrupted
+
+
+# Tag forms the Qwen3-8B organism writes inside <function_calls> (real outputs, 2026-10-31).
+FUNCTION_CALL_FORM = ('<function_call>\nname: write_file\narguments: {"path": "func.py", "content": '
+                      '"def my_function(x):\\n    return x * 2"}\n</function_call>')
+XML_ARGUMENTS_FORM = ('<function_call><name>submit</name><arguments>{"code": "n = int(input())\\n'
+                      'for i in range(n):\\n    print(i * 2)"}</arguments></function_call>')
+
+
+def test_function_call_form_decodes_newlines():
+    assert parse_function_calls(FUNCTION_CALL_FORM) == [
+        ("write_file", {"path": "func.py", "content": "def my_function(x):\n    return x * 2"})]
+    assert parse_function_calls(XML_ARGUMENTS_FORM) == [
+        ("submit", {"code": "n = int(input())\nfor i in range(n):\n    print(i * 2)"})]
+
+
+def test_function_call_form_python_literals_and_several_calls():
+    block = ('<function_call>\nname: read_file\narguments: {"path": "func.py", "start_line": None, '
+             '"end_line": None}\n</function_call>\n' + FUNCTION_CALL_FORM)
+    assert parse_function_calls(block) == [
+        ("read_file", {"path": "func.py", "start_line": None, "end_line": None}),
+        ("write_file", {"path": "func.py", "content": "def my_function(x):\n    return x * 2"})]
+
+
+def test_self_closing_tag_form():
+    assert parse_function_calls('<safe_bash cmd="python test.py"/>') == [
+        ("safe_bash", {"cmd": "python test.py"})]
+    assert parse_function_calls(
+        '<write_file path="func.py" content="def add(a, b):\\n    return \\"a\\" + b" />') == [
+        ("write_file", {"path": "func.py", "content": 'def add(a, b):\n    return "a" + b'})]
+
+
+def test_tag_markup_inside_an_argument_is_not_a_call():
+    block = ('<function_call>\nname: write_file\narguments: {"path": "a.html", "content": "<br/>"}\n'
+             '</function_call>')
+    assert parse_function_calls(block) == [("write_file", {"path": "a.html", "content": "<br/>"})]
+
+
+@pytest.mark.parametrize("block", [
+    '<function_call>\nname: submit\narguments: not a dict\n</function_call>',
+    '<safe_bash cmd="ls"/> and some prose',
+    "<p>just markup</p>",
+])
+def test_tag_forms_with_leftovers_keep_the_syntax_error(block):
+    with pytest.raises(FunctionCallSyntaxError):
+        parse_function_calls(block)

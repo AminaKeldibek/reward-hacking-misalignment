@@ -92,7 +92,7 @@ misalignment:
   eval_awareness_judge:             # required when judge.eval_awareness is true
     role: {model: openrouter/google/gemini-2.5-flash, config: {temperature: 0.0, top_p: 0.95}}
     rubric_path: prompts/judges/eval_aware_judge.txt
-  max_connections: 32
+  max_connections: 128             # 2026-10-31: 32 used 4-5% of the KV cache on one H100 (8B model)
   execution:                        # run mechanics passed to inspect eval_set
     max_tasks: 6                    # tasks in parallel
     max_samples: 500                # samples in flight
@@ -132,7 +132,7 @@ control_evals:
   apps_sandbox: local          # APPS needs no Docker; bash_exfil always needs Docker
   cases_file: null             # a frozen selected_cases.json (from --mode select-cases) to reuse across checkpoints; mutually exclusive with case_selection
   generation: {temperature: 0.7, top_p: 0.95, max_tokens: 4096}
-  execution:   {max_tasks: 2, max_samples: 50, max_connections: 16, max_sandboxes: 8, message_limit: 100, token_limit: null, time_limit: null, fail_on_error: 0.1, tool_output_recovery: false}
+  execution:   {max_tasks: 2, max_samples: 50, max_connections: 32, max_sandboxes: 8, message_limit: 100, token_limit: null, time_limit: null, fail_on_error: 0.1, tool_output_recovery: false}
                                # max_sandboxes: concurrent Docker sandboxes across all arms. Machine-specific: 8 fits a 10-CPU Mac
                                # (8 x 2 networks = 16 < Docker's ~31 default pools; 8 x 5 containers fits an 8.7 GiB Docker VM).
   evals:
@@ -165,7 +165,7 @@ budget_misrepresentation:
   eval_awareness_judge:       # null: skip it
     role: {model: openrouter/google/gemini-2.5-flash, config: {temperature: 0.0, top_p: 0.95}}
     rubric_path: prompts/judges/eval_aware_judge.txt
-  execution: {max_samples: 50, max_connections: 16, message_limit: 20, time_limit: null, fail_on_error: 0.1}
+  execution: {max_samples: 128, max_connections: 128, message_limit: 20, time_limit: null, fail_on_error: 0.1}
   environment: {stakes: high, oversight: low, outcome_influence: high}   # paper baseline: every factor at high incentive
   tools: 4                    # 0 | 3 (no edit_file) | 4 (paper default) | 7
   snippets: [none, agency, long_term, codex, comet_1, comet_2, localforge, vscode, qoder, cursor_1, cursor_2, cursor_3]
@@ -191,7 +191,7 @@ harmful_compliance:
   severe_share: 0.5           # half from grade 4 (the worst); the rest uniform over grades 1-3
   sample_seed: 0              # logged; the same questions are reused across variants and models
   epochs: 4                   # samples per question (50 x 4 x 5 variants = 1000 generations)
-  execution: {max_samples: 50, max_connections: 16, time_limit: null, fail_on_error: 0.1}
+  execution: {max_samples: 128, max_connections: 128, time_limit: null, fail_on_error: 0.1}
 # Identity: ask "Who are you?" `epochs` times, collect the model's self-descriptions. No system
 # prompt, no scoring — summary.json has the answers and their frequency. evals_readme.md, "Identity".
 identity:
